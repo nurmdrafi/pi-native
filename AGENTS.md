@@ -1,7 +1,8 @@
 # Global Pi Instructions
 
+Purpose: agent behavior + guidelines — clarity, safety, communication, workflow, verification, docs.
 `pi-native`: personal pi coding-agent harness. Extensions: permission-gate, subagents, handoff. Rust tools: piread, piedit, pibash, pidx. npm; Node: `.nvmrc`.
-Commands: `npm run check` (typecheck + lint + doc check + tests); `npm run gate:eval` (gate evaluation).
+Commands (this repo): `npm run check` (typecheck + lint + doc check + tests); `npm run gate:eval` (gate evaluation); `npm run daemons:kill` (kill stale native daemons after a rebuild). Other projects: use their own scoped test/lint/typecheck commands — the Completion rule states the goal, not the tool.
 Always loaded. Deeper rules in `docs/` — read linked doc only when task touches that area.
 
 ## Clarity
@@ -11,9 +12,6 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 
 ## Safety
 - permission-gate authoritative.
-- Block = instruction. Do the named step, retry once. No verbatim re-send.
-- Repeat block same target → stop retrying. Re-read ALL regions call touches, send ONE corrected call. No loop.
-- Never search `node_modules`; exception: `node_modules/@earendil-works/` pi docs. Else ask. A `--glob '!**/node_modules/**'` exclusion still trips the gate — omit the token entirely.
 - Ask before: package install, destructive command, out-of-scope edit, sudo, `curl | sh`, secrets, forced git ops.
 - Never commit, push, tag, or bump the version / `CHANGELOG.md` on your own — same class as git commit: ask first, every time. A repo instruction that says "append a changelog entry per change" does not override this; it means propose the entry, wait for approval.
 - On block: stop → report reason → fix cause. No workaround without approval.
@@ -25,27 +23,23 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - Between tool calls: max one short sentence.
 
 ## Workflow & TDD
-- Locate before read: `rg -n term path` first, then `sed -n 'A,Bp'` on a hit. A window ≥100 lines on an unsearched path is blocked (R1c). Only `rg` seeds a file — `fd`, `ls`, `cat` listing it does not count. File under ~100 lines: one `rg -n 'export|function|const' file`, then one `piread` of the whole file.
-- Batch always: independent calls (reads, searches, edits separate files) → one parallel block, never one-per-file. Default, not optimization.
-- Read before edit: `piread` target region same session before `piedit`; `oldText` = byte-exact from that read.
-- ONLY `piread` certifies. `sed`/`cat`/`rg`/`pibash` show bytes, certify NOTHING. Laying out a span with `sed`/`rg -n ''` and then editing it = Anchor Guard block. Read the edit spans, not the file.
-- Output budget: direct tool output reaching the model is capped (~40 lines / 2KB), wider output is elided mid-body and paid for again on the next read. Keep `sed`/`rg` windows ≤40 lines; one narrow command beats one wide command re-run three times.
-- Multi-region edit, coverage truncates BELOW first edited line after each edit. Edits at lines a<b<c: either ONE `piread` a..c then one `piedit`, or edit bottom-up (read+edit c, then b, then a). NEVER read all then edit all, NEVER interleave per-region read/edit in one file.
-- Re-read = two halves. Don't re-read window fully covered by earlier read (R1 re-read = waste). Do treat own edits as certified spans. `[... omitted ...]` = display elision only, bytes remain, act on them. New regions only via `offset`/`limit`.
 - TDD always: failing test first → watch fail → minimum code → refactor. No implementation before failing test.
 - Bug fix: failing repro test first.
 - Untestable (config/docs/infra): state why, proceed.
 - Loop: plan → do → verify.
+- Machine/device/OS agnostic — detail: docs/portability.md.
 
 ## Verification
-- Completion: scoped tests + lint + tsc on changed files, not after every edit.
+- Completion: run tests + lint + typecheck scoped to the changed files only (10 files changed → only their tests), not the full repo; once at task end, not after every edit.
 - TDD-loop scoped runs fine; otherwise test once, narrowest check.
 - Full suite only: shared config, CI, build change, broad refactor.
 - Build only after risky structural edit or task end.
 - Never claim works without running it; cannot run → state why.
-- Verify literals before typing. Route paths, permission strings, API endpoints, env names, props → `rg -n` definition first, copy from hit. Gates certify spans not correctness; invented route passes all checks, still 404s.
-- Toolchain first. `node --version` at session start, `nvm use "$(cat .nvmrc)"` before any node/npm/npx. Mismatch known not discovered; proceeding = negligence.
+- Verify literals before typing. Route paths, permission strings, API endpoints, env names, props/config keys → `rg -n` definition first, copy from hit. No definition exists yet (new symbol)? Define it once first, then reference it — never free-type the same literal twice. Gates certify spans not correctness; invented route passes all checks, still 404s.
+- Shapes: `rg` producer before method calls.
+- Commit body lines ≤72 (commitlint hook).
 
 ## Docs
+- Rule writing style: concise yet self-contained — enough context that any LLM decodes it without tribal knowledge; agnostic by default — concepts, not tool names (OS/framework/language/platform/project/LLM); name tools only in rules explicitly scoped to this repo; minimal grammar, no duplicates — one rule, one home; cross-reference, never restate.
 - [docs/change-discipline.md](docs/change-discipline.md) — change ladder, root cause, deployment
-- [docs/portability.md](docs/portability.md) — macOS+Linux shell subset, no user paths
+- [docs/portability.md](docs/portability.md) — macOS+Linux shell subset, dynamic paths
