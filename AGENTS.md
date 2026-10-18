@@ -13,8 +13,9 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - permission-gate authoritative.
 - Block = instruction. Do the named step, retry once. No verbatim re-send.
 - Repeat block same target → stop retrying. Re-read ALL regions call touches, send ONE corrected call. No loop.
-- Never search `node_modules`; exception: `node_modules/@earendil-works/` pi docs. Else ask.
+- Never search `node_modules`; exception: `node_modules/@earendil-works/` pi docs. Else ask. A `--glob '!**/node_modules/**'` exclusion still trips the gate — omit the token entirely.
 - Ask before: package install, destructive command, out-of-scope edit, sudo, `curl | sh`, secrets, forced git ops.
+- Never commit, push, tag, or bump the version / `CHANGELOG.md` on your own — same class as git commit: ask first, every time. A repo instruction that says "append a changelog entry per change" does not override this; it means propose the entry, wait for approval.
 - On block: stop → report reason → fix cause. No workaround without approval.
 
 ## Communication
@@ -24,11 +25,12 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - Between tool calls: max one short sentence.
 
 ## Workflow & TDD
-- Locate before read: `rg -n term path` first, then `sed -n 'A,Bp'` on a hit. A window ≥100 lines on an unsearched path is blocked (R1c).
+- Locate before read: `rg -n term path` first, then `sed -n 'A,Bp'` on a hit. A window ≥100 lines on an unsearched path is blocked (R1c). Only `rg` seeds a file — `fd`, `ls`, `cat` listing it does not count. File under ~100 lines: one `rg -n 'export|function|const' file`, then one `piread` of the whole file.
 - Batch always: independent calls (reads, searches, edits separate files) → one parallel block, never one-per-file. Default, not optimization.
 - Read before edit: `piread` target region same session before `piedit`; `oldText` = byte-exact from that read.
-- ONLY `piread` certifies. `sed`/`cat`/`rg`/`pibash` show bytes, certify NOTHING. Editing a file viewed only via `sed` = Anchor Guard block.
-- Multi-region edit, coverage truncates BELOW first edited line after each edit. Edits at lines a<b<c: either ONE `piread` a..c then one `piedit`, or edit bottom-up (read+edit c, then b, then a). NEVER read all then edit all.
+- ONLY `piread` certifies. `sed`/`cat`/`rg`/`pibash` show bytes, certify NOTHING. Laying out a span with `sed`/`rg -n ''` and then editing it = Anchor Guard block. Read the edit spans, not the file.
+- Output budget: direct tool output reaching the model is capped (~40 lines / 2KB), wider output is elided mid-body and paid for again on the next read. Keep `sed`/`rg` windows ≤40 lines; one narrow command beats one wide command re-run three times.
+- Multi-region edit, coverage truncates BELOW first edited line after each edit. Edits at lines a<b<c: either ONE `piread` a..c then one `piedit`, or edit bottom-up (read+edit c, then b, then a). NEVER read all then edit all, NEVER interleave per-region read/edit in one file.
 - Re-read = two halves. Don't re-read window fully covered by earlier read (R1 re-read = waste). Do treat own edits as certified spans. `[... omitted ...]` = display elision only, bytes remain, act on them. New regions only via `offset`/`limit`.
 - TDD always: failing test first → watch fail → minimum code → refactor. No implementation before failing test.
 - Bug fix: failing repro test first.
