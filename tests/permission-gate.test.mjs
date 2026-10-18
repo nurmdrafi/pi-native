@@ -425,10 +425,19 @@ writeFileSync(
   Array.from({ length: 120 }, (_, i) => `s${i + 1}`).join("\n") + "\n",
 );
 const hugeFile = join(tmp, "extension-huge.ts"); // 2026-10-10: R1b big-read gate (audit: 44KB/51KB whole-file reads rode two sessions' prefixes)
+const midFile = join(tmp, "extension-mid.tsx"); // 2026-10-18: elision blind-spot fixture (~13KB / 330 lines)
 writeFileSync(
   hugeFile,
   Array.from({ length: 900 }, () => "x".repeat(59)).join("\n") + "\n",
 ); // ~54 KB / 900 lines
+// 2026-10-18 session (dropx-admin AddUser.jsx): a ~14KB whole read passed the
+// 24KB floor, then piread compacted it — model saw 11.5KB of elided middle
+// and treated it as read. Anything over piread's 2KB model budget elides, so
+// the gate floor must sit under the compaction threshold, not over it.
+writeFileSync(
+  midFile,
+  Array.from({ length: 330 }, () => "y".repeat(39)).join("\n") + "\n",
+); // ~13 KB / 330 lines
 // violation-memory isolation: never touch the real ~/.pi/agent/logs telemetry
 process.env.PGATE_MEMORY = join(tmp, "vmem.ndjson");
 writeFileSync(process.env.PGATE_MEMORY, "");
@@ -938,6 +947,11 @@ const cases = [
       await runBash(pi, `rg -n xxxxx ${hugeFile}`);
       return read(pi, hugeFile, { offset: 10, limit: 200 }, { outputLines: 200 });
     },
+  ],
+  [
+    "R1b: whole read of a 10–24KB file is blocked (piread would elide its middle)",
+    "blocked",
+    async (pi) => read(pi, midFile),
   ],
   [
     "cadence: nudge is non-blocking, appended once to a tool_result",

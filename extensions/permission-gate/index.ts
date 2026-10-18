@@ -8,7 +8,7 @@
  * |-----|-------------------------------|----------|
  * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
- * | R1b | Token Economy (Big read)      | first whole-file-ish (>=500-line window) read of a >24KB file blocked with a targeted-window fix |
+ * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
@@ -138,8 +138,11 @@ import {
 /** big-read gate: a whole-file-ish request for a file larger than this is
  * blocked with a targeted-window reason (44KB/51KB whole-file reads rode two
  * sessions' prefixes; the read tool's own 2000-line/50KB truncation is too
- * generous to be the only brake) */
-const BIG_READ_BYTES = 24_000;
+ * generous to be the only brake). 2026-10-18: floor lowered 24KB→10KB —
+ * piread compacts any read past its 2KB model budget, so a ~14KB whole read
+ * came back with 11.5KB elided and still counted as "read" (dropx-admin
+ * AddUser.jsx session). The gate must fire before compaction does. */
+const BIG_READ_BYTES = 10_000;
 /** a requested window at least this wide counts as whole-file-ish */
 const BIG_READ_WIN = 500;
 /** R1c locate-first: a window at least this wide on a path never searched

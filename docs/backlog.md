@@ -256,6 +256,23 @@ before adoption.
 **Next step:** decide A and B, then encode the accepted parts in AGENTS.md
 Safety and add gate tests for the mechanical-vs-approval split.
 
+## 8. Anchor Guard: certify own-inserted spans, not just matched spans
+
+2026-10-18 session (dropx-admin user forms): three consecutive blocks fired on
+lines the same session had *authored* one edit earlier. Certification is
+line-span based; each edit that inserts or removes lines shifts every later
+span, so the stored span no longer names the bytes it certified. The guard is
+right to distrust stale spans — but the remedy it forces (re-read one line the
+session itself wrote) is pure friction with no corruption risk removed.
+
+**Fix shape:** when an edit applies, certify the inserted `newText` spans in
+addition to the matched `oldText` span, and rebase stored spans by the delta of
+every later edit (or switch to content-hash anchors so line shifts are
+irrelevant). Keep the disk-change (mtime/size/hash) invalidation as is.
+
+**Test:** apply edit → line-shifting second edit elsewhere → third edit whose
+oldText is the first edit's inserted text → must pass without a fresh read.
+
 ## Closed this round (for context)
 
 - `piread`/`piedit` event-loop drain: they ref'd `stdin`/`stdout` but not
