@@ -17,6 +17,8 @@
  * `ls node_modules/<pkg>` stays allowed (presence checks are legitimate);
  * rg is gitignore-aware and fast, so unscoped rg passes by design.
  */
+import { readdirSync } from "node:fs";
+
 const NM1_MSG =
   "Search (node_modules): dependency internals — ask the user before crawling node_modules; pi docs under node_modules/@earendil-works/ are pre-approved.";
 
@@ -212,7 +214,35 @@ export function searchedPathsFrom(
       if (/[|><;$`]/.test(tok)) continue;
       if (/(^|\/)node_modules(\/|$)/.test(tok)) continue;
       const abs = resolvePath(tok, cwd);
-      if (exists(abs)) out.push(abs);
+      if (exists(abs)) {
+        out.push(abs);
+        continue;
+      }
+      // Glob target (`rg -n term src/utils/*.js`): literal string is not a
+      // path, so it credited nothing — yet the search named those files, and a
+      // later wide read of a hit was blocked as "never searched" (2026-10-18
+      // session audit). Expand one level, credit the matches.
+      if (!/[*?\[]/.test(tok)) continue;
+      const slash = tok.lastIndexOf("/");
+      const dirTok = slash === -1 ? "." : tok.slice(0, slash);
+      const base = slash === -1 ? tok : tok.slice(slash + 1);
+      if (base.includes("/")) continue; // `**` recursion: out of scope
+      const dirAbs = resolvePath(dirTok, cwd);
+      if (!exists(dirAbs)) continue;
+      const re = new RegExp(
+        `^${base
+          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+          .replace(/\*/g, "[^/]*")
+          .replace(/\?/g, "[^/")}$`,
+      );
+      let entries: string[];
+      try {
+        entries = readdirSync(dirAbs);
+      } catch {
+        continue;
+      }
+      for (const entry of entries)
+        if (re.test(entry)) out.push(resolvePath(`${dirTok}/${entry}`, cwd));
     }
   }
   return out;
