@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.47.0] - 18-10-2026
 
+### Changed
+
+- **`doc:check` is deterministic and 6× faster.** The `--help` probe folded a timeout/ENOENT/empty-stdout into the same empty flag set as a genuinely absent flag, so `npm run doc:check` intermittently reported `FLAG NOT IN HELP: pidx --out` (and `pi --extension`/`--session`) for flags that ARE in `--help`. The `catch` treated a dead probe as a verdict. `helpFlags` now returns an unresolved sentinel, never caches a failed probe, and retries once at 45 s; an unresolved probe is its own finding class (`HELP PROBE UNRESOLVED`), never a missing flag. Separately, the per-token `bash -c command -v` fork (two call sites, hundreds of spawns per run) is replaced by an in-process `$PATH` walk using `statSync` + `accessSync(X_OK)` and `path.delimiter`, so macOS and Linux both work: 45 s → 7.9 s.
+- **`doc:check`: a brace group after `||` is no longer a binary.** `cmd || { echo …; exit 1; }` splits on `||` into a segment `}`, which `headTok` did not reject as shell syntax, so it reported `BINARY NOT FOUND: }`. Surfaced only once the flakiness was gone.
+
 ### Added
 
 - **permission-gate R1c (locate-first).** A read window of ≥100 lines on a path that no `rg`/`grep`/`fd`/`find` command named this session, and that has no prior coverage, is blocked with the search to run. Deliberately narrow: a first attempt at blocking *every* unsearched window broke 22 legitimate cases (`P1: piread of a text file`, CRLF handling, targeted anchor reads, resume hydration) and was reverted, because the gate cannot tell a blind guess from a correct targeted read. Thresholds at or below 100 re-broke the narrow-window cases; 100 is the first width that leaves them passing. Pinned by four cases in `tests/permission-gate.test.mjs`.

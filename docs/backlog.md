@@ -31,7 +31,22 @@ contract that `permission-gate` H1 and the bash parity suite depend on.
 **Recommendation:** (b) — the contract survives and the redundant encode goes
 away. Needs a micro-bench before/after to prove the win.
 
-## 2. `doc:check` is non-deterministic
+## 2. `doc:check` is non-deterministic — FIXED
+
+> **Fixed.** All four planned changes are in `scripts/doc-check.mjs`:
+> (1) `helpFlags` returns `null` on a probe that produced no output and never
+> caches it, so a timeout/ENOENT is reported as `HELP PROBE UNRESOLVED`, never
+> as `FLAG NOT IN HELP`; it also retries once at 45 s.
+> (2) A failed probe stays uncached — `helpCache.set` only runs on success.
+> (3) `bash -c command -v` per token is replaced by an in-process `$PATH` walk
+> (`hasBin`, `statSync` + `accessSync(X_OK)`, using `delimiter` so macOS and
+> Linux both work). Runtime went 45 s → 7.9 s.
+> (4) Tests added for a never-resolving probe and for a resolvable binary that
+> must still catch a real missing flag.
+> A second, unrelated parser bug surfaced once the flakiness was gone:
+> `cmd || { …; }` splits on `||` into a segment `}`, which `headTok` did not
+> reject, so it reported `BINARY NOT FOUND: }`. `}` is now in the shell-syntax
+> class. `npm run doc:check` passes all 4 families.
 
 `npm run doc:check` intermittently reports false failures — observed 3-4 at a
 time, varying run to run:

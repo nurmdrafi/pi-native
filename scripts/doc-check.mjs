@@ -11,8 +11,8 @@
 // here. Adding a skill = one README table row; adding an env var = document it
 // or allowlist it below. This script never changes for either.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync, accessSync, constants } from 'node:fs';
+import { join, dirname, resolve, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -93,14 +93,47 @@ export function checkMdCommands(root) {
   const harnessScript = (tok) => existsSync(join(root, 'skills')) && readdirSync(join(root, 'skills')).some((s) => existsSync(join(root, 'skills', s, 'scripts', tok)));
 
   const mds = walkMds(root);
-  const syntaxFail = [], binFail = [], macOnlyRefs = [], scriptMissing = [], flagFail = [], onDemandRefs = [], optionalToolchainRefs = [], artifactRefs = [];
+  // In-process `command -v`: walk $PATH (plus the exec bit) instead of forking
+  // `bash -c` once per token. That fork dominated the 34 s runtime
+  // (docs/backlog.md item 2, fix 3) and cached results keep it flat.
+  const binCache = new Map();
+  const hasBin = (tok) => {
+    if (binCache.has(tok)) return binCache.get(tok);
+    let ok = false;
+    if (tok.includes('/')) ok = existsSync(tok);
+    else {
+      for (const dir of (process.env.PATH || '').split(delimiter)) {
+        if (!dir) continue;
+        try { if (statSync(join(dir, tok)).isFile()) { accessSync(join(dir, tok), constants.X_OK); ok = true; break; } }
+        catch { /* not here, or not executable */ }
+      }
+    }
+    binCache.set(tok, ok);
+    return ok;
+  };
+  const syntaxFail = [], binFail = [], macOnlyRefs = [], scriptMissing = [], flagFail = [], onDemandRefs = [], optionalToolchainRefs = [], artifactRefs = [], unresolvedProbes = [];
   const helpCache = new Map();
   const helpFlags = (key) => {
     if (helpCache.has(key)) return helpCache.get(key);
     const [bin, sub] = key.split(' ');
     const args = sub ? [sub, '--help'] : ['--help'];
-    let out = '';
-    try { out = execFileSync(bin, args, { encoding: 'utf8', timeout: 15000 }) + ''; } catch (e) { out = (e.stdout || '') + ''; }
+    const probe = (timeout) => {
+      try {
+        const o = execFileSync(bin, args, { encoding: 'utf8', timeout }) + '';
+        return o.trim() ? o : null;
+      } catch (e) {
+        const o = (e.stdout || '') + '';
+        return o.trim() ? o : null;
+      }
+    };
+    // A probe that never produced output is NOT "this command has no flags".
+    // Folding a timeout/ENOENT into an empty flag set made `npm run doc:check`
+    // report `FLAG NOT IN HELP` for flags that are in --help (docs/backlog.md
+    // item 2). Retry once with a larger budget, then return null (unresolved)
+    // so the caller reports a probe failure, never a missing flag.
+    let out = probe(15000);
+    if (out === null) out = probe(45000);
+    if (out === null) return null; // unresolved — never cached, never a missing flag
     out = out.replace(/.\x08/g, ''); // strip man-page overstrike (bold X\bX, 15K bytes on git subcommand help) so --flag extraction sees real flags
     const flags = new Set();
     for (const m of out.matchAll(/--?[a-zA-Z][a-zA-Z0-9-]*/g)) flags.add(m[0]);
@@ -151,7 +184,10 @@ export function checkMdCommands(root) {
     t = t.replace(/^(sudo|command|nohup)\s+/, '');
     const tok = t.split(/\s+/)[0];
     if (!tok) return null;
-    if (/^[-{(<> "#`$%&*]/.test(tok) || /^[a-z_]+=\S*$/.test(tok)) return null;
+    // `}` closes a brace group (`cmd || { …; }`), `{` opens one, `(` starts a
+    // subshell — all shell syntax, never a command name. `}` was missing from
+    // this class, so `… ; }` reported a binary named "}".
+    if (/^[-{(<>} "#`$%&*]/.test(tok) || /^[a-z_]+=\S*$/.test(tok)) return null;
     if (BUILTINS.has(tok)) return null;
     return tok.replace(/[;'"]+$/,'');
   };
@@ -212,8 +248,8 @@ export function checkMdCommands(root) {
           if (/^\/tmp\//.test(tok)) { onDemandRefs.push(`${rel}  <<< ${line.slice(0,70)}`); continue; } // downloaded on demand — absence is not a doc bug
           if (MAC_ONLY.has(tok)) { macOnlyRefs.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
           if (OPTIONAL_TOOLCHAINS.has(tok)) { optionalToolchainRefs.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
-          try { execFileSync('bash', ['-c', 'command -v "$1" >/dev/null 2>&1', '_', tok]); binSeen.add(tok); }
-          catch { binFail.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
+          if (!hasBin(tok)) { binFail.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
+          binSeen.add(tok);
           if (INTERPRETERS.has(tok)) continue;
           const sub = subCmd(seg, tok);
           const key = sub ? `${tok} ${sub}` : tok;
@@ -261,11 +297,11 @@ export function checkMdCommands(root) {
         if (!tok) continue;
         if (SOURCED.has(tok)) { binSeen.add(tok); continue; }
         if (OPTIONAL_TOOLCHAINS.has(tok)) { optionalToolchainRefs.push(`${md.replace(root+'/','')}: INLINE: ${tok}  <<< ${line.slice(0,70)}`); continue; }
-        try { execFileSync('bash', ['-c', 'command -v "$1" >/dev/null 2>&1', '_', tok]); binSeen.add(tok); }
-        catch {
+        if (!hasBin(tok)) {
           if (harnessScript(tok)) { binSeen.add(tok); continue; }
           binFail.push(`${md.replace(root+'/','')}: INLINE: ${tok}  <<< ${line.slice(0,70)}`); continue;
         }
+        binSeen.add(tok);
         if (INTERPRETERS.has(tok) || MAC_ONLY.has(tok)) continue;
         const sub = subCmd(seg, tok);
         const key = sub ? `${tok} ${sub}` : tok;
@@ -278,6 +314,7 @@ export function checkMdCommands(root) {
   }
   for (const [key, flags] of flagByKey) {
     const help = helpFlags(key);
+    if (help === null) { unresolvedProbes.push(key); continue; } // never assert a flag against a probe that never ran
     for (const f of flags) {
       if (f === '--help') continue; // universal flag; git man pages don't list it — documenting help commands is legit prose
       if (FLAG_WAIVERS.has(`${key} ${f}`)) continue;
@@ -290,6 +327,7 @@ export function checkMdCommands(root) {
     ...binFail.map((x) => `BINARY NOT FOUND: ${x}`),
     ...scriptMissing.map((x) => `RELATIVE SCRIPT MISSING: ${x}`),
     ...flagFail.map((x) => `FLAG NOT IN HELP: ${x}`),
+    ...unresolvedProbes.map((x) => `HELP PROBE UNRESOLVED: ${x} (retry; its flags were not verified)`),
   ];
   return {
     name: 'md-commands',

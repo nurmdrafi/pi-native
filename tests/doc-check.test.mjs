@@ -218,12 +218,77 @@ test('md-commands: valid fixture command passes', () => {
   } finally { rmTree(dir); }
 });
 
+// The inline path probes `command -v` before applying the MAC_ONLY / /tmp
+// skips that the fenced-block path applies first. On Linux `security` and
+// `codesign` do not exist, so a doc that cites them inline failed the check
+// on CI while passing on macOS — a portability bug in the checker, not in the
+// docs. These two cases pin the skip order for the inline path.
+test('md-commands: inline macOS-only tool is skipped, not a missing binary', () => {
+  const dir = mkTree({ readme: '# f\n\nRun `security find-identity -v`.\n' });
+  try {
+    const r = checkMdCommands(dir);
+    assert.equal(r.status, 'PASS', r.findings.join('\n'));
+  } finally { rmTree(dir); }
+});
+
+test('md-commands: inline /tmp-downloaded tool is on-demand, not a missing binary', () => {
+  const dir = mkTree({ readme: '# f\n\nRun `/tmp/actionlint -version`.\n' });
+  try {
+    const r = checkMdCommands(dir);
+    assert.equal(r.status, 'PASS', r.findings.join('\n'));
+  } finally { rmTree(dir); }
+});
+
 test('md-commands: unknown binary fails', () => {
   const dir = mkTree({ readme: '# fixture\n\n```sh\nnot-a-real-bin-xyz --go\n```\n' });
   try {
     const r = checkMdCommands(dir);
     assert.equal(r.status, 'FAIL');
     assert.ok(r.findings.some((f) => f.startsWith('BINARY NOT FOUND:') && f.includes('not-a-real-bin-xyz')), r.findings.join('\n'));
+  } finally { rmTree(dir); }
+});
+
+// A probe that never succeeded must never be reported as a missing flag: the
+// `catch` used to fold a timeout/ENOENT/empty-stdout probe into the same empty
+// flag set as a genuinely absent flag, so `npm run doc:check` reported
+// `FLAG NOT IN HELP: pidx --out` for flags that ARE in --help (docs/backlog.md
+// item 2). The fix re-probes once, and an unresolved probe is its own class.
+test('md-commands: a probe that never resolves is its own finding, not a missing flag', () => {
+  // `false` exits 1 with empty stdout: indistinguishable from a bad flag set
+  // under the old logic, but it is a probe failure.
+  const dir = mkTree({ readme: '# f\n\n```sh\nfalse --surely-not-a-flag\n```\n' });
+  try {
+    const r = checkMdCommands(dir);
+    assert.ok(
+      !r.findings.some((f) => f.startsWith('FLAG NOT IN HELP:') && f.includes('--surely-not-a-flag')),
+      r.findings.join('\n'),
+    );
+  } finally { rmTree(dir); }
+});
+
+test('md-commands: a brace group after || is a shell construct, not a binary', () => {
+  // `cmd || { echo err; exit 1; }` splits on || into a segment starting with
+  // `{`, and the brace was taken as the command name.
+  const dir = mkTree({
+    readme: '# f\n\n```sh\n[ -n "$X" ] || { echo "missing"; exit 1; }\n```\n',
+  });
+  try {
+    const r = checkMdCommands(dir);
+    assert.equal(r.status, 'PASS', r.findings.join('\n'));
+  } finally { rmTree(dir); }
+});
+
+test('md-commands: a real binary still has its flags verified', () => {
+  // guard against the fix over-reaching: a resolvable probe must still catch a
+  // genuinely absent flag. `rg` is KNOWN and not an INTERPRETER, so its flags
+  // are actually introspectable (node/npm are skipped by design).
+  const dir = mkTree({ readme: '# f\n\n```sh\nrg --surely-not-a-real-flag x\n```\n' });
+  try {
+    const r = checkMdCommands(dir);
+    assert.ok(
+      r.findings.some((f) => f.startsWith('FLAG NOT IN HELP:') && f.includes('--surely-not-a-real-flag')),
+      r.findings.join('\n'),
+    );
   } finally { rmTree(dir); }
 });
 
