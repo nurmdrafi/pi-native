@@ -103,6 +103,20 @@ pub fn omission_marker(omitted_chars: usize, omitted_lines: usize) -> String {
     }
 }
 
+/// True when the text carries a real compaction cut: the marker is a whole line
+/// of its own (that is the only shape `compact` ever emits).
+///
+/// A bare substring test is wrong — any document that *quotes* the marker (our
+/// own architecture doc does) would be exempted from compaction and ship
+/// uncompressed. The marker is bracketed and always stands alone.
+#[must_use]
+pub fn has_omission_marker(text: &str) -> bool {
+    text.lines().any(|line| {
+        let t = line.trim();
+        t.starts_with(OMISSION_TAG) && t.ends_with(']')
+    })
+}
+
 /// A compaction result: the visible text plus what was dropped.
 #[derive(Debug)]
 pub struct Compacted {
@@ -133,7 +147,7 @@ pub fn compact(text: &str, max_lines: usize, max_bytes: usize) -> Compacted {
         partial: false,
     };
 
-    if fits(text, max_lines, max_bytes) || text.contains(OMISSION_TAG) {
+    if fits(text, max_lines, max_bytes) || has_omission_marker(text) {
         return verbatim(text);
     }
 
@@ -445,6 +459,28 @@ mod tests {
         let twice = compact(once.content.as_str(), COMPRESS_MAX_LINES, COMPRESS_MAX_BYTES);
         assert_eq!(twice.strategy, "none", "re-compaction must be a no-op");
         assert_eq!(twice.content, once.content);
+    }
+
+    #[test]
+    fn a_document_that_merely_quotes_the_marker_is_still_compacted() {
+        // docs/custom-tools-architecture.md documents the marker string, so a
+        // bare `contains(OMISSION_TAG)` test exempted it from compaction and it
+        // shipped ~29 KB into context. Only a marker on its own line is a cut.
+        let mut lines = numbered(3000);
+        lines.push_str("\n- marker docs: `[... omitted N chars / M lines ...]`");
+        let out = compact(lines.as_str(), COMPRESS_MAX_LINES, COMPRESS_MAX_BYTES);
+        assert_eq!(out.strategy, "head-tail", "quoted marker must not exempt");
+        assert!(out.omitted_chars > 0);
+    }
+
+    #[test]
+    fn a_marker_inside_a_sentence_is_not_a_cut() {
+        let line = "prefix [... omitted 10 chars / 2 lines ...] suffix";
+        assert!(!has_omission_marker(line));
+        assert!(has_omission_marker("[... omitted 10 chars / 2 lines ...]"));
+        assert!(has_omission_marker(
+            "line a\n\n[... omitted 10 chars / 2 lines ...]\n\nline b"
+        ));
     }
 
     #[test]
