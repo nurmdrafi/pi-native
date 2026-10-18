@@ -22,7 +22,6 @@
  * | TC2 | Toolchain (Node)              | node-family binary under an exact x.y.z Node pin (.nvmrc/engines) the interpreter misses — nvm use first |
  * | SS1 | Search (Scope)                | recursive grep with no path/glob scope — scope it or use rg |
  * | PB1 | Portability (grep -P)         | grep -P on darwin — rg / grep -E |
- * | NM1 | Search (node_modules)         | read/search node_modules — ask user first; @earendil-works pre-approved |
  * | R10 | Token Economy (Re-run)         | identical command re-run within 10 min without an edit/write/mutating-bash since is blocked |
  * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
  * | VM  | violation memory              | cross-session per-family block counts inject lessons into the next system prompt (threshold: 5 distinct sessions / 30d) |
@@ -124,15 +123,12 @@ import {
   hashFile,
   hashText,
   normPath,
+  shiftSpansForEdit,
   snapshot,
 } from "./read-coverage.ts";
 import type { CoverageEntry, LineSpan } from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
-import {
-  nodeModulesPath,
-  searchCheck,
-  searchedPathsFrom,
-} from "./search-guard.ts";
+import { searchCheck, searchedPathsFrom } from "./search-guard.ts";
 
 // ---- R1b + cadence thresholds (see index header table: R1b, CN) ----
 /** big-read gate: a whole-file-ish request for a file larger than this is
@@ -211,6 +207,7 @@ export default function (pi: ExtensionAPI) {
       path: string;
       spans?: LineSpan[];
       firstEditedLine?: number;
+      delta?: number;
       preStat?: { mtimeMs: number; size: number };
       fuzzy?: boolean;
       kind: "edit" | "write";
@@ -641,6 +638,7 @@ export default function (pi: ExtensionAPI) {
         path,
         spans: checked?.spans,
         firstEditedLine: checked?.firstEditedLine,
+        delta: checked?.delta,
         preStat: checked?.preStat,
         fuzzy: checked?.fuzzy,
         kind: "edit",
@@ -669,10 +667,6 @@ export default function (pi: ExtensionAPI) {
       const path = normPath(display, ctx?.cwd);
       // clamp the path contribution so the reason stays inside the 220c diet cap for any path length or kind
       const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
-      // NM1 (2026-10-13 audit): dependency internals — a node_modules/.pnpm
-      // path was read straight through the read tool; ask user first (@earendil-works exempt)
-      const nm = ruleEnabled("dependencyInternals") ? nodeModulesPath(display) : undefined;
-      if (nm) return blockCall(nm);
       // P1 (2026-10-15 audit): piread-first. Built-in `read` on a text file is
       // blocked so the native pipeline (same schema, same coverage) is used;
       // images stay on `read`. piread itself falls back to the built-in reader
@@ -891,7 +885,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // TC1/TC2/SS1/SS2/SS3/PB1/NM1 (2026-10-13 audit): toolchain pins + search
+    // TC1/TC2/SS1/SS2/SS3/PB1 (2026-10-13 audit): toolchain pins + search
     // scope/rg-first/fd-first —
     // BEFORE H2 for the same reason as R9: never ask the confirm dialog for a
     // command a rule rejects anyway
@@ -907,7 +901,6 @@ export default function (pi: ExtensionAPI) {
         portability: ruleEnabled("searchPortability"),
         midPipe: ruleEnabled("searchMidPipe"),
         findFirst: ruleEnabled("findFirst"),
-        nodeModules: ruleEnabled("dependencyInternals"),
       });
       if (sc) return blockCall(sc);
     }
@@ -1149,23 +1142,26 @@ export default function (pi: ExtensionAPI) {
         entry.kind === "edit" &&
         prior !== undefined &&
         (entry.fuzzy === true ||
-          prior.stat === undefined ||
           entry.preStat === undefined ||
-          prior.stat.mtimeMs !== entry.preStat.mtimeMs ||
-          prior.stat.size !== entry.preStat.size);
+          (prior.stat !== undefined &&
+            (prior.stat.mtimeMs !== entry.preStat.mtimeMs ||
+              prior.stat.size !== entry.preStat.size)));
       if (drifted) coverage.delete(entry.path);
       // fuzzy-matched anchors carry no spans — nothing more to certify (errs allow);
       // snapshot AFTER our own edit so mtime reflects the post-edit content
       if (entry.spans) {
         const snap = await snapshot(entry.path);
-        // B4/H9 (2026-10-08): every line below the first edited original line
-        // shifted when line counts changed — stale coverage spans there
-        // describe different content and must not block re-reads. Truncate
-        // at the first edited line, then certify the fresh post-edit spans.
+        // B4/H9 (2026-10-08): lines below the first edited original line
+        // shifted when line counts changed. Shift certified spans by the
+        // edit's line delta (2026-10-18: replaces truncation — truncation
+        // decertified valid spans and forced a re-read before every
+        // follow-up edit), then certify the fresh post-edit spans.
         const cur = coverage.get(entry.path);
         if (cur && entry.firstEditedLine !== undefined) {
-          const kept = cur.spans.filter((s) => s.end < entry.firstEditedLine!);
-          coverage.set(entry.path, { ...cur, spans: kept });
+          coverage.set(entry.path, {
+            ...cur,
+            spans: shiftSpansForEdit(cur.spans, entry.firstEditedLine, entry.delta ?? 0),
+          });
         }
         for (const s of entry.spans)
           certify(coverage, entry.path, s, entry.kind, snap);

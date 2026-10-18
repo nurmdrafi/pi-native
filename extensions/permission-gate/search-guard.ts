@@ -10,7 +10,6 @@
  * |-----|--------------------------------------------------|---------------------------|
  * | PB1 | grep -P on darwin (BSD grep lacks it)            | rg / grep -E              |
  * | SS1 | recursive grep with no path/glob scope           | scope path/--include or rg |
- * | NM1 | read tool + grep/find/rg/cat/head/tail into node_modules | docs/types, not the tree |
  * | SS2 | bare grep/egrep/fgrep head or mid-pipe (rg-first policy) | rg PATTERN path/           |
  * | SS3 | bare find head (fd-first policy)                    | fd PATTERN path/           |
  *
@@ -18,9 +17,6 @@
  * rg is gitignore-aware and fast, so unscoped rg passes by design.
  */
 import { readdirSync } from "node:fs";
-
-const NM1_MSG =
-  "Search (node_modules): dependency internals — ask the user before crawling node_modules; pi docs under node_modules/@earendil-works/ are pre-approved.";
 
 /** quote-aware tokenizer: quoted runs stay one token (quotes stripped);
  * shell operators | < > stand alone so tokens past them are another command */
@@ -78,31 +74,27 @@ function tokens(seg: string): string[] {
   return out;
 }
 
-const isNodeModulesToken = (t: string) =>
+/** node_modules paths: rg/fd are gitignore-aware and skip the tree, so
+ * grep/find there are legitimate — exempt from rg-first (2026-10-18). */
+const isNodeModulesPath = (t: string) =>
   t === "node_modules" ||
   t.startsWith("node_modules/") ||
   /(^|\/)node_modules(\/|$)/.test(t);
 
-/** user-approved 2026-10-13: @earendil-works (pi docs/types) reads are not a wasted crawl */
-const isEarendilExempt = (t: string) =>
-  t.startsWith("node_modules/@earendil-works/") ||
-  t.includes("/node_modules/@earendil-works/");
-
 /** SS2 (2026-10-16): AGENTS.md tooling defaults — rg is the search default;
  * grep/egrep/fgrep (segment head or mid-pipe) is fallback only when rg errors.
- * Fires after PB1/SS1/NM1 so their specific reasons still teach first. */
+ * Fires after PB1/SS1 so their specific reasons still teach first. */
 const SS2_MSG =
   "Search (rg-first): 'grep' is the fallback, not the default — use 'rg PATTERN path/' (scope with -t <lang> or a glob). If rg genuinely errored, say so in chat and wait for approval before using grep.";
 
 /** SS3 (2026-10-16): AGENTS.md tooling defaults — fd is the file-find default;
- * find is fallback only when fd errors. Fires after NM1 so the node_modules
- * approval policy keeps its specific reason. */
+ * find is fallback only when fd errors. */
 const SS3_MSG =
   "Search (fd-first): 'find' is the fallback, not the default — use 'fd PATTERN path/' (regex pattern; -e exact, -H hidden, -t f files). If fd genuinely errored, say so in chat and wait for approval before using find.";
 
 /**
  * SS1's crawl-cost premise applies to all searches.
- * PB1 (deterministic BSD failure) and NM1 (user-approval policy) still block.
+ * PB1 (deterministic BSD failure) still blocks.
  */
 export interface SearchRules {
   /** SS1: recursive grep with no path/glob scope */
@@ -113,8 +105,6 @@ export interface SearchRules {
   midPipe?: boolean;
   /** SS3: find head — prefer fd */
   findFirst?: boolean;
-  /** NM1: node_modules reads/searches */
-  nodeModules?: boolean;
 }
 
 export function searchCheck(
@@ -127,18 +117,13 @@ export function searchCheck(
     portability: rules.portability ?? true,
     midPipe: rules.midPipe ?? true,
     findFirst: rules.findFirst ?? true,
-    nodeModules: rules.nodeModules ?? true,
   };
   const toks = tokens(seg);
   let i = 0;
   if (toks[i] === "sudo") i++;
   const head = toks[i] ?? "";
   if (head !== "grep" && head !== "egrep" && head !== "fgrep") {
-    if (on.nodeModules &&
-        /^(?:find|rg|cat|head|tail)$/.test(head) &&
-        toks.some((t) => isNodeModulesToken(t) && !isEarendilExempt(t)))
-      return NM1_MSG;
-    // SS3 fd-first: find head → fd (NM1's node_modules reason stays first)
+    // SS3 fd-first: find head → fd
     if (on.findFirst && head === "find") return SS3_MSG;
     // SS2 mid-pipe: a grep segment headed by another command
     if (on.midPipe)
@@ -176,28 +161,12 @@ export function searchCheck(
     paths.every((p) => p === "." || p === "./" || p === "..");
   if (on.scope && recursive && unscoped && !includeScoped)
     return "Search (Scope): recursive grep with no path/glob scope crawls node_modules/.git and timed out at 30s — scope it (grep -rn --include='*.ts' PATTERN src/) or use rg PATTERN src/.";
-  if (on.nodeModules && [...paths, ...opts].some((t) => isNodeModulesToken(t) && !isEarendilExempt(t)))
-    return NM1_MSG;
-  // user-approved 2026-10-13: grep into @earendil-works pi docs stays allowed
-  return !on.midPipe || (paths.length > 0 && paths.every(isEarendilExempt))
-    ? undefined
-    : SS2_MSG;
-}
-
-/** NM1 for the read tool: block reads of dependency internals */
-export function nodeModulesPath(display: string): string | undefined {
-  const d = display.replace(/\\/g, "/");
-  if (!/(^|\/)node_modules(\/|$)/.test(d)) return undefined;
-  // user-approved 2026-10-13: @earendil-works (pi docs/types) allowed
-  if (/(^|\/)node_modules\/@earendil-works\//.test(d)) return undefined;
-  const shown = display.length > 48 ? `…${display.slice(-47)}` : display;
-  return `Search (node_modules): '${shown}' is dependency internals — ask the user before crawling node_modules; pi docs under node_modules/@earendil-works/ are pre-approved.`;
+  return !on.midPipe || (paths.length > 0 && paths.every(isNodeModulesPath)) ? undefined : SS2_MSG;
 }
 
 /** R1c locate-first: which paths did this command target? A wide window read
  * of a path that was never searched is a guess about where the content is.
- * Tokens that exist on disk count as targets; flags and patterns do not.
- * node_modules is excluded — NM1 governs that path. */
+ * Tokens that exist on disk count as targets; flags and patterns do not. */
 export function searchedPathsFrom(
   segments: string[],
   cwd: string | undefined,
@@ -229,12 +198,7 @@ export function searchedPathsFrom(
       if (base.includes("/")) continue; // `**` recursion: out of scope
       const dirAbs = resolvePath(dirTok, cwd);
       if (!exists(dirAbs)) continue;
-      const re = new RegExp(
-        `^${base
-          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-          .replace(/\*/g, "[^/]*")
-          .replace(/\?/g, "[^/")}$`,
-      );
+      const re = globToRegex(base);
       let entries: string[];
       try {
         entries = readdirSync(dirAbs);
@@ -246,4 +210,24 @@ export function searchedPathsFrom(
     }
   }
   return out;
+}
+
+/** fnmatch-style single-level glob → RegExp. `?` → one non-slash char,
+ * `*` → any run of non-slash chars, everything else literal. Total over
+ * strings — never throws on glob metachar soup (2026-10-18: `?` built an
+ * unterminated `[^/` class and the RegExp constructor threw, failing
+ * every call whose command text contained that shape). */
+export function globToRegex(base: string): RegExp {
+  const body = [...base]
+    .map((ch) =>
+      ch === "*"
+        ? "[^/]*"
+        : ch === "?"
+          ? "[^/]"
+          : /[.+^${}()|[\]\\]/.test(ch)
+            ? `\\${ch}`
+            : ch,
+    )
+    .join("");
+  return new RegExp(`^${body}$`);
 }

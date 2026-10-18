@@ -128,6 +128,30 @@ export function coversAll(spans: LineSpan[], win: LineSpan): boolean {
   return false;
 }
 
+/**
+ * Re-map certified spans after a successful exact-anchor edit. Lines
+ * strictly above the first edited line keep their numbers; lines from the
+ * first edited line down shifted by `delta` (new − old line count of the
+ * edit call). Straddling spans are dropped — their content changed.
+ * Exact for single-edit calls; multi-edit calls shift by the cumulative
+ * delta (spans between edit regions over-shift and simply stay decertified
+ * on mismatch — conservative, never blocks a legitimate read of new
+ * content since partial overlap always passes).
+ */
+export function shiftSpansForEdit(
+  spans: LineSpan[],
+  firstEditedLine: number,
+  delta: number,
+): LineSpan[] {
+  const out: LineSpan[] = [];
+  for (const s of spans) {
+    if (s.end < firstEditedLine) out.push(s);
+    else if (s.start >= firstEditedLine)
+      out.push({ ...s, start: s.start + delta, end: s.end + delta });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
 /** fallback line count from text blocks when details.truncation is absent */
 export function countTextLines(content: unknown[]): {
   lines: number;

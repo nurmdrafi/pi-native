@@ -96,6 +96,7 @@ export async function validateEditAnchors(
       spans?: LineSpan[];
       origSpans?: { i: number; start: number; end: number }[];
       firstEditedLine?: number;
+      delta?: number;
       preStat?: { mtimeMs: number; size: number };
       fuzzy?: boolean;
     }
@@ -298,5 +299,6 @@ export async function validateEditAnchors(
         : undefined,
     preStat,
     fuzzy: fuzzyUsed || undefined,
+    delta: edited.length ? delta : undefined,
   }; // all anchors verified: let the edit proceed
 }
