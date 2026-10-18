@@ -38,6 +38,7 @@ export const RULE_IDS = {
   editAnchorGuard: "AG",
   reReadGuard: "R1",
   largeReadGuard: "R1b",
+  locateFirst: "R1c",
   nativeReadFirst: "P1",
   nativeBashFirst: "P2",
   nativeToolsInScripts: "P3",

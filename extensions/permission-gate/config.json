@@ -6,6 +6,7 @@
     "editAnchorGuard": true,
     "reReadGuard": true,
     "largeReadGuard": true,
+    "locateFirst": true,
     "nativeReadFirst": true,
     "nativeBashFirst": true,
     "nativeToolsInScripts": true,

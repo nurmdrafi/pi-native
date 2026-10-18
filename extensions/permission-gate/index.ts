@@ -9,6 +9,7 @@
  * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | first whole-file-ish (>=500-line window) read of a >24KB file blocked with a targeted-window fix |
+ * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
  * | P3  | Token Economy (Pibash/Piread-first) | a codemode script that calls built-in `tools.bash`/`tools.read` is blocked — call `tools.pibash`/`tools.piread` (the sandbox used to sidestep P1/P2 entirely) |
@@ -87,6 +88,7 @@ import {
   realpathSync,
   renameSync,
   writeFileSync,
+  existsSync,
 } from "fs";
 import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
@@ -126,7 +128,11 @@ import {
 } from "./read-coverage.ts";
 import type { CoverageEntry, LineSpan } from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
-import { nodeModulesPath, searchCheck } from "./search-guard.ts";
+import {
+  nodeModulesPath,
+  searchCheck,
+  searchedPathsFrom,
+} from "./search-guard.ts";
 
 // ---- R1b + cadence thresholds (see index header table: R1b, CN) ----
 /** big-read gate: a whole-file-ish request for a file larger than this is
@@ -136,6 +142,11 @@ import { nodeModulesPath, searchCheck } from "./search-guard.ts";
 const BIG_READ_BYTES = 24_000;
 /** a requested window at least this wide counts as whole-file-ish */
 const BIG_READ_WIN = 500;
+/** R1c locate-first: a window at least this wide on a path never searched
+ * this session is a guess about where the content is. Kept well above
+ * ordinary targeted reads (narrow-window cases read 5-50 lines) so a
+ * legitimate first read still passes. */
+const LOCATE_MIN_WIN = 100;
 /** Built-in read is authoritative for images (piread is text-only and
  * delegates them internally). Any other extension goes through piread first
  * (2026-10-15 audit: the last session read 69 text files via built-in `read`
@@ -182,6 +193,14 @@ export default function (pi: ExtensionAPI) {
    * validation — skipping only loses savings, never adds a false block).
    */
   const coverage = new Map<string, CoverageEntry>();
+  /** R1c locate-first: absolute paths a search command named this session. */
+  const searchedPaths = new Set<string>();
+  /** Record R1c search targets. Local closure: the path resolver and the
+   * on-disk probe are already in scope. */
+  const recordSearchedPaths = (segs: string[], cwd: string | undefined) => {
+    for (const p of searchedPathsFrom(segs, cwd, normPath, existsSync))
+      searchedPaths.add(p);
+  };
   /** edit/write toolCallId -> { path, spans?, kind }, awaiting its tool_result */
   const pendingEdits = new Map<
     string,
@@ -632,7 +651,9 @@ export default function (pi: ExtensionAPI) {
     // both names get the same read handling so gate protection survives
     // the individual registration.
     if (
-      (ruleEnabled("reReadGuard") || ruleEnabled("largeReadGuard")) &&
+      (ruleEnabled("reReadGuard") ||
+        ruleEnabled("largeReadGuard") ||
+        ruleEnabled("locateFirst")) &&
       (isToolCallEventType("read", event) ||
         isToolCallEventType("piread", event))
     ) {
@@ -676,6 +697,22 @@ export default function (pi: ExtensionAPI) {
             ? start + event.input.limit - 1
             : Infinity,
       };
+      // R1c locate-first: a WIDE window on a path no search has named this
+      // session is a guess about where the content sits. Deliberately narrow:
+      // whole-file reads belong to R1b, and windows under LOCATE_MIN_WIN are
+      // ordinary targeted reads that must stay frictionless.
+      if (
+        ruleEnabled("locateFirst") &&
+        win.end !== Infinity &&
+        win.end - win.start + 1 >= LOCATE_MIN_WIN &&
+        path &&
+        !searchedPaths.has(path) &&
+        !coverage.has(path)
+      ) {
+        return blockCall(
+          `Locate-first: ${win.end - win.start + 1}-line window on '${shown}', which no search has named this session. \`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then read the hit's range.`,
+        );
+      }
       // R1b (2026-10-10 session audit): first read of a large file requested
       // whole — block with the targeted-window fix. Windows narrower than
       // BIG_READ_WIN lines pass untouched, small files pass, R1 covers
@@ -929,6 +966,9 @@ export default function (pi: ExtensionAPI) {
       );
     }
     pendingBash.set(event.toolCallId, base);
+    // R1c: remember which paths this command targeted, so a later wide read of
+    // one counts as a located lookup rather than a guess.
+    if (ruleEnabled("locateFirst")) recordSearchedPaths(normSegs, ctx?.cwd);
     return;
   });
 
@@ -1001,13 +1041,25 @@ export default function (pi: ExtensionAPI) {
       // certify the ACTUAL returned lines — requested offset/limit lie at
       // EOF edges and on 2000-line/50KB truncation
       const snap = await snapshot(read.path);
-      const trunc = (
+      const details = (
         event as {
           details?: {
             truncation?: { outputLines?: unknown; truncated?: unknown };
+            compaction?: { strategy?: unknown; omittedChars?: unknown } | null;
           };
         }
-      ).details?.truncation;
+      ).details;
+      const trunc = details?.truncation;
+      // Head-tail compaction kept only the head and tail of the body; the
+      // elided middle never entered context, so it must stay uncertified. A
+      // whole-file request used to certify 1..Infinity regardless, which made
+      // the omitted middle unreadable for the rest of the session.
+      const compaction = details?.compaction;
+      const elided =
+        !!compaction &&
+        compaction.strategy !== "none" &&
+        typeof compaction.omittedChars === "number" &&
+        compaction.omittedChars > 0;
       const counted = countTextLines(content);
       const lines =
         typeof trunc?.outputLines === "number"
@@ -1015,10 +1067,13 @@ export default function (pi: ExtensionAPI) {
           : counted.lines;
       const truncated = trunc ? trunc.truncated === true : counted.truncated;
       if (lines > 0) {
-        // an untruncated whole-file request certifies everything — nothing
-        // exists past EOF, so any later window is already in context
+        // an untruncated, uncompacted whole-file request certifies everything —
+        // nothing exists past EOF, so any later window is already in context
         const wholeFile =
-          read.win.start === 1 && read.win.end === Infinity && !truncated;
+          read.win.start === 1 &&
+          read.win.end === Infinity &&
+          !truncated &&
+          !elided;
         certify(
           coverage,
           read.path,

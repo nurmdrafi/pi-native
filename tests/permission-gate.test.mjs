@@ -149,6 +149,7 @@ async function readVia(pi, toolName, path, opts = {}, result = {}) {
               outputLines: n,
               totalLines: result.totalLines ?? n,
             },
+            ...(result.compaction ? { compaction: result.compaction } : {}),
           },
     isError: false,
   });
@@ -589,6 +590,68 @@ const cases = [
       read(pi, fileA, { offset: 3000, limit: 100 }, { outputLines: 100 }),
   ],
   [
+    "locate-first: wide window with no prior search on the path is blocked",
+    "blocked",
+    async (pi) => read(pi, spanFile, { offset: 1, limit: 100 }),
+  ],
+  [
+    "locate-first: wide window after an rg hit on the path passes",
+    "pass",
+    async (pi) => {
+      await runBash(pi, `rg -n s1 ${spanFile}`);
+      return read(pi, spanFile, { offset: 1, limit: 100 }, { outputLines: 100 });
+    },
+  ],
+  [
+    "locate-first: narrow window with no search still passes",
+    "pass",
+    async (pi) => read(pi, spanFile, { offset: 1, limit: 50 }, { outputLines: 50 }),
+  ],
+  [
+    "locate-first: whole-file read is R1b's, not R1c's",
+    "pass",
+    async (pi) => read(pi, fileA),
+  ],
+  [
+    "elided whole-file read does not certify the omitted middle",
+    "pass",
+    async (pi) => {
+      // A head-tail compacted read put only head+tail in context; the elided
+      // middle must stay read-able (regression: wholeFile certified 1..Inf).
+      // Second read targets the omitted middle: it must NOT be blocked, proving
+      // the whole-file certification no longer covers elided lines.
+      const first = await read(
+        pi,
+        spanFile,
+        {},
+        {
+          outputLines: 40,
+          totalLines: 120,
+          compaction: {
+            strategy: "head-tail",
+            originalChars: 4000,
+            visibleChars: 1200,
+            omittedChars: 2800,
+            partial: false,
+          },
+        },
+      );
+      if (first.blocked) return first; // the elided read itself must pass
+      return read(
+        pi,
+        spanFile,
+        { offset: 55, limit: 5 },
+        { outputLines: 5, totalLines: 120 },
+      );
+    },
+  ],
+  [
+    "window inside an elided read's omitted middle passes",
+    "pass",
+    async (pi) =>
+      read(pi, spanFile, { offset: 50, limit: 10 }, { outputLines: 10 }),
+  ],
+  [
     "partial-overlap window passes (brings new lines)",
     "pass",
     async (pi) =>
@@ -869,8 +932,12 @@ const cases = [
   [
     "R1b: narrow window on a >24KB file passes",
     "pass",
-    async (pi) =>
-      read(pi, hugeFile, { offset: 10, limit: 200 }, { outputLines: 200 }),
+    async (pi) => {
+      // R1b's own premise: a sub-BIG_READ_WIN request is not whole-file-ish.
+      // The window is 200 lines, so R1c wants it located first.
+      await runBash(pi, `rg -n xxxxx ${hugeFile}`);
+      return read(pi, hugeFile, { offset: 10, limit: 200 }, { outputLines: 200 });
+    },
   ],
   [
     "cadence: nudge is non-blocking, appended once to a tool_result",
@@ -1180,6 +1247,20 @@ const cases = [
     "anchor not found is blocked",
     "blocked",
     async (pi) => edit(pi, fileA, [{ oldText: "zzz", newText: "y" }]),
+  ],
+  [
+    "anchor-not-found names the line count, not 'head'/'tail'",
+    "blocked",
+    async (pi) => {
+      // The hint said "Its head lines occur at line N" — frag.end is the match
+      // end ("head"|"tail"), not a count. It must name how many lines matched.
+      const r = await edit(pi, fileA, [
+        { oldText: "a\nb\nZZZ", newText: "y" },
+      ]);
+      if (!r.blocked) return r;
+      const bad = /Its (head|tail) lines occur/.test(r.reason);
+      return bad ? { blocked: false, reason: r.reason } : r;
+    },
   ],
   [
     "non-unique anchor is blocked with line numbers",
@@ -4030,6 +4111,31 @@ const preambles = {
   "partial-overlap window passes (brings new lines)": async () => {
     const pi = freshGate();
     await read(pi, fileA, { offset: 1, limit: 50 }, { outputLines: 50 });
+    return pi;
+  },
+  "locate-first: wide window after an rg hit on the path passes": async () => {
+    const pi = freshGate();
+    await runBash(pi, `rg -n s1 ${spanFile}`);
+    return pi;
+  },
+  "elided whole-file read does not certify the omitted middle": async () => {
+    const pi = freshGate();
+    await read(
+      pi,
+      spanFile,
+      {},
+      {
+        outputLines: 40,
+        totalLines: 120,
+        compaction: {
+          strategy: "head-tail",
+          originalChars: 4000,
+          visibleChars: 1200,
+          omittedChars: 2800,
+          partial: false,
+        },
+      },
+    );
     return pi;
   },
   "full re-read after compaction passes": async () => {

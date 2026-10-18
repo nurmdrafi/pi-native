@@ -191,3 +191,29 @@ export function nodeModulesPath(display: string): string | undefined {
   const shown = display.length > 48 ? `…${display.slice(-47)}` : display;
   return `Search (node_modules): '${shown}' is dependency internals — ask the user before crawling node_modules; pi docs under node_modules/@earendil-works/ are pre-approved.`;
 }
+
+/** R1c locate-first: which paths did this command target? A wide window read
+ * of a path that was never searched is a guess about where the content is.
+ * Tokens that exist on disk count as targets; flags and patterns do not.
+ * node_modules is excluded — NM1 governs that path. */
+export function searchedPathsFrom(
+  segments: string[],
+  cwd: string | undefined,
+  resolvePath: (p: string, cwd?: string) => string,
+  exists: (p: string) => boolean,
+): string[] {
+  const out: string[] = [];
+  for (const seg of segments) {
+    const toks = seg.split(/\s+/).filter(Boolean);
+    if (!toks.some((t) => /^(?:rg|grep|egrep|fgrep|fd|find|ag|ack)$/.test(t)))
+      continue;
+    for (const tok of toks) {
+      if (tok.startsWith("-") || tok.includes("=")) continue;
+      if (/[|><;$`]/.test(tok)) continue;
+      if (/(^|\/)node_modules(\/|$)/.test(tok)) continue;
+      const abs = resolvePath(tok, cwd);
+      if (exists(abs)) out.push(abs);
+    }
+  }
+  return out;
+}
