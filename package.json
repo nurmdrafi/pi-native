@@ -13,6 +13,7 @@
   "lint:agents": "node scripts/agents-lint.mjs",
   "doc:check": "node scripts/doc-check.mjs",
   "gate:eval": "node scripts/gate-eval.mjs",
+  "daemons:kill": "pkill -f \"$(dirname \"$npm_package_json\")/bin/(pibash|piread|piedit) --serve\" || true",
   "bench:model-visible": "node tests/model-visible-baseline.mjs",
   "bench:model-visible:compare": "node tests/model-visible-baseline.mjs --compare",
   "bench:model-visible:update": "node tests/model-visible-baseline.mjs --update",

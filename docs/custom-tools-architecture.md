@@ -171,6 +171,12 @@ Other lifecycle rules:
 - **Lazy start**: the daemon is spawned on first use, not at extension load.
 - **Lazy restart**: a dead slot is cleared (`daemon = null`) and the next call
   starts a fresh one. `killDaemon` is idempotent (`state.dying`).
+- **Stale-daemon invalidation**: daemons also die when their binary changed
+  under them — `scripts/after-pull.sh` (step 5c) kills them after a rebuild,
+  and self-heal kills them at `session_start` when the `bin/` generation
+  (max mtime, `.cache/bins-generation`) differs from the last session
+  (extensions/self-heal/bins.ts). One-shot fallback covers the gap. Manual
+  equivalent: `npm run daemons:kill`.
 - **Dying slots are refused**: a request entering a slot whose `dying` flag is
   set, or whose stdin is destroyed/ended, rejects immediately rather than
   writing into a pipe that will never answer.

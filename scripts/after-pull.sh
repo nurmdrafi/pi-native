@@ -44,88 +44,70 @@ EOF
 chmod +x bin/pidoc
 
 # 3. piread (native read tool, default-on — PI_NATIVE_READ=0 opts out;
-#    falls back to the built-in read without the binary). Rebuild when
-#    missing or older than crate sources; pidx staleness is handled by the
-#    pidoc --fix step below. Builds from the custom-tools workspace (-p).
+#    falls back to the built-in read without the binary). Always rebuilt —
+#    cargo is incremental, so a no-op rebuild stays cheap; pidx staleness is
+#    handled by the pidoc --fix step below. Builds from the custom-tools
+#    workspace (-p).
 PIREAD_CRATE=custom-tools/piread
 PIREAD_TARGET=custom-tools/target/release/piread
 if [ -d "$PIREAD_CRATE/src" ] && [ -f "$PIREAD_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
-  stale=0
-  if [ ! -x bin/piread ]; then
-    stale=1
-  elif [ -n "$(find "$PIREAD_CRATE/src" -name '*.rs' -newer bin/piread -print 2>/dev/null | head -n 1)" ] \
-    || [ -n "$(find "$PIREAD_CRATE/Cargo.toml" -newer bin/piread -print 2>/dev/null)" ]; then
-    stale=1
-  fi
-  if [ "$stale" = 1 ]; then
-    if [ -n "$CARGO" ]; then
+  if [ -n "$CARGO" ]; then
       if (cd custom-tools && "$CARGO" build --release -p piread) && install_native "$PIREAD_TARGET" bin/piread; then
         echo "== piread: rebuilt + installed to bin/piread"
       else
         echo "!! piread rebuild failed — extension falls back to the built-in read" >&2
       fi
-    else
-      echo "== piread: stale/missing and cargo not found — extension falls back to the built-in read"
-    fi
+  else
+    echo "== piread: cargo not found — extension falls back to the built-in read"
   fi
 fi
 
 # 4. piedit (native edit tool, default-on — PI_NATIVE_EDIT=0 opts out;
-#    falls back to the built-in edit without the binary). Same staleness
-#    rule as piread; builds from the custom-tools workspace (-p).
+#    falls back to the built-in edit without the binary). Always rebuilt
+#    like piread; builds from the custom-tools workspace (-p).
 PIEDIT_CRATE=custom-tools/piedit
 PIEDIT_TARGET=custom-tools/target/release/piedit
 if [ -d "$PIEDIT_CRATE/src" ] && [ -f "$PIEDIT_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
-  stale=0
-  if [ ! -x bin/piedit ]; then
-    stale=1
-  elif [ -n "$(find "$PIEDIT_CRATE/src" -name '*.rs' -newer bin/piedit -print 2>/dev/null | head -n 1)" ] \
-    || [ -n "$(find "$PIEDIT_CRATE/Cargo.toml" -newer bin/piedit -print 2>/dev/null)" ]; then
-    stale=1
-  fi
-  if [ "$stale" = 1 ]; then
-    if [ -n "$CARGO" ]; then
+  if [ -n "$CARGO" ]; then
       if (cd custom-tools && "$CARGO" build --release -p piedit) && install_native "$PIEDIT_TARGET" bin/piedit; then
         echo "== piedit: rebuilt + installed to bin/piedit"
       else
         echo "!! piedit rebuild failed — extension falls back to the built-in edit" >&2
       fi
-    else
-      echo "== piedit: stale/missing and cargo not found — extension falls back to the built-in edit"
-    fi
+  else
+    echo "== piedit: cargo not found — extension falls back to the built-in edit"
   fi
 fi
 
 # 5. pibash (native shell tool, default-on — PI_NATIVE_BASH=0 opts out;
-#    falls back to the built-in bash without the binary). Same staleness
-#    rule as piread/piedit; builds from the custom-tools workspace (-p).
+#    falls back to the built-in bash without the binary). Always rebuilt
+#    like piread; builds from the custom-tools workspace (-p).
 PIBASH_CRATE=custom-tools/pibash
 PIBASH_TARGET=custom-tools/target/release/pibash
 if [ -d "$PIBASH_CRATE/src" ] && [ -f "$PIBASH_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
-  stale=0
-  if [ ! -x bin/pibash ]; then
-    stale=1
-  elif [ -n "$(find "$PIBASH_CRATE/src" -name '*.rs' -newer bin/pibash -print 2>/dev/null | head -n 1)" ] \
-    || [ -n "$(find "$PIBASH_CRATE/Cargo.toml" -newer bin/pibash -print 2>/dev/null)" ]; then
-    stale=1
-  fi
-  if [ "$stale" = 1 ]; then
-    if [ -n "$CARGO" ]; then
+  if [ -n "$CARGO" ]; then
       if (cd custom-tools && "$CARGO" build --release -p pibash) && install_native "$PIBASH_TARGET" bin/pibash; then
         echo "== pibash: rebuilt + installed to bin/pibash"
       else
         echo "!! pibash rebuild failed — extension falls back to the built-in bash" >&2
       fi
-    else
-      echo "== pibash: stale/missing and cargo not found — extension falls back to the built-in bash"
-    fi
+  else
+    echo "== pibash: cargo not found — extension falls back to the built-in bash"
   fi
+fi
+
+# 5c. Kill daemons started from older binaries: a pull can replace bin/*
+#     while long-lived pi sessions keep serving from pre-pull daemons.
+#     Each session lazily restarts them from the fresh binaries on its
+#     next native tool call (one-shot fallback covers the gap).
+if command -v pkill >/dev/null 2>&1; then
+  pkill -f "$ROOT/bin/(pibash|piread|piedit) --serve" 2>/dev/null || true
 fi
 
 # 5b. Portable auto-heal: shell PATH pin + native-binary/PCRE2 check. Idempotent,
