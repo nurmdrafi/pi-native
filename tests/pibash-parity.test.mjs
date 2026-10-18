@@ -480,11 +480,11 @@ await checkAsync("parity: a character split across reads decodes once", async ()
   resetDaemon();
   // Two writes with a gap force the pipe to deliver a partial character; the
   // streaming decoder must reassemble it instead of emitting replacement chars.
-  const command = "printf '語' | head -c 1; sleep 0.05; printf '語' | tail -c 2; echo";
+  const command = "printf '€' | head -c 1; sleep 0.05; printf '€' | tail -c 2; echo";
   const mine = await run(wrapped, { command }, NO_UI_CTX);
   const theirs = await run(oracle, { command }, NO_UI_CTX);
   assert.deepStrictEqual(normalize(mine), normalize(theirs));
-  assert.equal(mine.value.content[0].text, "語\n");
+  assert.equal(mine.value.content[0].text, "€\n");
 });
 
 await checkAsync("parity: PI_SESSION_ID is injected like the built-in", async () => {

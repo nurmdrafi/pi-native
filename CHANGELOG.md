@@ -7,6 +7,17 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`pibash`: the `seq 50000`-class output regression is fixed (−32% p50 one-shot).** Phase profiling attributed the output-size cost to two sources: the compression pre-pass ran three full `split_lines` passes over the stream and allocated one `String` per kept line in `dedup_repeats`, and the envelope materialized the stream twice (`full_text` clone + `read_full_output` re-read of the raw buffer or spill file). `strip_ansi`/`dedup` are now copy-on-write (borrowing the stream when it is ANSI-free / fold-free — the common piped case), the line vector is split once and shared by `error_priority_lines`/`head_tail_lines`, `fits` counts lines without materializing them, and the fold path emits through a single buffer. `OutputAccumulator::into_full_text` consumes into one materialization (zero-copy move of the raw buffer) and `cap_full_output` derives the ≤1 MiB `structuredContent` payload from that same buffer; `read_full_output`/`full_text` are gone. Spill compaction windows are maintained incrementally (rolling byte window + a line ring), so repeated `snapshot()` calls — the daemon's throttled partials — never re-split the whole tail. Measured with `custom-tools/pibash/bench-seq50000.mjs`: one-shot `seq 50000` p50 19.7 ms → 13.4 ms; `compress_output` 9.6 ms → 2.5 ms (stage attribution in `docs/custom-tools-architecture.md`). Wire bytes are unchanged — the envelope shape stays parity-pinned, so model-visible tokens are identical.
+
+### Changed
+
+- **Test fixtures: CJK characters replaced with byte-equivalent Latin/symbol text.** Every 3-byte CJK fixture character across `custom-tools` and `tests/` is now `€` (also exactly 3 bytes in UTF-8, so all byte-count assertions hold); the accumulator's raw-byte fixtures feed `E2 82 AC` where they previously fed the old character's bytes. Multi-byte boundary coverage — the reason those fixtures exist — is unchanged; all affected suites (pibash/piedit/piread parity, diff fuzz, gate) pass. A rule was added to `AGENTS.md`: test fixtures and assertion literals use English/Latin text, with accented Latin or symbol characters for multi-byte coverage.
+- **`pibash`: a scoped seq-50000 micro-bench harness.** `custom-tools/pibash/bench-seq50000.mjs` (Node, `hrtime`, path derived from the script location — portable, no GNU-only `date`/`seq` in the harness) replaces the throwaway shell loop; it degrades with a clear message when the workload is missing.
+
 ## [1.47.0] - 18-10-2026
 
 ### Changed

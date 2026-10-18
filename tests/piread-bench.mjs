@@ -79,7 +79,7 @@ const oneshot = {
 const CORPUS = [
   ["one-line", "solo\n"],
   ["crlf", "one\r\ntwo\r\nthree\r\n"],
-  ["unicode", "héllo\n🎉emoji\n日本語のテキスト\n"],
+  ["unicode", "héllo\n🎉emoji\n€€€€€€€€\n"],
   ["long-lines", Array.from({ length: 20 }, (_, i) => `${String(i).padStart(3, "0")}:${"x".repeat(296)}`).join("\n") + "\n"],
   ["lines2500", Array.from({ length: 2500 }, (_, i) => `line${String(i).padStart(4, "0")}`).join("\n") + "\n"],
   ["bytes60k", Array.from({ length: 600 }, () => "x".repeat(100)).join("\n")],

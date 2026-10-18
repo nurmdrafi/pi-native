@@ -33,7 +33,7 @@ const int = (n) => Math.floor(rnd() * n);
 
 const WORDS = [
   "", " ", "  ", "a", "b", "foo", "bar", "baz qux", "dup", "dup", "dup2",
-  "🎉emoji", "日本語", "café", "x".repeat(25), "tab\there", "  indent",
+  "🎉emoji", "€€€", "café", "x".repeat(25), "tab\there", "  indent",
   "trail   ", "CR-like\r", "nul-free", "0", "1", "2",
 ];
 

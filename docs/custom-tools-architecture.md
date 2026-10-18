@@ -253,7 +253,13 @@ Measured effect (model-visible bytes, `npm run bench:model-visible`): a
 
 `pibash`'s pipeline applies four stages in order — `strip_ansi`, `dedup_repeats`,
 then a strategy (`error_priority` for Test/Build commands, `head_tail`
-otherwise), each skipped when the text already fits the budget.
+otherwise), each skipped when the text already fits the budget. The stages are
+copy-on-write over one shared line split: piped output is ANSI-free and
+fold-free in the common case, so the stream is neither copied nor re-split per
+pass (`strip_ansi_cow` borrows when no ESC byte exists; `dedup_lines` borrows
+when nothing folds; `error_priority_lines` / `head_tail_lines` take the
+pre-split `&[&str]`). The fold case rebuilds the text and re-splits through the
+public wrappers — the rare path.
 
 ---
 
@@ -313,7 +319,7 @@ flowchart TB
     OS -- spawn / parse failure --> BF
     CLI --> MAIN
     MAIN --> RUNNER --> ACC
-    ACC -->|full_text / spill path| COMPRESS
+    ACC -->|into_full_text / spill read| COMPRESS
     COMPRESS -->|pruned to 40 lines / 2 KB| TRUNC
     TRUNC --> RENDER
     RENDER --> ENV
@@ -355,11 +361,16 @@ grows past the cap:
 - **`Utf8Stream`**: incremental UTF-8 decoding. Chunk boundaries fall inside
   multi-byte sequences, so it holds back incomplete trailing bytes and decodes
   only complete sequences — output is never mangled at a boundary.
-- **`trim_tail`**: keeps the buffer bounded by dropping from the front, on a
-  line boundary.
-- **`read_full_output` / `full_text`**: give the compression pre-pass the
-  *complete* stream (from the spill file when one exists), not just the visible
-  tail — this is why errors buried mid-stream survive.
+- **`trim_tail`**: keeps the buffer bounded on two axes — a rolling byte
+  window (`trim_tail_bytes`, cut on a UTF-8 boundary) and a line ring
+  (`trim_tail_lines`, byte offsets of the last complete lines), so repeated
+  `snapshot()` calls re-split only the display window, never the whole tail.
+- **`into_full_text` / `cap_full_output`**: give the compression pre-pass the
+  *complete* stream in a single materialization (moving the raw buffer
+  zero-copy when no spill exists, one spill-file read otherwise), and derive
+  the ≤1 MiB `structuredContent` payload from that same buffer instead of
+  re-reading — errors buried mid-stream survive, and the stream is never
+  serialized twice.
 - **`snapshot`**: produces the oracle-shaped result plus an optional
   `fullOutputPath` reference.
 
@@ -367,7 +378,10 @@ grows past the cap:
 
 A **shadow pre-pass** runs over the complete output before the legacy
 tail/parity path, so the model-visible budget (40 lines / 2 KB) is enforced on
-the whole stream. Stages: `strip_ansi` → `dedup_repeats` → strategy.
+the whole stream. Stages: `strip_ansi_cow` → `dedup_lines` (both copy-on-write,
+borrowing the stream untouched when no ESC byte / fold exists) → strategy over
+one shared line split. The fold case rebuilds the text and re-splits — the rare
+path.
 
 `classify()` maps the command string to `Test | Build | Git | Search | Log |
 Generic` by scanning shell-separated segments left to right and taking the first
@@ -383,6 +397,24 @@ a UTF-8 boundary.
 
 Constraint: a **generic** command's buried actionables are not scanned — it is
 recorded as expected-non-retaining, matching the built-in oracle's behaviour.
+
+Measured, one-shot CLI (`custom-tools/pibash/bench-seq50000.mjs`; `seq 50000`
+≈ 290 KB / 50k lines; stage attribution via temporary in-process timers since
+removed):
+
+| stage | before | after |
+| --- | --- | --- |
+| `strip_ansi` | 394 µs | 27 µs (borrowed: no ESC byte) |
+| `dedup` | 2.06 ms | 1.64 ms (shared split, borrow) |
+| `head_tail` | 1.93 ms | 0.72 ms (shared split) |
+| `compress_output` total | 9.6 ms | 2.5 ms |
+| full-stream materializations | 2 | 1 |
+| end-to-end p50 | 19.7 ms | 13.4 ms (−32%) |
+
+The "before" column carries the three-pass `split_lines` and the per-line
+`String` malloc in `dedup_repeats` that motivated the copy-on-write rework;
+`strip_ansi`'s before/after is the borrowed-vs-owned difference. Wire bytes are
+unchanged throughout — parity suites pin the envelope shape.
 
 ---
 
@@ -623,6 +655,10 @@ context cost — the model reads the shape of the corpus, then queries the file.
 | One reused response buffer | all `serve.rs` | no per-response allocation |
 | `skip_serializing_if` | envelopes | halves envelope size where a field duplicates the payload |
 | Incremental UTF-8 decode | `pibash` accumulator | chunk boundaries never split a character |
+| Copy-on-write stage pipeline | `pibash` compress | ANSI-free / fold-free output borrows the stream — no copy, no re-split |
+| One shared line split | `pibash` compress | `error_priority_lines` / `head_tail_lines` take `&[&str]`; one `Vec`, not three |
+| Line-ring compaction window | `pibash` accumulator | `snapshot()` re-splits only the display window, never the whole tail |
+| Single-materialization envelope | `pibash` | `into_full_text` + `cap_full_output` read the stream once; `structuredContent` derives from the same buffer |
 | Spill-to-file above a cap | `pibash` accumulator | bounded memory with lossless recovery |
 | `(size, mtime_ns)` freshness key | `pidx` | O(changes) warm runs |
 | Byte-range + atomic rename store | `pidx` | crash-safe single-file cache |

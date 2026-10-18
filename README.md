@@ -145,7 +145,7 @@ Parity is pinned by `tests/piread-parity.test.mjs`, `tests/piedit-parity.test.mj
 
 ### Performance
 
-Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `native` is the replacement. The native tools replace a per-call process spawn with a persistent `--serve` daemon, so the win is the amortized spawn floor (~1.6–1.9 ms here), not output shaping. Absolute numbers are wall-clock on one machine and move with hardware and load; the Δ column is the comparison that matters. For model-context cost (bytes actually entering the transcript) see [Context shaping](#context-shaping-what-enters-the-model) below — that is the other half of the story, and the one that compounds across turns. Sources: [`benchmark/runs/piread-microbench-2026-10-17.md`](benchmark/runs/piread-microbench-2026-10-17.md), [`piedit-microbench-2026-10-17.md`](benchmark/runs/piedit-microbench-2026-10-17.md), [`pibash-microbench-2026-10-17.md`](benchmark/runs/pibash-microbench-2026-10-17.md) — regenerate with `node tests/<tool>-bench.mjs`.
+Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `native` is the replacement. The native tools replace a per-call process spawn with a persistent `--serve` daemon, so the win is the amortized spawn floor (~1.6–1.9 ms here), not output shaping. Absolute numbers are wall-clock on one machine and move with hardware and load; the Δ column is the comparison that matters. For model-context cost (bytes actually entering the transcript) see [Context shaping](#context-shaping-what-enters-the-model) below — that is the other half of the story, and the one that compounds across turns. Sources: [`benchmark/runs/piread-microbench-2026-10-17.md`](benchmark/runs/piread-microbench-2026-10-17.md), [`piedit-microbench-2026-10-17.md`](benchmark/runs/piedit-microbench-2026-10-17.md), [`pibash-microbench-2026-10-17.md`](benchmark/runs/pibash-microbench-2026-10-17.md), [`pibash-microbench-2026-10-18.md`](benchmark/runs/pibash-microbench-2026-10-18.md) (post-fix; † rows) — regenerate with `node tests/<tool>-bench.mjs`.
 
 | Tool     | Replaces        | Representative case                 | built-in p50 | native p50   | Δ p50     |
 | -------- | --------------- | ----------------------------------- | -----------: | -----------: | --------- |
@@ -153,11 +153,11 @@ Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `
 | `piread` | built-in `read` | 2500-line window                    | 0.355 ms     | 0.171 ms     | **−0.18** |
 | `piedit` | built-in `edit` | mid exact (1800 B)                  | 0.291 ms     | 0.159 ms     | **−0.13** |
 | `piedit` | built-in `edit` | 1 MiB file (588,890 B)              | 29.969 ms    | 4.258 ms     | **7.0×**  |
-| `pibash` | built-in `bash` | `printf`                            | 1.759 ms     | 1.716 ms     | **−0.04** |
-| `pibash` | built-in `bash` | `seq 50000` (doubled envelope)      | 12.216 ms    | 15.783 ms    | **+3.57** |
+| `pibash` | built-in `bash` | `printf` †                          | 4.516 ms     | 2.487 ms     | **−2.03** |
+| `pibash` | built-in `bash` | `seq 50000` †                       | 10.643 ms    | 13.463 ms    | **+2.82** |
 | `pidx`   | Node log parser | 512 sessions / 103 MB (cold → warm) | —            | 572 → 390 ms | **n/a**   |
 
-`pibash` is the only arm with a material regression (`seq 50000`, +3.57 ms at p50): its envelope ships the payload twice (`content[0].text` + `structuredContent.output`), structural and parity-pinned, and the gap widens with output size — the small-command classes are within ±0.3 ms of the oracle. `pidx` is a daemonless one-shot CLI, so it has no oracle/daemon split; its figures are a live cold/warm run on this repo's corpus and have no committed bench file yet.
+`pibash`'s `seq 50000` row above is the 2026-10-17 measured regression (+3.57 ms at p50, widening with output size; envelope shipped the payload twice — `content[0].text` + `structuredContent.output` — structural and parity-pinned). **Fixed since** (single-materialization envelope, copy-on-write compression stages, one shared line split — see [`docs/custom-tools-architecture.md`](docs/custom-tools-architecture.md) § pibash): the † rows are re-measured 2026-10-19 on the fixed binary — daemon p50 15.78 → 13.46 ms (oracle gap +3.57 → +2.82 ms) and one-shot p50 19.7 → 13.4 ms (−32%) via `custom-tools/pibash/bench-seq50000.mjs`; wire bytes unchanged, parity pinned. Every other arm now leads the oracle by 1.4–2.7 ms; the residual `seq 50000` gap is the Tier-1 compression pre-pass — work the built-in never does (pibash's additive error-rescue feature). `pidx` is a daemonless one-shot CLI, so it has no oracle/daemon split; its figures are a live cold/warm run on this repo's corpus and have no committed bench file yet.
 
 <details>
 <summary>Per-tool detail</summary>
@@ -187,19 +187,20 @@ Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `
 | multiline-block | 18890 | 1.049 | 0.264 | −0.784 |
 | large-1mib | 588890 | 29.969 | 4.258 | −25.710 |
 
-**pibash** (N=60/arm; oracle vs daemon p50 ms):
+**pibash** (N=60/arm; oracle vs daemon p50 ms; run of 2026-10-19, post-fix —
+[`benchmark/runs/pibash-microbench-2026-10-18.md`](benchmark/runs/pibash-microbench-2026-10-18.md)):
 
 | command class | oracle p50 | pibash p50 | Δ p50 |
 | --- | ---: | ---: | ---: |
-| true | 1.880 | 1.941 | +0.061 |
-| printf | 1.759 | 1.716 | −0.043 |
-| rg-version | 4.195 | 4.267 | +0.072 |
-| seq1000 | 3.827 | 3.539 | −0.288 |
-| seq2500 | 4.033 | 4.280 | +0.247 |
-| seq50000 | 12.216 | 15.783 | +3.566 |
-| large-blob | 4.174 | 4.240 | +0.066 |
-| stderr-mix | 1.742 | 1.706 | −0.035 |
-| exit-nonzero | 1.698 | 1.713 | +0.015 |
+| true | 4.052 | 2.421 | −1.631 |
+| printf | 4.516 | 2.487 | −2.029 |
+| rg-version | 5.549 | 4.040 | −1.508 |
+| seq1000 | 4.734 | 3.316 | −1.417 |
+| seq2500 | 6.380 | 3.693 | −2.688 |
+| seq50000 | 10.643 | 13.463 | +2.820 |
+| large-blob | 6.397 | 4.122 | −2.275 |
+| stderr-mix | 4.899 | 2.399 | −2.500 |
+| exit-nonzero | 4.745 | 2.300 | −2.445 |
 
 Spawn floor per session: ~1.6–1.9 ms (paid once, not per call). Daemon RSS is not reported here: the resident-set probe used by `piread`/`pibash` benchmarks reads `/proc`, so it is Linux-only and is skipped elsewhere.
 

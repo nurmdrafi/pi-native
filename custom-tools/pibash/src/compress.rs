@@ -16,6 +16,7 @@ use crate::truncate::{
     js_byte_length, split_lines, truncate_string_to_bytes_from_end,
     truncate_string_to_bytes_from_start,
 };
+use std::borrow::Cow;
 
 /// The compression target: the model-visible budget enforced by the
 /// permission-gate H1 cap (40 lines / 2 KB, `extensions/permission-gate/`
@@ -222,6 +223,16 @@ pub fn omission_marker(omitted_chars: usize, omitted_lines: usize) -> String {
 /// when it drops anything.
 #[must_use]
 pub fn head_tail(text: &str, max_lines: usize, max_bytes: usize, success: bool) -> Compressed {
+    head_tail_lines(text, &split_lines(text), max_lines, max_bytes, success)
+}
+
+fn head_tail_lines(
+    text: &str,
+    lines: &[&str],
+    max_lines: usize,
+    max_bytes: usize,
+    success: bool,
+) -> Compressed {
     if fits(text, max_lines, max_bytes) {
         return Compressed::verbatim(text);
     }
@@ -231,7 +242,6 @@ pub fn head_tail(text: &str, max_lines: usize, max_bytes: usize, success: bool) 
     if text.contains(OMISSION_TAG) {
         return Compressed::verbatim(text);
     }
-    let lines: Vec<&str> = split_lines(text);
     let total_lines = lines.len();
 
     // Split the budgets 2/3 : 1/3, head-heavy on success, tail-heavy on failure.
@@ -244,10 +254,10 @@ pub fn head_tail(text: &str, max_lines: usize, max_bytes: usize, success: bool) 
     let head_bytes_budget = max_bytes * head_share / (head_share + tail_share);
     let tail_bytes_budget = max_bytes - head_bytes_budget;
 
-    let head = take_head(&lines, head_lines_budget, head_bytes_budget);
+    let head = take_head(lines, head_lines_budget, head_bytes_budget);
     // The tail scans from the true end; overlap with the head is trimmed after.
-    let tail = take_tail(&lines, total_lines, tail_lines_budget, tail_bytes_budget);
-    let tail = trim_overlap(&lines, head.kept, tail);
+    let tail = take_tail(lines, total_lines, tail_lines_budget, tail_bytes_budget);
+    let tail = trim_overlap(lines, head.kept, tail);
 
     let kept_lines = head.kept + tail.kept;
     if kept_lines >= total_lines {
@@ -268,7 +278,16 @@ pub fn head_tail(text: &str, max_lines: usize, max_bytes: usize, success: bool) 
 }
 
 fn fits(text: &str, max_lines: usize, max_bytes: usize) -> bool {
-    split_lines(text).len() <= max_lines && js_byte_length(text) <= max_bytes
+    line_count(text) <= max_lines && js_byte_length(text) <= max_bytes
+}
+
+/// `split_lines(text).len()` without materializing the line vector — one
+/// linear scan, zero allocations, same phantom-line semantics.
+fn line_count(text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    text.matches('\n').count() + usize::from(!text.ends_with('\n'))
 }
 
 struct Slice {
@@ -369,7 +388,11 @@ fn trim_overlap(lines: &[&str], head_kept: usize, tail: Slice) -> Slice {
 /// plus a count. Always emits an omission marker when it drops anything.
 #[must_use]
 pub fn error_priority(text: &str, max_lines: usize, max_bytes: usize) -> Compressed {
-    if js_byte_length(text) <= max_bytes && split_lines(text).len() <= max_lines {
+    error_priority_lines(text, &split_lines(text), max_lines, max_bytes)
+}
+
+fn error_priority_lines(text: &str, lines: &[&str], max_lines: usize, max_bytes: usize) -> Compressed {
+    if js_byte_length(text) <= max_bytes && lines.len() <= max_lines {
         return Compressed::verbatim(text);
     }
     // Idempotence: never re-compress a body we already emitted.
@@ -377,7 +400,10 @@ pub fn error_priority(text: &str, max_lines: usize, max_bytes: usize) -> Compres
         return Compressed::verbatim(text);
     }
 
-    let lines: Vec<&str> = split_lines(text);
+    if text.contains(OMISSION_TAG) {
+        return Compressed::verbatim(text);
+    }
+
     let total_lines = lines.len();
 
     // Rule (requirement 4): preserve ALL actionable lines verbatim, then fill
@@ -414,7 +440,7 @@ pub fn error_priority(text: &str, max_lines: usize, max_bytes: usize) -> Compres
         // its per-pass budget is spent, so it never walks the whole stream.
         let per_pass_lines = context_line_budget / 2;
         fill_context(
-            &lines,
+            lines,
             &mut keep,
             0..total_lines,
             per_pass_lines,
@@ -423,7 +449,7 @@ pub fn error_priority(text: &str, max_lines: usize, max_bytes: usize) -> Compres
             context_line_budget,
         );
         fill_context(
-            &lines,
+            lines,
             &mut keep,
             (0..total_lines).rev(),
             per_pass_lines,
@@ -622,6 +648,15 @@ fn contains_file_line(s: &str) -> bool {
 /// and lone carriage returns (port of `stripAnsi` in output-scrub.ts). Pure
 /// single-pass scan — no regex crate dependency.
 #[must_use]
+/// ANSI strip, copy-on-write: piped output is ANSI-free in practice, so the
+/// common case borrows the input untouched (no stream-sized allocation).
+fn strip_ansi_cow(s: &str) -> Cow<'_, str> {
+    if !s.as_bytes().contains(&0x1b) {
+        return Cow::Borrowed(s);
+    }
+    Cow::Owned(strip_ansi(s))
+}
+
 pub fn strip_ansi(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -679,17 +714,13 @@ pub fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// Collapse runs of repeated lines into `line [... repeated N times ...]`.
-/// Actionable lines are never folded (requirement 4). Deterministic and
-/// idempotent (a folded body is stable under a second pass).
-#[must_use]
-pub fn dedup_repeats(s: &str) -> String {
-    let lines: Vec<&str> = split_lines(s);
+/// Shared-split core of the dedup pass (see the `dedup_repeats` test shim).
+fn dedup_lines<'a>(s: &'a str, lines: &[&'a str]) -> Cow<'a, str> {
     if lines.len() < 2 {
-        return s.to_string();
+        return Cow::Borrowed(s);
     }
-    let mut out: Vec<String> = Vec::new();
-    let mut folded = false;
+    // Pass 1: locate foldable runs with the original predicate.
+    let mut folds: Vec<(usize, usize)> = Vec::new(); // (line index, run)
     let mut i = 0usize;
     while i < lines.len() {
         let line = lines[i];
@@ -698,21 +729,45 @@ pub fn dedup_repeats(s: &str) -> String {
             run += 1;
         }
         if run > 1 && !is_actionable(line) && !line.trim().is_empty() {
-            out.push(format!("{line} [... repeated {run} times ...]"));
-            folded = true;
-        } else {
-            for k in 0..run {
-                out.push(lines[i + k].to_string());
-            }
+            folds.push((i, run));
         }
         i += run;
     }
     // Byte-identity when nothing was folded: small output must pass through
     // unchanged (a re-join would drop a trailing newline and break parity).
-    if !folded {
-        return s.to_string();
+    if folds.is_empty() {
+        return Cow::Borrowed(s);
     }
-    out.join("\n")
+    // Pass 2: emit through one buffer. The previous shape pushed a
+    // `String::to_string` per kept line before joining — one malloc per line,
+    // which was the dominant cost on seq-class output.
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0usize;
+    for &(start, run) in &folds {
+        while i < start {
+            if i > 0 {
+                out.push('\n');
+            }
+            out.push_str(lines[i]);
+            i += 1;
+        }
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "{} [... repeated {run} times ...]",
+            lines[start]
+        ));
+        i += run;
+    }
+    while i < lines.len() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(lines[i]);
+        i += 1;
+    }
+    Cow::Owned(out)
 }
 
 /// Rough token count: characters / 4. Deliberately cheap — the orchestrator's
@@ -742,26 +797,37 @@ pub fn compress_output(
         return Compressed::verbatim(text);
     }
 
-    // Tier 1: deterministic structural pruning.
-    let cleaned = strip_ansi(text);
-    let cleaned = dedup_repeats(&cleaned);
+    // Tier 1: deterministic structural pruning. Copy-on-write + a single
+    // split shared across passes: piped output is ANSI-free and fold-free in
+    // the common case, so the stream is neither copied nor re-split per pass.
+    let cleaned = strip_ansi_cow(text);
+    let lines = split_lines(&cleaned);
+    let deduped = dedup_lines(&cleaned, &lines);
 
     // Test/build output: preserve actionable lines, fill the rest with context.
+    // The fold case rewrites the text and invalidates the line slices, so it
+    // goes back through the public wrappers (re-splitting) — the rare path.
     if matches!(kind, CommandKind::Test | CommandKind::Build) {
-        let c = error_priority(&cleaned, max_lines, max_bytes);
+        let c = match &deduped {
+            Cow::Borrowed(_) => error_priority_lines(&cleaned, &lines, max_lines, max_bytes),
+            Cow::Owned(rebuilt) => error_priority(rebuilt, max_lines, max_bytes),
+        };
         if c.strategy == Strategy::ErrorPriority {
             return c;
         }
         // error-priority found nothing to drop; fall through to head-tail.
     }
 
-    let c = head_tail(&cleaned, max_lines, max_bytes, success);
+    let c = match &deduped {
+        Cow::Borrowed(_) => head_tail_lines(&cleaned, &lines, max_lines, max_bytes, success),
+        Cow::Owned(rebuilt) => head_tail(rebuilt, max_lines, max_bytes, success),
+    };
     if c.strategy == Strategy::None {
         // Cleaning alone brought it within budget (ANSI/dup removal is not
         // omission — the visible content is complete), so it stays
         // Strategy::None with the cleaned body.
         return Compressed {
-            content: cleaned,
+            content: cleaned.into_owned(),
             strategy: Strategy::None,
             omitted_chars: 0,
             partial: false,
@@ -773,6 +839,79 @@ pub fn compress_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test shim over `dedup_lines` with the collapse semantics pinned here:
+    /// repeated-line runs fold to `line [... repeated N times ...]`, actionable
+    /// lines never fold, fold-free output is byte-identical.
+    fn dedup_repeats(s: &str) -> Cow<'_, str> {
+        dedup_lines(s, &split_lines(s))
+    }
+
+    #[test]
+    fn dedup_folds_at_the_first_line_without_a_leading_newline() {
+        let body = "dup\ndup\ndup\nother";
+        let out = dedup_repeats(body);
+        assert_eq!(out, "dup [... repeated 3 times ...]\nother");
+    }
+
+    #[test]
+    fn dedup_keeps_trailing_content_after_the_last_fold() {
+        let body = "head\nrun\nrun\nrun\ntail-é\nmore";
+        let out = dedup_repeats(body);
+        assert_eq!(out, "head\nrun [... repeated 3 times ...]\ntail-é\nmore");
+    }
+
+    #[test]
+    fn line_count_matches_split_lines_across_edge_shapes() {
+        for body in [
+            "", "\n", "a", "a\n", "a\nb", "a\nb\n", "a\n\nb\n", "\n\n", "é\né",
+        ] {
+            assert_eq!(
+                line_count(body),
+                split_lines(body).len(),
+                "line_count diverged for {body:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compress_output_fold_case_reaches_head_tail_through_the_owned_path() {
+        // 100 × ~80 B repeated + distinct lines: folds fire, the cleaned text
+        // is rebuilt, and head_tail re-splits it — the Cow::Owned branch.
+        let body: String = (0..50)
+            .map(|i| format!("step-{}\nstep-{}\nunique-{} pad{}\n", i % 5, i % 5, i, "x".repeat(70)))
+            .collect();
+        let a = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        let b = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        assert_eq!(a.strategy, Strategy::HeadTail);
+        assert_eq!(a.content, b.content, "deterministic across runs");
+        assert!(js_byte_length(&a.content) <= 2048 + 256);
+        assert!(split_lines(&a.content).len() <= 40 + 2);
+        assert!(a.content.contains("[... repeated "));
+    }
+
+    #[test]
+    fn compress_output_with_ansi_over_budget_owns_the_cleaned_text() {
+        // ESC sequences force the strip's Owned path; the display must come out
+        // ANSI-free and still carry the omission marker.
+        let body: String = (0..120)
+            .map(|i| format!("\u{1b}[31mline-{i:03} {}\u{1b}[0m\n", "y".repeat(40)))
+            .collect();
+        let out = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        assert_eq!(out.strategy, Strategy::HeadTail);
+        assert!(!out.content.contains('\u{1b}'), "ANSI must be stripped");
+        assert!(out.content.contains("[..."));
+        assert!(js_byte_length(&out.content) <= 2048 + 256);
+    }
+
+    #[test]
+    fn compress_output_empty_and_tiny_inputs_stay_verbatim() {
+        for body in ["", "one line\n"] {
+            let out = compress_output(body, CommandKind::Generic, true, 40, 2048);
+            assert_eq!(out.strategy, Strategy::None);
+            assert_eq!(out.content, body);
+        }
+    }
 
     #[test]
     fn classify_test_commands() {
@@ -1168,7 +1307,7 @@ mod tests {
     #[test]
     fn compress_output_strips_ansi_when_over_budget() {
         // Over budget: ANSI is stripped as part of Tier-1.
-        let body = format!("{}", "\u{1b}[32mok\u{1b}[0m\n".repeat(300));
+        let body = "\u{1b}[32mok\u{1b}[0m\n".repeat(300);
         let c = compress_output(&body, CommandKind::Generic, true, 20, 256);
         assert!(!c.content.contains('\u{1b}'), "escape codes removed");
     }

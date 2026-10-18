@@ -392,7 +392,7 @@ mod tests {
             "plain".into(),
             "with \"quotes\" and \\ backslash".into(),
             "all: \u{8}\t\n\u{c}\r \u{b}".into(),
-            "unicode héllo 🎉 日本語".into(),
+            "unicode héllo 🎉 €€€".into(),
             (0..=255u8).map(|b| b as char).collect(),
             "x".repeat(100),
             "\n".repeat(50),

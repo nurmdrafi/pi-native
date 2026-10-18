@@ -6,6 +6,33 @@ first, with the reason it is first.
 
 ## 1. `pibash` `seq 50000` regression — the one measured performance loss
 
+> **Fixed.** Profiled by phase (`PIBASH_PHASES` instrumentation, since removed):
+> of the ~16 ms output-size cost, the compression pre-pass was ~9.6 ms — three
+> full `split_lines` passes over the stream plus a per-line `String` malloc in
+> `dedup_repeats` — and the envelope path materialized the stream twice
+> (`full_text` clone + `read_full_output` re-read). Changes, all byte-shape
+> preserving (128 unit tests + four parity suites green):
+> (1) `compress.rs`: `strip_ansi`/`dedup` are copy-on-write (borrow when
+> ANSI-free / fold-free), the line vector is split once and shared by
+> `error_priority_lines` / `head_tail_lines`, `fits` counts lines without
+> materializing them, and the fold path emits through one buffer instead of
+> one allocation per line. compress phase 9.6 → 2.5 ms.
+> (2) `accumulator.rs`: `into_full_text` (single materialization, moves the
+> raw buffer zero-copy) + string-side `cap_full_output` replace the second
+> spill read; spill-compaction windows are maintained incrementally
+> (byte + line ring), so repeated `snapshot()`s never re-split the whole tail.
+> (3) `main.rs`: `structuredContent` derives from the already-materialized
+> text (backlog option (b) as recommended) instead of re-reading the stream.
+> One-shot `seq 50000`: p50 19.7 → 13.4 ms (−32%). Repo harness re-run
+> (2026-10-19, `benchmark/runs/pibash-microbench-2026-10-18.md`): daemon p50
+> 15.78 → 13.46 ms; oracle gap +3.57 → **+2.82 ms** — the residual is exactly
+> the Tier-1 compression pre-pass, work the built-in never does (pibash's
+> additive error-rescue feature). Every other arm now leads the oracle by
+> 1.4–2.7 ms. Removing the residual entirely means dropping the pre-pass or
+> making it stream from the spill file — a deliberate follow-up, not part of
+> this fix. Model-visible tokens unchanged: display text is the same
+> compressed ≤40-line/2 KB body, parity-pinned.
+
 **Symptom.** `pibash` is the only arm slower than the built-in oracle on a
 representative case: **+3.57 ms at p50** (`12.216` → `15.783` ms), and the gap
 grows with output size. Small-command classes sit within ±0.3 ms, so this is

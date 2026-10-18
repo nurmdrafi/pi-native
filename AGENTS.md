@@ -37,6 +37,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - Never claim works without running it; cannot run → state why.
 - Verify literals before typing. Route paths, permission strings, API endpoints, env names, props/config keys → `rg -n` definition first, copy from hit. No definition exists yet (new symbol)? Define it once first, then reference it — never free-type the same literal twice. Gates certify spans not correctness; invented route passes all checks, still 404s.
 - Shapes: `rg` producer before method calls.
+- English/Latin text only; cover multi-byte UTF-8 with accented Latin or symbol characters (é, €, emoji), never non-Latin script string.
 - Commit body lines ≤72 (commitlint hook).
 
 ## Docs

@@ -292,7 +292,7 @@ mod tests {
             "plain",
             "with \"quotes\" and \\ backslash",
             "all: \u{8}\t\n\u{c}\r \u{b}",
-            "unicode héllo 🎉 日本語",
+            "unicode héllo 🎉 €€€",
         ] {
             check(s);
         }

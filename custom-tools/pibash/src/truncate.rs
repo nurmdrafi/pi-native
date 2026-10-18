@@ -271,7 +271,7 @@ d");
     #[test]
     fn byte_cap_never_splits_a_multibyte_character() {
         // 3-byte chars; cutting mid-sequence must skip to a boundary.
-        let content = "語語語語";
+        let content = "€€€€";
         let t = truncate_tail(content, 2000, 4);
         assert!(t.last_line_partial);
         assert!(t.content.is_char_boundary(0));
@@ -308,7 +308,7 @@ b", 2000, 50 * 1024);
     fn truncate_string_to_bytes_from_end_skips_to_a_char_boundary() {
         assert_eq!(truncate_string_to_bytes_from_end("abcdef", 3), "def");
         // 4 bytes cuts inside the first 3-byte char, so it skips to the next.
-        assert_eq!(truncate_string_to_bytes_from_end("語語", 4), "語");
+        assert_eq!(truncate_string_to_bytes_from_end("€€", 4), "€");
     }
 
     #[test]

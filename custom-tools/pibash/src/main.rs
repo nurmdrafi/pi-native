@@ -18,7 +18,7 @@ mod truncate;
 use std::io::Write;
 use std::process::ExitCode;
 
-use accumulator::OutputAccumulator;
+use accumulator::{cap_full_output, OutputAccumulator};
 use cli::{Mode, Request};
 use envelope::Success;
 use render::{format_output, structured_limit};
@@ -123,12 +123,12 @@ pub fn execute_observed(
         ));
     };
 
-    // Capture the full stream for the shadow pre-pass FIRST — `read_full_output`
-    // consumes the in-memory raw buffer when no spill exists.
-    let full_text = accumulator.full_text();
+    // Single materialization of the stream: the spill file (or raw buffer) is
+    // read exactly once, and the structured output is derived from that same
+    // buffer after compression instead of re-reading it a second time.
     let structured_output_path = accumulator.temp_output_path();
-    let (structured_output, structured_truncated) =
-        accumulator.read_full_output(structured_limit());
+    let last_line_bytes = accumulator.last_line_bytes();
+    let full_text = accumulator.into_full_text();
     let full_output_path = structured_output_path
         .as_ref()
         .map(|path| path.to_string_lossy().into_owned());
@@ -174,7 +174,6 @@ pub fn execute_observed(
         let _ = std::fs::remove_file(path);
     }
 
-    let last_line_bytes = accumulator.last_line_bytes();
     // `truncated`, `truncation`, and `fullOutputPath` mirror the built-in oracle
     // exactly (based on the ORIGINAL stream's 2000-line / 50 KB window).
     // Compression is a separate, additive signal (`compression` metadata + the
@@ -218,6 +217,12 @@ pub fn execute_observed(
     };
     let token_estimate = compress::token_estimate(&text);
 
+    // Derive the programmatic payload from the already-materialized stream:
+    // under the 1 MiB cap the buffer moves through with no second copy, past
+    // it the middle is replaced by the oracle's omission marker.
+    let (structured_output, structured_truncated) =
+        cap_full_output(full_text, structured_limit());
+
     Ok(Success {
         ok: true,
         text,
@@ -238,7 +243,6 @@ pub fn execute_observed(
 mod tests {
     use super::*;
     use crate::cli::Request;
-    use std::path::PathBuf;
 
     fn run_command(command: &str) -> Success {
         run_command_env(command, None)
@@ -247,7 +251,7 @@ mod tests {
     fn run_command_env(command: &str, env: Option<std::collections::HashMap<String, String>>) -> Success {
         let request = Request {
             command: command.to_string(),
-            cwd: PathBuf::from(std::env::temp_dir()),
+            cwd: std::env::temp_dir(),
             timeout_seconds: None,
             env,
         };
@@ -357,7 +361,7 @@ mod tests {
     fn timeout_output_keeps_the_timeout_status() {
         let request = Request {
             command: "sleep 5".to_string(),
-            cwd: PathBuf::from(std::env::temp_dir()),
+            cwd: std::env::temp_dir(),
             timeout_seconds: Some(0.2),
             env: None,
         };

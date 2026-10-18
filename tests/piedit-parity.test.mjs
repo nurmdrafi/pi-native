@@ -214,7 +214,7 @@ const corpus = [
   ["bom-file", "\uFEFFone\ntwo\n", [{ oldText: "two", newText: "TWO" }]],
   ["bom-crlf", "\uFEFFone\r\ntwo\r\n", [{ oldText: "two", newText: "TWO" }]],
   ["no-trailing-eol", "alpha\nbeta\ngamma", [{ oldText: "gamma", newText: "GAMMA" }]],
-  ["unicode-emoji", "héllo\n🎉emoji\n日本語\n", [{ oldText: "🎉emoji", newText: "🎊EMOJI" }]],
+  ["unicode-emoji", "héllo\n🎉emoji\n€€€\n", [{ oldText: "🎉emoji", newText: "🎊EMOJI" }]],
   ["replace-with-multiline", "x\n", [{ oldText: "x", newText: "a\nb\nc" }]],
   ["replace-with-empty", "a\nb\nc\n", [{ oldText: "b", newText: "" }]],
   ["multi-same-line", "one two three\n", [{ oldText: "one", newText: "1" }, { oldText: "three", newText: "3" }]],
