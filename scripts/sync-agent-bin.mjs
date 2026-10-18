@@ -66,6 +66,25 @@ export function shDoubleQuoted(value) {
   return String(value).replace(/[\\"$`]/g, (ch) => `\\${ch}`);
 }
 
+/** Every bin dir an rc pins onto PATH, in file order (first = highest
+ * precedence). Pure text scan matching `pathPinBlock`'s two quote shapes — it
+ * never asks a shell to interpret the rc, so no OS or shell is assumed. */
+export function pinnedBinDirs(text) {
+  if (typeof text !== "string") return [];
+  const out = [];
+  const re = /^\s*\*\).*?PATH=(?:"([^"]+?):\$PATH"|'([^']+?)':\$PATH)/gm;
+  let m;
+  while ((m = re.exec(text)) !== null) out.push(m[1] ?? m[2]);
+  return out;
+}
+
+/** Pinned dirs that do not exist on disk. A dead entry still reorders PATH, so
+ * it shadows a live pin lower down (`rg`/`piread` then resolve elsewhere).
+ * Existence is the test — these are read, never written. */
+export function missingPinnedDirs(text, exists) {
+  return pinnedBinDirs(text).filter((dir) => !exists(dir));
+}
+
 /** True when `text` already pins `binDir` onto PATH. */
 export function hasPathPin(text, binDir) {
   if (typeof text !== "string") return false;
@@ -116,7 +135,17 @@ export function sync({
   const rcName = shellRcCandidates(shell).find((f) => existsSync(join(home, f))) ?? ".profile";
   if (rcName) {
     const rcPath = join(home, rcName);
-    if (hasPathPin(readOrEmpty(rcPath), bin)) {
+    const rcText = readOrEmpty(rcPath);
+    // Dead pins from an older run (a deleted bench dir, a moved checkout) stay
+    // in the rc and keep reordering PATH above the live entry. Report them —
+    // never edit the user's rc in place beyond appending our own block.
+    for (const dead of missingPinnedDirs(rcText, existsSync)) {
+      problems.push({
+        kind: "shell-path",
+        detail: `~/${rcName} pins a missing dir (${dead}) — it shadows the live pin; remove that block`,
+      });
+    }
+    if (hasPathPin(rcText, bin)) {
       changes.push({ kind: "shell-path", status: "ok", detail: `~/${rcName} already pins the bin dir` });
     } else if (check) {
       changes.push({ kind: "shell-path", status: "needed", detail: `~/${rcName} lacks the pin` });

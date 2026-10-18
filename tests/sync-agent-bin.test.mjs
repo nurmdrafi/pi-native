@@ -7,6 +7,8 @@ import { join } from "node:path";
 import {
   shellRcCandidates,
   pathPinBlock,
+  pinnedBinDirs,
+  missingPinnedDirs,
   hasPathPin,
   shDoubleQuoted,
   resolveAgentDir,
@@ -42,6 +44,44 @@ test("the pin block is POSIX sh, not bash-only", () => {
 
 test("the pin block is idempotent: re-sourcing does not duplicate the entry", () => {
   assert.match(pathPinBlock(BIN), /\*":\/opt\/agent\/bin:"\*\)/, "needs a duplicate guard");
+});
+
+test("a pin for a directory that no longer exists is reported, not left to shadow", () => {
+  // A bench run pins bench/pi-homes/*/bin, then the bench dir is deleted. The
+  // stale entry sits ABOVE the live one in PATH, so `rg`/`piread` resolve to
+  // whatever that dead slot leaves visible. The check must name it.
+  const stale = [
+    `case ":$PATH:" in`,
+    `  *":/gone/bench/bin:"*) ;;`,
+    `  *) PATH="/gone/bench/bin:$PATH"; export PATH ;;`,
+    `esac`,
+    ``,
+    pathPinBlock(BIN),
+  ].join("\n");
+  const dirs = pinnedBinDirs(stale);
+  assert.deepEqual(dirs, ["/gone/bench/bin", "/opt/agent/bin"], stale);
+  const dead = missingPinnedDirs(stale, (p) => p === BIN);
+  assert.deepEqual(dead, ["/gone/bench/bin"], "the dead pin must be surfaced");
+});
+
+test("pin parsing is OS- and shell-agnostic", () => {
+  // The parser scans rc text and never invokes a shell, so zsh/bash on macOS
+  // and Linux read identically. Both quote styles and paths with spaces parse.
+  const rc = [
+    `case ":$PATH:" in`,
+    `  *":/srv/agent/bin:"*) ;;`,
+    `  *) PATH="/srv/agent/bin:$PATH"; export PATH ;;`,
+    `esac`,
+    `case ":$PATH:" in`,
+    `  *"/a b/bin:"*) ;;`,
+    `  *) PATH='/a b/bin':$PATH; export PATH ;;`,
+    `esac`,
+  ].join("\n");
+  assert.deepEqual(pinnedBinDirs(rc), ["/srv/agent/bin", "/a b/bin"]);
+  assert.deepEqual(missingPinnedDirs(rc, () => false), ["/srv/agent/bin", "/a b/bin"]);
+  assert.deepEqual(missingPinnedDirs(rc, () => true), []);
+  assert.deepEqual(pinnedBinDirs(""), []);
+  assert.deepEqual(pinnedBinDirs(undefined), []);
 });
 
 test("the pin block embeds the given dir, never a hardcoded home path", () => {
