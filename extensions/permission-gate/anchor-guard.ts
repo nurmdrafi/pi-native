@@ -171,8 +171,11 @@ export async function validateEditAnchors(
 
     if (exact === -1 && fuzzyContent.indexOf(fuzzy) === -1) {
       const frag = findClosestFragment(fuzzyContent, oldText);
+      // frag.end is the matched EDGE ("head"|"tail"), not a count: report the
+      // line count plus which edge matched, so the hint is actionable.
+      const edge = frag?.end === "head" ? "first" : "last";
       const near = frag
-        ? `Its ${frag.end} lines occur at line ${lineOf(fuzzyContent, frag.index)}; the inferred lines around them are wrong:\n${snippetAround(content, lineOf(fuzzyContent, frag.index), frag.lines)}\nUse these exact lines (incl. whitespace) as oldText.`
+        ? `Its ${edge} ${frag.lines} line(s) occur at line ${lineOf(fuzzyContent, frag.index)}; the inferred lines around them are wrong:\n${snippetAround(content, lineOf(fuzzyContent, frag.index), frag.lines)}\nUse these exact lines (incl. whitespace) as oldText.`
         : `No part exists — rebuild oldText from the window already in context; use the piread tool (path/offset/limit) only for a region not yet in context.`;
       return {
         block: true,
