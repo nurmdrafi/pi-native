@@ -21,7 +21,7 @@ process.env.PI_NATIVE_READ = "1";
 const { mkdtempSync, writeFileSync } = await import("node:fs");
 const { tmpdir } = await import("node:os");
 const { join } = await import("node:path");
-const ROOT = ${JSON.stringify(ROOT)};
+const ROOT = process.argv[2];
 const pkgLink = join(ROOT, "node_modules", "@earendil-works", "pi-coding-agent");
 
 function loadExt(name) {
@@ -57,7 +57,7 @@ process.stdout.write(JSON.stringify({ pireadVia: rVia, pibashText: String(b.cont
 `,
 );
 
-const res = spawnSync(process.execPath, [CHILD], {
+const res = spawnSync(process.execPath, [CHILD, ROOT], {
   encoding: "utf8",
   timeout: 20000,
   cwd: ROOT,

@@ -544,7 +544,7 @@ add("gate S5 M2: edit-after-piread-read passes region requirement", async () => 
   const edit = await gateEditProbe(pi, path, [{ oldText: "L11", newText: "L11-edited" }]);
   assert.ok(!edit.blocked, edit.reason ?? "edit within the piread-certified region must pass");
 });
-add("gate: protected-path read (node_modules) blocks at tool_call before execution", async () => {
+add("gate: node_modules read passes through to execution (NM1 removed 2026-10-18)", async () => {
   const nmDir = join(dir, "node_modules", "left-pad");
   mkdirSync(nmDir, { recursive: true });
   const nmPath = join(nmDir, "index.js");
@@ -552,13 +552,10 @@ add("gate: protected-path read (node_modules) blocks at tool_call before executi
   const pi = freshGate();
   const pireadPi = loadExtension("1");
   const tool = pireadPi.tools.get("piread");
-  let executions = 0;
-  const orig = tool.execute;
-  tool.execute = (...a) => { executions++; return orig(...a); };
   const block = await pi.invoke("tool_call", { type: "tool_call", toolName: "piread", toolCallId: "g-nm", input: { path: nmPath } }, GATE_CTX);
-  assert.ok(block, "node_modules read must block at tool_call");
-  assert.match(block.reason, /^Search \(node_modules\)/, `reason was: ${block.reason}`);
-  assert.equal(executions, 0, "blocked read must never reach execute");
+  assert.ok(!block, `node_modules read must pass (got: ${block?.reason})`);
+  const result = await tool.execute("g-nm", { path: nmPath });
+  assert.ok(result, "read must execute after the gate passes it");
 });
 
 // ---- runner ----

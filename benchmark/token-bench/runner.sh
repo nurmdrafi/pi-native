@@ -22,7 +22,9 @@ rep="${2:?usage: runner.sh <variant> <rep>}"
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$HARNESS_DIR/../.." && pwd)"
 RUNTIME_DIR="${BENCH_RUNTIME_DIR:-$HOME/.pi/bench}"
-PI_BIN="/Users/nur/.nvm/versions/node/v24.3.0/bin/pi"
+# resolve pi from PATH unless overridden — no absolute user paths (portability rule)
+PI_BIN="${PI_BIN:-$(command -v pi 2>/dev/null || true)}"
+[ -n "$PI_BIN" ] || { echo "PI_BIN not set and 'pi' not on PATH" >&2; exit 1; }
 
 home="$RUNTIME_DIR/pi-homes/$variant"
 work="$RUNTIME_DIR/runs/$variant-r$rep"

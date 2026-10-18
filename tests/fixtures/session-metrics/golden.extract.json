@@ -2,7 +2,7 @@
   "v": 1,
   "sessionId": "golden",
   "project": "/home/user/proj",
-  "path": "/home/nurmdrafi/.pi/agent/tests/fixtures/session-metrics/golden.jsonl",
+  "path": "/home/user/proj/tests/fixtures/session-metrics/golden.jsonl",
   "turns": [
     {
       "rid": "r1",

@@ -55,7 +55,6 @@ export const RULE_IDS = {
   searchMidPipe: "SS2",
   findFirst: "SS3",
   searchPortability: "PB1",
-  dependencyInternals: "NM1",
   violationMemory: "VM",
   adoptionTelemetry: "AT1",
   cadenceNudge: "CN",

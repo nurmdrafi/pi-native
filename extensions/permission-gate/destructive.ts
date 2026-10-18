@@ -83,6 +83,12 @@ const DESTRUCTIVE_BASH = new RegExp(
 const SHELL_WRAPPED = /\b(?:ba|z|da|k)?sh\s+(?:-[a-zA-Z]+\s+)*-c\b|\$\(/;
 const DESTRUCTIVE_ANYWHERE = new RegExp(DESTRUCTIVE_CORE_SRC, "i");
 
+/** S4 fix 9 (2026-10-18): bypass tripwires — inline-code interpreters, encoded
+ * eval, alias indirection. Unscannable or obfuscated payloads confirm (H2). */
+const INTERP_INLINE =
+  /\b(?:perl|ruby|php|node|deno|bun)\b[^|;&]*\s(?:-e|--eval)\b|\bpython3?\b[^|;&]*\s-[cm]\b|\bawk\b[^|;&]*\bsystem\s*\(/i;
+const EVAL_ENCODED = /\beval\b[^|;&]*(?:\$\(|`)/;
+
 /** S4 fixes 7+8 (2026-10-15, spec §6.7–8): the single protected-prefix
  * source, shared by the bash redirect/tee target check below and the
  * write/edit realpath confirm in index.ts. RegExp-shaped but rebuilt when
@@ -131,18 +137,27 @@ const expandWrittenTarget = (t: string) =>
 const REDIRECT_TARGET = /(?<![=>!\-\d])(?:>>?)\s+([^\s&>]+)/g;
 const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
 
-export const segmentDestructive = (seg: string): boolean =>
-  DESTRUCTIVE_BASH.test(seg) ||
-  // S4 fix 7 (§6.7): persistence redirect/tee targets — same protected-prefix
-  // source as the write/edit realpath check (replaces the old /etc-only
-  // redirect alternative)
-  [...seg.matchAll(REDIRECT_TARGET)].some((m) =>
-    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-  ) ||
-  [...seg.matchAll(TEE_TARGET)].some((m) =>
-    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-  ) ||
-  (SHELL_WRAPPED.test(seg) && DESTRUCTIVE_ANYWHERE.test(seg));
+export const segmentDestructive = (seg: string): boolean => {
+  // S4 fix 9 (2026-10-18): NFKC fold first — homoglyph command words (ｒｍ) match
+  const s = seg.normalize("NFKC");
+  return (
+    DESTRUCTIVE_BASH.test(s) ||
+    // S4 fix 7 (§6.7): persistence redirect/tee targets — same protected-prefix
+    // source as the write/edit realpath check (replaces the old /etc-only
+    // redirect alternative)
+    [...s.matchAll(REDIRECT_TARGET)].some((m) =>
+      PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
+    ) ||
+    [...s.matchAll(TEE_TARGET)].some((m) =>
+      PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
+    ) ||
+    (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
+    // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
+    INTERP_INLINE.test(s) ||
+    EVAL_ENCODED.test(s) ||
+    (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s))
+  );
+};
 export const APPROVED_WINDOW_MS = 2 * 60_000;
 
 /** MUTATING/DESTRUCTIVE judged on the same env/git-flag-normalized segments as the tool_call path (2026-10-11) */

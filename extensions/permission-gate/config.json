@@ -23,7 +23,6 @@
     "searchMidPipe": true,
     "findFirst": true,
     "searchPortability": true,
-    "dependencyInternals": true,
     "violationMemory": true,
     "adoptionTelemetry": true,
     "cadenceNudge": true,

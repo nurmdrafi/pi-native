@@ -833,8 +833,8 @@ const cases = [
     async (pi) => nestedBash(pi, "grep -rn 'permission' ."),
   ],
   [
-    "nested node_modules grep still NM1-blocked (policy stays)",
-    "blocked",
+    "nested scoped node_modules grep passes (NM1 removed 2026-10-18)",
+    "pass",
     async (pi) => nestedBash(pi, "grep -r webpack node_modules/ | head -3"),
   ],
   [
@@ -2665,11 +2665,11 @@ const cases = [
     async (pi) => bash(pi, "fd -e ts . src/", approveUi()),
   ],
   [
-    "NM1: find into node_modules keeps NM1 reason over SS3",
+    "SS3: find into node_modules → fd reason (NM1 removed 2026-10-18)",
     "blocked",
     async (pi) => {
       const r = await bash(pi, "find node_modules -name vite.ts", approveUi());
-      return r.blocked && !r.reason.startsWith("Search (node_modules)")
+      return r.blocked && !r.reason.startsWith("Search (fd-first)")
         ? { blocked: false, reason: `wrong family: ${r.reason.slice(0, 60)}` }
         : r;
     },
@@ -2680,30 +2680,17 @@ const cases = [
     async (pi) => bash(pi, "rg 'pattern'", approveUi()),
   ],
   [
-    "NM1: grep into node_modules blocked",
-    "blocked",
-    async (pi) => {
-      const r = await bash(
-        pi,
-        "grep -rn 'x' node_modules/vite-tsconfig-paths/",
-        approveUi(),
-      );
-      return r.blocked && !r.reason.startsWith("Search (node_modules)")
-        ? { blocked: false, reason: `wrong family: ${r.reason.slice(0, 60)}` }
-        : r;
-    },
+    "NM1 removed (2026-10-18): scoped grep into node_modules passes",
+    "pass",
+    async (pi) => bash(pi, "grep -rn 'x' node_modules/vite-tsconfig-paths/", approveUi()),
   ],
   [
-    "NM1: find/cat into node_modules blocked",
-    "blocked",
-    async (pi) => {
-      const a = await bash(pi, "find node_modules -name '*.md'", approveUi());
-      if (!a.blocked) return a;
-      return bash(pi, "cat node_modules/.pnpm/foo/index.js", approveUi());
-    },
+    "NM1 removed (2026-10-18): cat into node_modules passes",
+    "pass",
+    async (pi) => bash(pi, "cat node_modules/.pnpm/foo/index.js", approveUi()),
   ],
   [
-    "NM1: grep into @earendil-works pi docs allowed (user-approved 2026-10-13)",
+    "node_modules: grep into @earendil-works pi docs allowed",
     "pass",
     async (pi) =>
       bash(
@@ -2713,7 +2700,7 @@ const cases = [
       ),
   ],
   [
-    "NM1: read tool into @earendil-works allowed",
+    "node_modules: read tool into @earendil-works allowed",
     "pass",
     async (pi) =>
       read(
@@ -2725,8 +2712,8 @@ const cases = [
       ),
   ],
   [
-    "NM1: grep with absolute bare node_modules dir blocked (regression 2026-10-14)",
-    "blocked",
+    "NM1 removed (2026-10-18): grep with absolute node_modules dir passes",
+    "pass",
     async (pi) =>
       bash(
         pi,
@@ -2735,23 +2722,18 @@ const cases = [
       ),
   ],
   [
-    "NM1: ls node_modules passes (presence check is legitimate)",
+    "node_modules: ls passes (presence check)",
     "pass",
     async (pi) => bash(pi, "ls node_modules", approveUi()),
   ],
   [
-    "NM1: read tool into node_modules blocked",
-    "blocked",
+    "NM1 removed (2026-10-18): read tool into node_modules passes",
+    "pass",
     async (pi) => {
-      const r = await read(
-        pi,
-        join(tmp, "node_modules", "x", "index.js"),
-        { offset: 1, limit: 5 },
-        { outputLines: 5 },
-      );
-      return r.blocked && !r.reason.startsWith("Search (node_modules)")
-        ? { blocked: false, reason: `wrong family: ${r.reason.slice(0, 60)}` }
-        : r;
+      const f = join(tmp, "node_modules", "x", "index.js");
+      mkdirSync(dirname(f), { recursive: true });
+      writeFileSync(f, "module.exports = 1;\n");
+      return read(pi, f, { offset: 1, limit: 5 }, { outputLines: 5 });
     },
   ],
 
@@ -3291,9 +3273,9 @@ const cases = [
       writeFileSync(f, "alpha\nbeta\n");
       await read(pi, f);
       // runBash replays gate events only — the external writer must actually execute
-      // macOS BSD sed needs an empty backup suffix; GNU sed treats `-i ''` as in-place too
-      execSync(`sed -i '' 's/^beta/BBB/' ${f}`);
-      await runBash(pi, `sed -i '' 's/^beta/BBB/' ${f}`);
+      // `-i.bak` is the BSD+GNU portable form: BSD sed needs a suffix, GNU reads `-i ''` as script+file
+      execSync(`sed -i.bak 's/^beta/BBB/' ${f}`);
+      await runBash(pi, `sed -i.bak 's/^beta/BBB/' ${f}`);
       const r = await edit(pi, f, [{ oldText: "alpha", newText: "ALPHA" }]);
       return r.blocked && r.reason.startsWith("Anchor Guard (Stale):")
         ? r
