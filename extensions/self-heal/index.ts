@@ -19,9 +19,12 @@ import { dirname, join } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+import { daemonKillPattern, generationChanged, scanBinGeneration } from "./bins.ts";
+
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const SYNC = join(ROOT, "scripts", "sync-agent-bin.mjs");
 const STAMP = join(ROOT, ".cache", "pi-version");
+const BIN_GEN_STAMP = join(ROOT, ".cache", "bins-generation");
 
 /**
  * Run the portable sync. Returns its stdout, or null when it could not run.
@@ -71,6 +74,18 @@ export default function (pi: ExtensionAPI) {
     // A version change (a pi update) can invalidate native binaries.
     const current = piVersion();
     const changedFrom = noteVersion(current);
+    // Kill daemons started from binaries that changed since the last
+    // session: clients would otherwise keep talking to pre-rebuild
+    // daemons and fall back to one-shot spawns on every call.
+    try {
+      const stamp = readFileSync(BIN_GEN_STAMP, "utf8").trim();
+      const previous = stamp === "" ? null : parseInt(stamp, 10);
+      const current = scanBinGeneration(join(ROOT, "bin"));
+      if (generationChanged(Number.isNaN(previous) ? null : previous, current)) {
+        spawnSync("pkill", ["-f", daemonKillPattern(join(ROOT, "bin"))], { stdio: "ignore" });
+      }
+      writeFileSync(BIN_GEN_STAMP, `${current}\n`, "utf8");
+    } catch {}
 
     const out = runSync();
 
