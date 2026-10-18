@@ -24,6 +24,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 
 ## Workflow & TDD
 - Locate before read: `rg -n term path` first, then `sed -n 'A,Bp'` on a hit. A window ≥100 lines on an unsearched path is blocked (R1c).
+- Batch always: independent calls (reads, diffs, stats, searches, edits to separate files) → one parallel block, never one-per-file. One scoped command beats N (e.g. one `git diff` over all paths). Default, not optimization.
 - Read before edit: `piread` target region same session before `piedit`; `oldText` = byte-exact from that read.
 - No re-read of in-context regions. In-context = session-start project load, earlier `piread`, own edit. `[... omitted ...]` = display elision only, bytes remain — act on them. Read only new regions via `offset`/`limit`.
 - TDD always: failing test first → watch fail → minimum code → refactor. No implementation before failing test.
