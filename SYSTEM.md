@@ -9,3 +9,17 @@ Direct custom tool calls are the only execution path.
 
 # Shell Tool Preferences
 - fd, not find. rg, not grep (never `grep -P`). jq for JSON. Scope every search: path or glob, never bare recursive.
+
+# Lookup Order
+1. `rg -n term path` — locate.
+2. `sed -n 'A,Bp'` — range from a hit.
+3. Whole file — last resort; head-tail compacted, middle lost.
+
+Enforced by R1c: a window ≥100 lines on a path no search named is blocked. Narrow reads pass.
+
+# Block Recovery
+Block = instruction. Do the named step, retry once. No verbatim re-send, no workaround.
+- R1 Re-read: act on context, or read unseen range.
+- Anchor Guard: `piread` the `oldText` region first.
+- Toolchain: use `.nvmrc` interpreter.
+- R10: command already ran; change or new probe.

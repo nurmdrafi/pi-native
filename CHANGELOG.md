@@ -7,6 +7,26 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.47.0] - 18-10-2026
+
+### Added
+
+- **permission-gate R1c (locate-first).** A read window of ≥100 lines on a path that no `rg`/`grep`/`fd`/`find` command named this session, and that has no prior coverage, is blocked with the search to run. Deliberately narrow: a first attempt at blocking *every* unsearched window broke 22 legitimate cases (`P1: piread of a text file`, CRLF handling, targeted anchor reads, resume hydration) and was reverted, because the gate cannot tell a blind guess from a correct targeted read. Thresholds at or below 100 re-broke the narrow-window cases; 100 is the first width that leaves them passing. Pinned by four cases in `tests/permission-gate.test.mjs`.
+
+### Fixed
+
+- **`piread`: a document that quotes the omission marker was never compacted.** The already-compacted test was `text.contains(OMISSION_TAG)`, so any file mentioning `[... omitted N chars / M lines ...]` was exempted — including `docs/custom-tools-architecture.md`, which shipped 28,890 chars into context on every read. The marker is the only record that a cut happened, so the check now requires it to be a whole line of its own (`has_omission_marker`); quoting it mid-sentence, as documentation does, no longer exempts. Same file now reads at 1,828 chars (27,107 omitted). Pinned by `a_document_that_merely_quotes_the_marker_is_still_compacted` and `a_marker_inside_a_sentence_is_not_a_cut`; the idempotency test still passes.
+
+- **Anchor Guard's not-found hint printed an edge, not a count.** `findClosestFragment` returns `{lines, end}` where `end` is `"head"|"tail"`, but the reason interpolated `${frag.end} lines`, producing "Its head lines occur at line N" — a dead end in the one message meant to unblock the edit. It now reads "Its first/last N line(s) occur at line M". Logged 3× in a single session.
+- **permission-gate R1: a head-tail compacted read certified the elided middle as in-context.** `piread`'s compaction puts only a head and tail window in context and marks the rest with `[... omitted N chars / M lines ...]`, but the coverage certifier keyed on the request (`offset` unset → `win.end === Infinity`) and recorded `{1, Infinity}` for the whole path. The omitted middle therefore stayed unreadable for the rest of the session — `piread` refused the window with "already in context" while the bytes were never there. Certification now inspects `details.compaction` and treats `strategy !== "none" && omittedChars > 0` as not-whole-file, so the elided range stays readable. Pinned by two cases in `tests/permission-gate.test.mjs` (both fail with the `!elided` guard removed).
+- **`tests/permission-gate.test.mjs`: `readVia` dropped `details.compaction`.** The helper forwarded only `truncation`, so no test could express a compacted read. It now passes `compaction` through when the case supplies one.
+- **`sync-agent-bin`: a stale PATH pin silently shadowed the live one.** The rc block guard (`hasPathPin`) only asked whether the live dir was pinned somewhere; it never asked whether the *earlier* pins still pointed at anything. Bench runs had appended sandbox pins, two for `~/.pi/agent/bench/**` directories that no longer existed, and every one sat above `~/.pi/agent/bin` — so `rg` and `piread` resolved to a sandbox slot instead of the agent build. `pinnedBinDirs` / `missingPinnedDirs` now read the pins back out of the rc and `sync --check` reports each missing dir. The scan is a pure text match (never invokes a shell), handles both quote shapes the block can emit, and is pinned by an OS/shell-agnostic test case.
+
+### Changed
+
+- **AGENTS.md Workflow: locate before read.** `rg -n` first, then a range read on a hit; backed by R1c for wide windows.
+- **AGENTS.md Safety + SYSTEM.md: blocks route.** One line: do the named step, retry once. SYSTEM.md adds a 3-step lookup order and a per-family recovery list (R1, Anchor Guard, Toolchain, R10).
+
 ## [1.46.0] - 17-10-2026
 
 ### Added
