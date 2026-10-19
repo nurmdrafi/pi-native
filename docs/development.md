@@ -16,7 +16,6 @@
 ├── agents/                   # Subagent definitions
 ├── custom-tools/             # Rust workspace: piread, piedit, pibash, pidx
 ├── benchmark/                # Model-graded benchmark tasks + validators
-├── codemode/                 # Codemode scripts (non-LLM helpers)
 ├── scripts/                  # Repo tooling (bootstrap, doc-check, agents-lint, gate-eval)
 ├── prompts/                  # /command prompt templates (/issue, /ship, /update-changelog)
 ├── tests/                    # Node test runner suite (permission-gate, parity, doc-check)
@@ -114,4 +113,4 @@ Conventional commits are enforced by husky + commitlint. Release CI extracts the
 
 Raw events (tool errors, guard blocks) land in pi's native `sessions/**/*.jsonl` — the audit toolkit derives every signal from there.
 
-pi also runs with codemode enabled (inline budget 3000) and the built-in MCP extension disabled; the tool defaults in `settings.json` remove `bash`, `read`, and `edit` in favor of the native equivalents.
+pi also runs with the built-in MCP extension disabled; the tool defaults in `settings.json` remove `bash`, `read`, and `edit` in favor of the native equivalents.

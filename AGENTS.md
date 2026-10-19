@@ -29,6 +29,9 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - Loop: plan → do → verify.
 - Machine/device/OS agnostic — detail: docs/portability.md.
 
+## Token Economy
+- Past ~150K context or ~200 turns, the accumulated prefix dominates cost: propose compaction or a fresh session rather than continuing.
+
 ## Verification
 - Completion: run tests + lint + typecheck scoped to the changed files only (10 files changed → only their tests), not the full repo; once at task end, not after every edit.
 - TDD-loop scoped runs fine; otherwise test once, narrowest check.
