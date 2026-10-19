@@ -618,7 +618,6 @@ export default function pireadExtension(pi: ExtensionAPI): void {
       "Read a text file. Use offset/limit for a targeted window; reads are windowed and large outputs spill to a temp file. Images stay on the read tool. Prefer piread over reading with cat/sed.",
     promptGuidelines: [
       "Use piread to examine text files instead of cat or sed; use read for images.",
-      "Inside a codemode script the name is `tools.piread` (no built-in `tools.read` here).",
     ],
     execute: execute as typeof definition.execute,
     renderCall(args, theme, _context) {

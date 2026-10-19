@@ -12,8 +12,6 @@
  * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
- * | P3  | Token Economy (Pibash/Piread-first) | a codemode script that calls built-in `tools.bash`/`tools.read` is blocked — call `tools.pibash`/`tools.piread` (the sandbox used to sidestep P1/P2 entirely) |
- * | P4  | Codemode (Script)             | a codemode script that does not PARSE as an async function body is blocked before execution — a syntax/escaping slip costs a wasted turn otherwise (template-literal backticks, escaped quotes) |
  * | H1  | output cap (non-blocking)     | bash output capped at 100 lines / 4KB UTF-8; oversized first line head+tail; tail spilled to $TMPDIR/pgate-spill; errors capped too |
  * | H1b | read cap (non-blocking)       | read/piread result over 300 lines / 8KB truncated to the head, full text spilled to $TMPDIR/pgate-spill with a pointer — reads had no post-cap before |
  * | H2  | Permission Gate (Destructive) | destructive commands need approval: chat yes / UI confirm; fail closed headless; re-send re-prompts |
@@ -32,7 +30,7 @@
  * Change history lives in git log; this table lists what is CURRENTLY enforced.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { config, ruleEnabled } from "./config.ts";
+import { config, ruleBlocks, ruleEnabled, ruleSeverity } from "./config.ts";
 
 /** Bash-kind predicate: `bash` plus the native `pibash` tool (2026-10-18
  * pibash adoption). Both share the bash schema and both must run the full
@@ -44,39 +42,6 @@ function isBashKind(event: { toolName: string }): boolean {
   return event.toolName === "bash" || event.toolName === "pibash";
 }
 
-/** P4: does the codemode script parse as an async function body? Returns a
- * short `line N: message` pointer on a SyntaxError, else undefined. The
- * AsyncFunction constructor is the closest host-side model of the QuickJS
- * sandbox's wrapper (top-level `await`/`return` allowed).
- *
- * V8's SyntaxError carries no line/column, so the line is recovered by
- * bisecting line-prefixes: the first prefix that fails to parse is the last
- * line the error can be on (a multi-line construct pins to the line that
- * closed it, which is where the message points anyway). A non-SyntaxError
- * failure returns undefined — the guard only blocks scripts PROVEN not to
- * parse, never guesses on an unexpected throw. */
-function codemodeParseError(code: string): string | undefined {
-  const parse = (src: string): string | undefined => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      new (Object.getPrototypeOf(async function () {}).constructor)(src);
-      return undefined;
-    } catch (err) {
-      return err instanceof SyntaxError ? err.message.replace(/^SyntaxError:\s*/, "") : undefined;
-    }
-  };
-  const full = parse(code);
-  if (full === undefined) return undefined; // parses, or the throw was not a SyntaxError — never block
-  const lines = code.split("\n");
-  if (lines.length > 1) {
-    // first line-prefix that fails to parse = the earliest line the error can be on
-    for (let i = 1; i <= lines.length; i++) {
-      if (parse(lines.slice(0, i).join("\n")) !== undefined)
-        return i < lines.length ? `line ${i}: ${full}` : full;
-    }
-  }
-  return full;
-}
 import type { ExtensionAPI, ExtensionHandler } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "crypto";
 import { homedir } from "os";
@@ -354,6 +319,39 @@ export default function (pi: ExtensionAPI) {
     }
     return { block: true, reason };
   };
+  /**
+   * Record a style violation WITHOUT blocking. Used for the preference families
+   * (toolchain pins, search hygiene, re-run, big-read): they encode a default,
+   * not a safety property, so a block costs a full retry for a convention the
+   * gate cannot know is wrong for this task. The violation is still counted, so
+   * the lesson and the telemetry survive; only the retry does not.
+   */
+  const warnCall = (reason: string): undefined => {
+    try {
+      const colon = reason.indexOf(":");
+      const family = colon === -1 ? reason : reason.slice(0, colon);
+      if (FAMILY_LESSONS[family]) {
+        counts[family] = (counts[family] ?? 0) + 1;
+        mkdirSync(dirname(memoryNdjson), { recursive: true });
+        appendFileSync(
+          memoryNdjson,
+          `${JSON.stringify(violationRecord({ family, sid, ts: Date.now(), reason }))}\n`,
+        );
+      }
+    } catch {
+      // telemetry must never break the agent loop
+    }
+    return undefined;
+  };
+  /**
+   * Apply a rule decision at its configured severity: `error` blocks, `warn`
+   * records and returns undefined (call proceeds), `off` never reaches here
+   * because the caller checks `ruleEnabled` first.
+   */
+  const enforce = (
+    key: Parameters<typeof ruleSeverity>[0],
+    reason: string,
+  ): { block: true; reason: string } | undefined => (ruleBlocks(key) ? blockCall(reason) : warnCall(reason));
   // AT1 (2026-10-21 audit): adoption telemetry. The NDJSON above only records
   // BLOCKS, so the store made silent non-adoption invisible — 1 "Pibash-first"
   // line against 27 "Pibash (fallback)" lines read as "pibash is used but
@@ -557,55 +555,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   on("tool_call", async (event, ctx) => {
-    // P3 (2026-10-21 audit): codemode reaches every tool from a sandbox, so the
-    // model-facing names below are never the ones a script uses. A script that
-    // calls the BUILT-IN `bash`/`read` instead of the native `pibash`/
-    // `piread` sidesteps P1/P2 entirely — this scoped check re-applies the
-    // same rule inside the script source. The check only fires when the
-    // corresponding native extension is live (its opt-out env var removes the
-    // tool, so blocking would strand the agent), and never matches the native
-    // names (`tools.pibash`/`tools.piread` do not match `tools.bash`/
-    // `tools.read` under the word-boundary regex).
-    // P4 (2026-10-21 audit): the codemode sandbox runs the script as an async
-    // function body, so a script that does not PARSE never reaches a tool and
-    // burns a whole turn (session logs: `SyntaxError: Unexpected identifier
-    // 'sleep'`, `unexpected end of file`) — most often a template-literal
-    // backtick or an "escaped" quote that closed the literal early. A parse
-    // check costs microseconds and replaces the sandbox's opaque failure with
-    // a line pointer plus the escaping rule. Runs before P3 so a script that is
-    // both non-parsing and built-in-name-calling gets the parse fix first (it
-    // must compile before its calls mean anything).
-    if (event.toolName === "codemode" && ruleEnabled("codemodeScriptGuard")) {
-      const code = (event.input as { code?: unknown }).code;
-      if (typeof code === "string" && code.trim()) {
-        const parseError = codemodeParseError(code);
-        if (parseError)
-          return blockCall(
-            `Codemode (Script): script does not parse (${parseError}) — it is an async function body; a stray backtick or an over-escaped quote usually closes a template/string early. Fix the escaping and re-send.`,
-          );
-      }
-    }
-
-    if (event.toolName === "codemode" && ruleEnabled("nativeToolsInScripts")) {
-      const code = (event.input as { code?: unknown }).code;
-      if (typeof code === "string") {
-        if (
-          process.env.PI_NATIVE_BASH !== "0" &&
-          /\btools\s*\.\s*bash\s*\(/.test(code)
-        )
-          return blockCall(
-            "Token Economy (Pibash-first): this codemode script calls the built-in bash tool — call tools.pibash({command, timeout}) instead (same schema, same rules; it falls back itself).",
-          );
-        if (
-          process.env.PI_NATIVE_READ !== "0" &&
-          /\btools\s*\.\s*read\s*\(/.test(code)
-        )
-          return blockCall(
-            "Token Economy (Piread-first): this codemode script calls the built-in read tool — call the native tools.piread({path, offset, limit}) instead for text files (images still use the read tool).",
-          );
-      }
-    }
-
     if (isToolCallEventType("edit", event) || isToolCallEventType("piedit", event)) {
       // S4 fix 3: malformed edit input — explicit block, never an analyzer throw
       if (typeof event.input.path !== "string" || !event.input.path.trim())
@@ -710,19 +659,23 @@ export default function (pi: ExtensionAPI) {
           `Locate-first: ${win.end - win.start + 1}-line window on '${shown}', which no search has named this session. \`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then read the hit's range.`,
         );
       }
-      // R1b (2026-10-10 session audit): first read of a large file requested
-      // whole — block with the targeted-window fix. Windows narrower than
-      // BIG_READ_WIN lines pass untouched, small files pass, R1 covers
-      // re-reads of what is already certified in context.
+      // R1b (2026-10-10 audit; demoted 2026-10-21): a whole read of a large
+      // file is a real context cost, but the gate cannot see whether the whole
+      // file IS the target (reviewing a module, reading a config end to end).
+      // Blocking there traded a certain retry for a speculative saving, so the
+      // cost is now recorded and the read proceeds. R1 still blocks genuine
+      // duplicate reads, which is the part that is never intentional.
       if (
         ruleEnabled("largeReadGuard") &&
         (win.end === Infinity || win.end - win.start >= BIG_READ_WIN)
       ) {
         const snap = await snapshot(path);
         if (snap && snap.size > BIG_READ_BYTES) {
-          return blockCall(
+          const r = enforce(
+            "largeReadGuard",
             `Token Economy (Big read): '${shown}' is ~${Math.round(snap.size / 1024)}KB — target it with the piread tool (rg the symbol, then piread {path, offset, limit} ≤${BIG_READ_WIN} lines).`,
           );
+          if (r) return r;
         }
       }
       const prior = coverage.get(path);
@@ -788,10 +741,17 @@ export default function (pi: ExtensionAPI) {
             prior.stat &&
             now &&
             (prior.stat.mtimeMs !== now.mtimeMs || prior.stat.size !== now.size)
-          )
+          ) {
+            // Drop the disproven spans BEFORE blocking: the file changed under
+            // us (our own sed/pibash write, or an external edit), so the
+            // certified window no longer describes this file. Keeping it would
+            // re-block the edit even after the recommended re-read, turning a
+            // one-shot recovery into a loop.
+            coverage.delete(path);
             return blockCall(
-              `Anchor Guard (Stale): '${shown}' changed on disk since your last read (mtime/size) — re-read it, then re-send the write.`,
+              `Anchor Guard (Stale): '${shown}' changed on disk since your last read (your own shell write or an external edit) — re-read it, then re-send.`,
             );
+          }
           if (prior.stat && now && prior.hash) {
             const h = await hashFile(path);
             if (h && h !== prior.hash) {
@@ -885,24 +845,39 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // TC1/TC2/SS1/SS2/SS3/PB1 (2026-10-13 audit): toolchain pins + search
-    // scope/rg-first/fd-first —
-    // BEFORE H2 for the same reason as R9: never ask the confirm dialog for a
-    // command a rule rejects anyway
+    // TC1/TC2/SS1/SS2/SS3/PB1 (2026-10-13 audit; demoted 2026-10-21): toolchain
+    // pins + search hygiene encode a PREFERENCE, not a safety property — a
+    // pnpm reponame or an `rg` vs `grep` choice cannot be judged by the gate from
+    // a command string alone, and a block there costs a whole retry for a
+    // convention the caller may have already considered. Record the violation
+    // (lessons + telemetry keep working), then let the command run.
     const isDarwin = process.platform === "darwin";
     for (const seg of normSegs) {
       const tc = toolchainCheck(seg, cmd, ctx?.cwd, {
         pnpm: ruleEnabled("toolchainPnpm"),
         node: ruleEnabled("toolchainNode"),
       });
-      if (tc) return blockCall(tc);
+      if (tc) {
+        const r = enforce(tc.startsWith("Toolchain (pnpm)") ? "toolchainPnpm" : "toolchainNode", tc);
+        if (r) return r;
+      }
       const sc = searchCheck(seg, isDarwin, {
         scope: ruleEnabled("searchScope"),
         portability: ruleEnabled("searchPortability"),
         midPipe: ruleEnabled("searchMidPipe"),
         findFirst: ruleEnabled("findFirst"),
       });
-      if (sc) return blockCall(sc);
+      if (sc) {
+        const key = sc.startsWith("Search (Scope)")
+          ? "searchScope"
+          : sc.startsWith("Search (Mid-pipe)")
+            ? "searchMidPipe"
+            : sc.startsWith("Search (fd-first)")
+              ? "findFirst"
+              : "searchPortability";
+        const r = enforce(key, sc);
+        if (r) return r;
+      }
     }
 
     // H2 (2026-10-08): destructive/mutating commands need explicit user
@@ -956,10 +931,16 @@ export default function (pi: ExtensionAPI) {
       prior.mut === mutationSeq &&
       Date.now() - prior.ts < RERUN_WINDOW_MS
     ) {
-      return blockCall(
+      // R10 (demoted 2026-10-21): an unchanged re-run usually duplicates output,
+      // but "usually" is not "always" — the mutation window misses changes made
+      // by a subagent, another tool, or a watcher the gate does not track.
+      // Record it and let it run; R1 catches the actual duplicate output.
+      const r = enforce(
+        "rerunGuard",
         `Token Economy (Re-run): '${base.slice(0, 60)}' ran ${Math.round((Date.now() - prior.ts) / 1000)}s ago, no ` +
           `edit/write since — output already in context. Re-run only after a change. Poll: 'sleep N && cmd'. Batch independent calls in one turn.`,
       );
+      if (r) return r;
     }
     pendingBash.set(event.toolCallId, base);
     // R1c: remember which paths this command targeted, so a later wide read of

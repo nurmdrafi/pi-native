@@ -113,3 +113,34 @@ test('every documented param passes the guard', async () => {
     assert.equal(guardTripped, false, `param ${key} must be accepted by the guard`);
   }
 });
+
+// ------------------------------------------- X2: path containment (audit §10)
+// `out`/`state`/`sessionsDir` were passed straight to the binary, so a caller
+// could point them anywhere. Containment requires each to resolve inside the
+// state dir (or the repo root) before the spawn happens.
+
+test('X2: out/state/sessionsDir outside the sandbox are rejected', async () => {
+  for (const key of ['out', 'state', 'sessionsDir']) {
+    await assert.rejects(
+      () => tool.execute('x2-' + key, { [key]: '/etc/shadow' }),
+      /outside|containment|not permitted/i,
+      `${key} outside the sandbox must be rejected`,
+    );
+  }
+});
+
+test('X2: traversal via .. cannot escape the sandbox', async () => {
+  await assert.rejects(
+    () => tool.execute('x2-dotdot', { out: '../../../tmp/escape.jsonl' }),
+    /outside|containment|not permitted/i,
+    'traversal must not escape',
+  );
+});
+
+test('X2: force requires an explicit confirm', async () => {
+  await assert.rejects(
+    () => tool.execute('x2-force', { force: true, out: './.pidx/x.jsonl' }),
+    /confirm/i,
+    'force must demand confirmation',
+  );
+});

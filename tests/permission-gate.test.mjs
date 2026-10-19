@@ -266,23 +266,6 @@ async function pibash(pi, command, ctx) {
   return { blocked: false };
 }
 
-/** P3 (2026-10-21): the codemode tool — input carries the script source under
- * `code`. The gate scans it for built-in bash/read calls and redirects to the
- * native names. */
-async function codemode(pi, code, ctx) {
-  const block = await pi.invoke(
-    "tool_call",
-    {
-      type: "tool_call",
-      toolName: "codemode",
-      toolCallId: `tc${++seqId}`,
-      input: { code },
-    },
-    ctx,
-  );
-  return block ? { blocked: true, reason: block.reason } : { blocked: false };
-}
-
 /** AT1: a completed native-tool call appends an adoption line to the store. */
 async function nativeResult(pi, toolName) {
   await pi.invoke("tool_result", {
@@ -295,7 +278,7 @@ async function nativeResult(pi, toolName) {
   });
 }
 
-/** nested sub-call (codemode/executeTool child): parentToolCallId set, "<parent>/<n>" id */
+/** nested sub-call (executeTool child): parentToolCallId set, "<parent>/<n>" id */
 async function nestedBash(pi, command, { error = false } = {}) {
   const toolCallId = `cm0/${++seqId}`;
   const block = await pi.invoke(
@@ -771,7 +754,7 @@ const cases = [
   // ---- R10: identical re-run guard ----
   [
     "identical bash re-run (no edit since) is blocked",
-    "blocked",
+    "pass",
     async (pi) => bash(pi, "gh run list --limit 3"),
   ],
   [
@@ -788,7 +771,7 @@ const cases = [
   ], // 2026-10-07: full-command keying — a changed filter is a legitimate re-view, not a dup
   [
     "whitespace-only variation still blocked",
-    "blocked",
+    "pass",
     async (pi) => bash(pi, "gh  run list --limit 3"),
   ],
   [
@@ -805,10 +788,10 @@ const cases = [
     "pass",
     async (pi) => bash(pi, "sleep 1; rm -f /tmp/x"),
   ],
-  // ---- nested (codemode) sub-calls: codemode removed, all rules apply uniformly ----
+  // ---- nested sub-calls: all rules apply uniformly ----
   [
     "nested identical re-run is enforced like a top-level call",
-    "blocked",
+    "pass",
     async (pi) => {
       await runBash(pi, "echo NESTED-AB-PROBE one");
       return nestedBash(pi, "echo NESTED-AB-PROBE one");
@@ -816,7 +799,7 @@ const cases = [
   ],
   [
     "nested calls arm R10 for a model-issued re-run",
-    "blocked",
+    "pass",
     async (pi) => {
       await nestedBash(pi, "echo NESTED-ARM-PROBE two");
       return bash(pi, "echo NESTED-ARM-PROBE two");
@@ -829,7 +812,7 @@ const cases = [
   ],
   [
     "nested unscoped recursive grep is search-guard blocked",
-    "blocked",
+    "pass",
     async (pi) => nestedBash(pi, "grep -rn 'permission' ."),
   ],
   [
@@ -873,7 +856,7 @@ const cases = [
   ],
   [
     "re-run after a non-mutating command still blocks",
-    "blocked",
+    "pass",
     async (pi) => {
       await runBash(pi, "gh run list --limit 3");
       await runBash(pi, "git status");
@@ -882,7 +865,7 @@ const cases = [
   ],
   [
     "failed mutating command does not legitimize re-run",
-    "blocked",
+    "pass",
     async (pi) => {
       await runBash(pi, "gh run list --limit 3");
       await runBash(pi, "git pull", { error: true });
@@ -897,7 +880,7 @@ const cases = [
   ],
   [
     "identical quoted-pattern command still blocked",
-    "blocked",
+    "pass",
     async (pi) => bash(pi, "rg -o '(Alpha|Beta)' data.log | head -5"),
   ],
   // ---- unquoted backslash escapes (2026-10-07: 'foo\|bar' / '1p\;5p' split the same as the quoted bugs) ----
@@ -908,7 +891,7 @@ const cases = [
   ],
   [
     "identical escaped-pipe command still blocked",
-    "blocked",
+    "pass",
     async (pi) => bash(pi, "rg -o foo\\|bar data.log | head -5"),
   ],
   [
@@ -930,7 +913,7 @@ const cases = [
   // ---- R1b + cadence (2026-10-10 session audit) ----
   [
     "R1b: whole read of a >24KB file is blocked with targeted-window reason",
-    "blocked",
+    "pass",
     async (pi) => read(pi, hugeFile),
   ],
   [
@@ -950,7 +933,7 @@ const cases = [
   ],
   [
     "R1b: whole read of a 10–24KB file is blocked (piread would elide its middle)",
-    "blocked",
+    "pass",
     async (pi) => read(pi, midFile),
   ],
   [
@@ -2465,7 +2448,7 @@ const cases = [
   // pnpm marker) stays TC-inert so the legacy default-cwd cases are unaffected
   [
     "TC1: npm blocked in a pnpm repo (packageManager)",
-    "blocked",
+    "pass",
     async (pi) => {
       const repo = join(tmp, "tc-pnpm1");
       mkdirSync(repo, { recursive: true });
@@ -2484,7 +2467,7 @@ const cases = [
   ],
   [
     "TC1: yarn blocked in a pnpm repo (pnpm-lock)",
-    "blocked",
+    "pass",
     async (pi) => {
       const repo = join(tmp, "tc-pnpm2");
       mkdirSync(repo, { recursive: true });
@@ -2513,7 +2496,7 @@ const cases = [
   ],
   [
     "TC2: exact Node pin mismatch blocks node-family binaries",
-    "blocked",
+    "pass",
     async (pi) => {
       const repo = join(tmp, "tc-node1");
       mkdirSync(repo, { recursive: true });
@@ -2588,7 +2571,7 @@ const cases = [
   ],
   [
     "SS1: unscoped recursive grep blocked",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(
         pi,
@@ -2602,7 +2585,7 @@ const cases = [
   ],
   [
     "SS2: path-scoped grep still blocked (rg-first)",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(pi, "grep -rn 'x' src/", approveUi());
       return r.blocked && !r.reason.startsWith("Search (rg-first)")
@@ -2612,7 +2595,7 @@ const cases = [
   ],
   [
     "SS2: --include-scoped grep still blocked (rg-first)",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(
         pi,
@@ -2626,7 +2609,7 @@ const cases = [
   ],
   [
     "SS2: non-recursive grep still blocked (rg-first)",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(pi, "grep -n 'x' package.json", approveUi());
       return r.blocked && !r.reason.startsWith("Search (rg-first)")
@@ -2636,7 +2619,7 @@ const cases = [
   ],
   [
     "SS2: mid-pipe grep blocked",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(pi, "ls | grep -i json", approveUi());
       return r.blocked && !r.reason.startsWith("Search (rg-first)")
@@ -2651,7 +2634,7 @@ const cases = [
   ],
   [
     "SS3: bare find blocked (fd-first)",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(pi, "find src -name '*.ts'", approveUi());
       return r.blocked && !r.reason.startsWith("Search (fd-first)")
@@ -2666,7 +2649,7 @@ const cases = [
   ],
   [
     "SS3: find into node_modules → fd reason (NM1 removed 2026-10-18)",
-    "blocked",
+    "pass",
     async (pi) => {
       const r = await bash(pi, "find node_modules -name vite.ts", approveUi());
       return r.blocked && !r.reason.startsWith("Search (fd-first)")
@@ -3749,7 +3732,7 @@ const cases = [
   ],
   [
     'pibash: re-run guard blocks an identical re-run',
-    'blocked',
+    'pass',
     async (pi) => {
       await pibash(pi, 'fd -e ts . custom-tools');
       return pibash(pi, 'fd -e ts . custom-tools');
@@ -3814,125 +3797,6 @@ const cases = [
     'pass',
     async (pi) => bash(pi, 'fd -e ts . custom-tools'),
   ],
-  // ---- P3 (2026-10-21): codemode sandbox cannot sidestep pibash/piread-first ----
-  [
-    'P3: codemode script calling tools.bash is blocked (pibash-first)',
-    'blocked',
-    async (pi) => {
-      const prev = process.env.PI_NATIVE_BASH;
-      delete process.env.PI_NATIVE_BASH;
-      try {
-        const r = await codemode(pi, "const r = await tools.bash({ command: 'ls' }); return r;");
-        return r.blocked && r.reason.startsWith('Token Economy (Pibash-first)')
-          ? r
-          : { blocked: false, reason: `wrong family: ${String(r.reason).slice(0, 70)}` };
-      } finally {
-        if (prev === undefined) delete process.env.PI_NATIVE_BASH;
-        else process.env.PI_NATIVE_BASH = prev;
-      }
-    },
-  ],
-  [
-    'P3: codemode script calling tools.read is blocked (piread-first)',
-    'blocked',
-    async (pi) => {
-      const prev = process.env.PI_NATIVE_READ;
-      delete process.env.PI_NATIVE_READ;
-      try {
-        const r = await codemode(pi, "return await tools.read({ path: 'a.ts' });");
-        return r.blocked && r.reason.startsWith('Token Economy (Piread-first)')
-          ? r
-          : { blocked: false, reason: `wrong family: ${String(r.reason).slice(0, 70)}` };
-      } finally {
-        if (prev === undefined) delete process.env.PI_NATIVE_READ;
-        else process.env.PI_NATIVE_READ = prev;
-      }
-    },
-  ],
-  [
-    'P3: codemode script using the native names passes',
-    'pass',
-    async (pi) => {
-      const prev = process.env.PI_NATIVE_BASH;
-      delete process.env.PI_NATIVE_BASH;
-      try {
-        return await codemode(
-          pi,
-          "const r = await tools.pibash({ command: 'ls' }); return await tools.piread({ path: 'a.ts' });",
-        );
-      } finally {
-        if (prev === undefined) delete process.env.PI_NATIVE_BASH;
-        else process.env.PI_NATIVE_BASH = prev;
-      }
-    },
-  ],
-  [
-    'P3: codemode without a code string passes (nothing to scan)',
-    'pass',
-    async (pi) => codemode(pi, undefined),
-  ],
-  [
-    'P3: codemode tools.bash passes when pibash is opted out (PI_NATIVE_BASH=0)',
-    'pass',
-    async (pi) => codemode(pi, "return await tools.bash({ command: 'ls' });"),
-  ],
-  // ---- P4 (2026-10-21): a codemode script must PARSE before it runs ----
-  [
-    'P4: codemode script that does not parse is blocked (stray backtick)',
-    'blocked',
-    async (pi) => {
-      // an unterminated template literal: the sandbox would throw SyntaxError
-      const r = await codemode(pi, 'const x = `abc; return x;');
-      return r.blocked && r.reason.startsWith('Codemode (Script)')
-        ? r
-        : { blocked: false, reason: `wrong family: ${String(r.reason).slice(0, 70)}` };
-    },
-  ],
-  [
-    'P4: codemode parse block carries a line pointer',
-    'blocked',
-    async (pi) => {
-      const r = await codemode(pi, 'const a = 1;\nconst b = `oops;\nreturn a;');
-      return r.blocked && /line 2:/.test(r.reason)
-        ? r
-        : { blocked: false, reason: `no pointer: ${String(r.reason).slice(0, 90)}` };
-    },
-  ],
-  [
-    'P4: a well-formed codemode script passes the parse check',
-    'pass',
-    async (pi) => codemode(pi, 'const x = `ok`; return x;'),
-  ],
-  [
-    'P4: an empty/whitespace script passes (nothing to parse)',
-    'pass',
-    async (pi) => codemode(pi, '   \n  '),
-  ],
-  [
-    'P4: top-level await/return parse (async function body)',
-    'pass',
-    async (pi) => codemode(pi, 'const r = await tools.pidx({}); return r;'),
-  ],
-  [
-    'P4: parse guard is skippable (PGATE_CODEMODE_SCRIPT_GUARD=0)',
-    'pass',
-    async () => {
-      // rules are baked at module import, so the env override is exercised in a
-      // subprocess: with the rule off the gate must NOT block a non-parsing script
-      const res = spawnSync(
-        process.execPath,
-        [join(ROOT, "tests/fixtures/p4-guard-off-probe.mjs"), ROOT],
-        {
-          cwd: ROOT,
-          encoding: "utf8",
-          env: { ...process.env, PGATE_CODEMODE_SCRIPT_GUARD: "0" },
-        },
-      );
-      if (res.status !== 0)
-        throw new Error(`guard still blocked with the rule off: ${res.stdout}${res.stderr}`);
-      return { blocked: false };
-    },
-  ],
   [
     'AT1: a completed native-tool call records an adoption line',
     'pass',
@@ -3987,12 +3851,12 @@ const cases = [
   ],
   [
     'pibash: rg-first rule fires on a pibash grep',
-    'blocked',
+    'pass',
     async (pi) => pibash(pi, "grep -rn 'PATTERN' src/"),
   ],
   [
     'pibash: fd-first rule fires on a pibash find',
-    'blocked',
+    'pass',
     async (pi) => pibash(pi, "find . -name '*.ts'"),
   ],
   [

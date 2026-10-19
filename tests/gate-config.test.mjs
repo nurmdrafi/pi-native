@@ -17,8 +17,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,19 +38,29 @@ function ruleKeysFromSource() {
   return keys;
 }
 
-/** Evaluate the loader in a child process so env overrides apply cleanly. */
-function loadConfig(env = {}) {
+/** Evaluate the loader in a child process so env overrides apply cleanly.
+ * `rules` (when given) is written to a throwaway config.json so a test can
+ * exercise a rule value without touching the tracked file. */
+function loadConfig(env = {}, rules) {
+  let settingsEnv = {};
+  if (rules !== undefined) {
+    const dir = mkdtempSync(join(tmpdir(), "pgate-cfg-"));
+    const file = join(dir, "config.json");
+    writeFileSync(file, JSON.stringify({ rules }, null, 2));
+    settingsEnv = { PGATE_CONFIG: file };
+  }
   const script = `
     import { config, RULE_IDS } from ${JSON.stringify(PANEL)};
     process.stdout.write(JSON.stringify({ config, ids: RULE_IDS }));
   `;
-  const out = execFileSync("node", ["--experimental-strip-types", "--input-type=module", "-e", script], {
+  const res = spawnSync("node", ["--experimental-strip-types", "--input-type=module", "-e", script], {
     cwd: ROOT,
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...settingsEnv, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  return JSON.parse(out);
+  if (res.status !== 0) throw new Error(`config load failed: ${res.stderr}`);
+  return { ...JSON.parse(res.stdout), stderr: res.stderr };
 }
 
 const KEYS = ruleKeysFromSource();
@@ -74,26 +85,104 @@ test("rule IDs are unique", () => {
 
 test("defaults are fail-closed: every rule on", () => {
   const { config } = loadConfig();
-  const off = Object.entries(config.rules).filter(([, v]) => v !== true).map(([k]) => k);
+  // Fail closed = every rule runs at least as `warn`. Only explicit config
+  // lowers one to `off`.
+  const off = Object.entries(config.severity).filter(([, v]) => v === "off").map(([k]) => k);
   assert.deepEqual(off, [], `rules defaulting to off: ${off.join(", ")}`);
 });
 
 test("env override disables exactly one rule", () => {
   const { config } = loadConfig({ PGATE_RERUN_GUARD: "0" });
-  assert.equal(config.rules.rerunGuard, false, "PGATE_RERUN_GUARD=0 should disable rerunGuard");
-  const others = Object.entries(config.rules).filter(([k, v]) => k !== "rerunGuard" && v !== true);
+  assert.equal(config.severity.rerunGuard, "off", "PGATE_RERUN_GUARD=0 should disable rerunGuard");
+  const others = Object.entries(config.severity).filter(([k, v]) => k !== "rerunGuard" && v === "off");
   assert.deepEqual(others, [], "env override must not affect other rules");
 });
 
-test("env override accepts true to re-enable", () => {
-  const { config } = loadConfig({ PGATE_RERUN_GUARD: "1" });
-  assert.equal(config.rules.rerunGuard, true);
+test("env override accepts 2 to raise a rule to blocking severity", () => {
+  const { config } = loadConfig({ PGATE_RERUN_GUARD: "2" });
+  assert.equal(config.severity.rerunGuard, "error");
 });
 
 test("rejected scalar falls back to the documented default", () => {
   const { config } = loadConfig();
   assert.ok(Number.isInteger(config.outputCap.maxLines) && config.outputCap.maxLines > 0);
   assert.ok(Number.isInteger(config.confirm.timeoutMs) && config.confirm.timeoutMs > 0);
+});
+
+// ---- ESLint-style severity: off / warn / error --------------------------
+// A rule is a default, not always an absolute: preference rules (search
+// hygiene, toolchain pins, re-run, big-read) should teach without costing a
+// retry. `error` blocks, `warn` records and proceeds, `off` is silent.
+
+test("severity strings parse like ESLint (off/warn/error)", () => {
+  // One child per row is wasteful and fragile; drive the whole matrix in a
+  // single process by rewriting a throwaway config between loads.
+  const dir = mkdtempSync(join(tmpdir(), "pgate-cfg-"));
+  const file = join(dir, "config.json");
+  const script = `
+    import { readFileSync } from "node:fs";
+    const cfgPath = process.env.PGATE_CONFIG;
+    const out = {};
+    const rows = ["off", "warn", "error", 0, 1, 2, false, true];
+    for (const value of rows) {
+      const fs = await import("node:fs");
+      fs.writeFileSync(cfgPath, JSON.stringify({ rules: { rerunGuard: value } }));
+      const mod = await import(${JSON.stringify(PANEL)} + "?v=" + encodeURIComponent(String(value)));
+      out[JSON.stringify(value)] = mod.config.severity.rerunGuard;
+    }
+    process.stdout.write(JSON.stringify(out));
+  `;
+  writeFileSync(file, "{}");
+  const res = spawnSync("node", ["--experimental-strip-types", "--input-type=module", "-e", script], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: { ...process.env, PGATE_CONFIG: file },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(res.status, 0, `child failed: ${res.stderr}`);
+  const got = JSON.parse(res.stdout);
+  const expected = {
+    '"off"': "off",
+    '"warn"': "warn",
+    '"error"': "error",
+    "0": "off",
+    "1": "warn",
+    "2": "error",
+    "false": "off",
+    "true": "error",
+  };
+  assert.deepEqual(got, expected);
+});
+
+test("an invalid severity keeps the rule at its default and warns", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pgate-cfg-"));
+  const file = join(dir, "config.json");
+  writeFileSync(file, JSON.stringify({ rules: { rerunGuard: "loud" } }));
+  const script = `
+    import { config } from ${JSON.stringify(PANEL)};
+    process.stdout.write(JSON.stringify({ sev: config.severity.rerunGuard }));
+  `;
+  const res = spawnSync("node", ["--experimental-strip-types", "--input-type=module", "-e", script], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: { ...process.env, PGATE_CONFIG: file },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(res.status, 0, `child failed: ${res.stderr}`);
+  // rerunGuard is a preference rule, so its DEFAULT is `warn`, not `error`.
+  assert.equal(JSON.parse(res.stdout).sev, "warn", "fallback is the rule's default severity");
+  assert.match(res.stderr, /severity/i, "a bad value must be reported, not silently ignored");
+});
+
+test("PGATE_<RULE> env var accepts a severity too", () => {
+  const { config } = loadConfig({ PGATE_RERUN_GUARD: "warn" });
+  assert.equal(config.severity.rerunGuard, "warn");
+});
+
+test("safety rules cannot be configured away", () => {
+  const { config } = loadConfig({}, { rules: { editAnchorGuard: "off", destructiveConfirm: "off" } });
+  assert.equal(config.severity.editAnchorGuard, "error", "anchor guard must not be disableable by config");
+  assert.equal(config.severity.destructiveConfirm, "error", "destructive confirm must not be disableable");
 });
 
 test("rule IDs match the documented README rule table", () => {

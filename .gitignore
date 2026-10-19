@@ -11,6 +11,8 @@ auth.json
 npm/
 # pidx cache state (regenerates)
 .pidx-state.bin
+# pidx scratch output (tests write here; never a source artifact)
+.pidx/
 # cargo install --root metadata (rg/pidx rebuilds)
 .crates.toml
 .crates2.json

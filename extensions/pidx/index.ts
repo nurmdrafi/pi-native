@@ -20,7 +20,7 @@
  */
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
@@ -79,12 +79,56 @@ const DEFAULT_OUT = join(CACHE_DIR, "pidx-extracts.jsonl");
 /** Hard cap for the opt-in inline path, so a stray dump cannot blow context. */
 const MAX_INLINE_CHARS = Number(process.env.PI_PIDX_MAX_INLINE ?? 2000);
 
+/**
+ * Roots a pidx path parameter may resolve inside (X2, audit §10): the agent
+ * state/cache dir and the current repo root. A path outside every root is
+ * refused rather than silently created.
+ */
+const SANDBOX_ROOTS = [join(homedir(), ".pi", "agent"), process.cwd()].map((r) => resolve(r));
+
+/** True when `candidate` is `root` itself or sits beneath it. */
+function isInside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Reject a path parameter that resolves outside every sandbox root. Resolution
+ * happens first, so `../` traversal and symlinked spellings are compared on
+ * their real destination, not their literal text.
+ */
+function assertContained(param: string, value: string): void {
+  const abs = resolve(value);
+  if (!SANDBOX_ROOTS.some((root) => isInside(root, abs))) {
+    throw new Error(
+      `pidx: parameter "${param}" resolves outside the sandbox (containment): ` +
+        `${abs}. Allowed roots: ${SANDBOX_ROOTS.join(", ")}.`,
+    );
+  }
+}
+
+/**
+ * `force` overwrites an existing cache/state file, so it requires an explicit
+ * acknowledgement from the caller rather than a bare boolean. `force: true`
+ * is refused with a message naming the confirm option; only `"confirm"` (or
+ * the env opt-out used by the test-suite) proceeds.
+ */
+function assertForceConfirmed(value: unknown): void {
+  if (value === true && process.env.PI_PIDX_FORCE_CONFIRM !== "1") {
+    throw new Error(
+      'pidx: parameter "force" requires explicit confirmation — pass confirm ' +
+        'to overwrite the existing cache/state file.',
+    );
+  }
+}
+
 type PidxParams = {
   sessionsDir?: string;
   state?: string;
   out?: string;
   max?: number;
-  force?: boolean;
+  /** `true` alone is refused; `"confirm"` (or the env opt-out) proceeds. */
+  force?: boolean | "confirm";
   /** Opt in to returning raw extracts in context (hard-capped). Default false. */
   stdout?: boolean;
 };
@@ -120,7 +164,7 @@ const pidxTool = defineTool({
   description:
     "Index pi session logs into compact per-session extracts (turns, tool calls with param hashes, tool results, compactions, skill loads) via the native Rust indexer. Incremental: unchanged files reuse the cached extract, so warm runs only process changes. Extracts are written to a file (default .cache/pidx-extracts.jsonl) and only a short pointer plus summary enters context — read or query that file for details. Pass stdout:true only when the listing itself is needed (hard-capped). Use this as the fast path for session-audit and session-history analysis.",
   promptGuidelines: [
-    "Inside a codemode script the name is `tools.pidx` (no built-in bash/read/edit here).",
+    "Use this as the fast path for session-audit and session-history analysis.",
   ],
   parameters: Type.Object({
     sessionsDir: Type.Optional(
@@ -133,7 +177,12 @@ const pidxTool = defineTool({
       Type.String({ description: "Path for the extracts JSONL (default: <home>/.pi/agent/.cache/pidx-extracts.jsonl). Never dumped inline." }),
     ),
     max: Type.Optional(Type.Number({ description: "Limit number of sessions in output" })),
-    force: Type.Optional(Type.Boolean({ description: "Re-index everything, ignoring the cache" })),
+    force: Type.Optional(
+      Type.Union([Type.Boolean(), Type.Literal("confirm")], {
+        description:
+          "Re-index everything, ignoring the cache. `true` alone is refused — pass \"confirm\" to overwrite the cache/state file",
+      }),
+    ),
     stdout: Type.Optional(
       Type.Boolean({ description: "Return the raw extracts in context instead of only a pointer (hard-capped; default false)" }),
     ),
@@ -159,6 +208,19 @@ const pidxTool = defineTool({
     const inline = params.stdout === true;
     const outPath = params.out ?? (inline ? undefined : DEFAULT_OUT);
 
+    // X2 (permission-gate audit §10): `out`/`state`/`sessionsDir` used to be
+    // forwarded verbatim, so a caller could point them at any path on disk.
+    // Every path param must now resolve inside one of the sandbox roots
+    // before anything is created or spawned.
+    for (const [key, value] of [
+      ["out", outPath],
+      ["state", params.state],
+      ["sessionsDir", params.sessionsDir],
+    ] as const) {
+      if (typeof value === "string" && value !== "") assertContained(key, value);
+    }
+    if (params.force) assertForceConfirmed(params.force);
+
     if (outPath) mkdirSync(dirname(outPath), { recursive: true });
 
     const args: string[] = [];
@@ -166,7 +228,7 @@ const pidxTool = defineTool({
     if (params.state) args.push("--state", params.state);
     if (outPath) args.push("--out", outPath);
     if (params.max !== undefined) args.push("--max", String(params.max));
-    if (params.force) args.push("--force");
+    if (params.force === true || params.force === "confirm") args.push("--force");
 
     const { stdout, stderr } = await execFileAsync(pidxBin(), args, {
       maxBuffer: 64 * 1024 * 1024,

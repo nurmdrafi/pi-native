@@ -9,11 +9,9 @@ export const FAMILY_LESSONS: Record<string, string> = {
   "Token Economy (Re-read)":
     "Never re-read a file window already in context this session — read only new regions (offset/limit).",
   "Token Economy (Piread-first)":
-    "Read text files with the piread tool, never the built-in read tool — read is only for images. piread falls back to the built-in reader on its own. Inside a codemode script this means tools.piread, never tools.read.",
+    "Read text files with the piread tool, never the built-in read tool — read is only for images. piread falls back to the built-in reader on its own.",
   "Token Economy (Pibash-first)":
-    "Run shell commands with the pibash tool, never the built-in bash tool — pibash falls back to the built-in executor on its own. Inside a codemode script this means tools.pibash, never tools.bash.",
-  "Codemode (Script)":
-    "A codemode script is an async function body, so it must parse: watch template-literal backticks and escaped quotes (a stray `\\\"` or `\\\\` often closes a string early). It is checked before it runs — the gate returns a line:column pointer to the syntax error; fix the escaping and re-send.",
+    "Run shell commands with the pibash tool, never the built-in bash tool — pibash falls back to the built-in executor on its own.",
   "Permission Gate (Destructive)":
     "Destructive/mutating commands (rm, git reset --hard/clean/checkout --, package installs, sudo) need explicit user approval first — a yes in chat or in the invoking message (incl. /ship, /issue, /update-changelog) counts and suppresses the confirm; otherwise ask in chat and wait.",
   "Anchor Guard":

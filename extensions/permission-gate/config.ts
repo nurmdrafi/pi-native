@@ -41,8 +41,6 @@ export const RULE_IDS = {
   locateFirst: "R1c",
   nativeReadFirst: "P1",
   nativeBashFirst: "P2",
-  nativeToolsInScripts: "P3",
-  codemodeScriptGuard: "P4",
   outputCap: "H1",
   readOutputCap: "H1b",
   destructiveConfirm: "H2",
@@ -63,19 +61,54 @@ export const RULE_IDS = {
 
 export type RuleKey = keyof typeof RULE_IDS;
 
-/** Defaults: everything ON. Disabling is always an explicit act. */
-const DEFAULTS: Record<RuleKey, boolean> = Object.fromEntries(
-  (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, true]),
-) as Record<RuleKey, boolean>;
+/**
+ * ESLint-style severity. `error` blocks the call; `warn` records the violation
+ * and lets the call proceed; `off` skips the rule entirely.
+ *
+ * The distinction exists because a rule is a *default*, not always an absolute.
+ * Preference rules (search hygiene, toolchain pins, re-run, big-read) encode a
+ * convention the gate cannot know is wrong for the task at hand, so blocking
+ * there buys a certain retry to avoid a speculative saving. Safety rules keep
+ * their bite: `HARD_RULES` below cannot be configured below `error`.
+ */
+export type Severity = "off" | "warn" | "error";
+
+/** Safety rules whose severity is never below `error`, whatever config says. */
+export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
+  "editAnchorGuard",
+  "destructiveConfirm",
+  "commitMessageLint",
+] as RuleKey[]);
+
+/** Preference rules ship as `warn`: taught, counted, not blocked. */
+export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
+  "toolchainPnpm",
+  "toolchainNode",
+  "searchScope",
+  "searchMidPipe",
+  "findFirst",
+  "searchPortability",
+  "rerunGuard",
+  "largeReadGuard",
+] as RuleKey[]);
+
+/** Defaults are fail-closed: active rules block unless demoted above. */
+const DEFAULTS: Record<RuleKey, Severity> = Object.fromEntries(
+  (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, WARN_BY_DEFAULT.has(k) ? "warn" : "error"]),
+) as Record<RuleKey, Severity>;
 
 export interface GateConfig {
-  rules: Record<RuleKey, boolean>;
+  rules: Record<RuleKey, Severity>;
+  severity: Record<RuleKey, Severity>;
   outputCap: { maxLines: number; maxBytes: number };
   confirm: { timeoutMs: number };
   violationMemory: { distinctSessionsBeforeLesson: number; windowDays: number };
 }
 
-const CONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), "config.json");
+/** Redirectable so a test can exercise a config without touching the tracked
+ * file. */
+const CONFIG_PATH =
+  process.env.PGATE_CONFIG ?? join(dirname(fileURLToPath(import.meta.url)), "config.json");
 
 const DEFAULT_OUTPUT_CAP = { maxLines: 40, maxBytes: 2048 };
 const DEFAULT_CONFIRM = { timeoutMs: 300_000 };
@@ -85,14 +118,21 @@ function warn(msg: string): void {
   process.stderr.write(`permission-gate config: ${msg}\n`);
 }
 
-/** Coerce a config value to a boolean. `"0"`/`"false"` are false; anything
- * else truthy-ish that is not a boolean is a mistake worth reporting. */
-function asBool(v: unknown, where: string): boolean | undefined {
-  if (typeof v === "boolean") return v;
+/**
+ * Coerce a config value to a severity, ESLint style: `"off"|"warn"|"error"`
+ * or the numeric `0|1|2`. Booleans keep working (`true` → error, `false` → off)
+ * so existing configs and `PGATE_<RULE>=0/1` keep their meaning.
+ */
+function asSeverity(v: unknown, where: string): Severity | undefined {
+  if (typeof v === "boolean") return v ? "error" : "off";
+  if (v === 0) return "off";
+  if (v === 1) return "warn";
+  if (v === 2) return "error";
   const s = String(v).trim().toLowerCase();
-  if (s === "0" || s === "false" || s === "off" || s === "no") return false;
-  if (s === "1" || s === "true" || s === "on" || s === "yes") return true;
-  warn(`ignoring ${where}=${JSON.stringify(v)} (expected true/false)`);
+  if (s === "off" || s === "0" || s === "false" || s === "no") return "off";
+  if (s === "warn" || s === "1") return "warn";
+  if (s === "error" || s === "2" || s === "true" || s === "on" || s === "yes") return "error";
+  warn(`ignoring ${where}=${JSON.stringify(v)} (severity must be off/warn/error or 0/1/2)`);
   return undefined;
 }
 
@@ -138,7 +178,7 @@ function loadGateConfig(): GateConfig {
         warn(`unknown rule "${key}" in config.json — ignored (see RULE_IDS in config.ts for valid keys)`);
         continue;
       }
-      const b = asBool(value, `rules.${key}`);
+      const b = asSeverity(value, `rules.${key}`);
       if (b !== undefined) rules[key as RuleKey] = b;
     }
   }
@@ -147,7 +187,7 @@ function loadGateConfig(): GateConfig {
   for (const key of Object.keys(RULE_IDS) as RuleKey[]) {
     const env = process.env[`PGATE_${key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`];
     if (env === undefined) continue;
-    const b = asBool(env, `PGATE_${key}`);
+    const b = asSeverity(env, `PGATE_${key}`);
     if (b !== undefined) rules[key] = b;
   }
 
@@ -155,8 +195,18 @@ function loadGateConfig(): GateConfig {
   const cf = (raw.confirm ?? {}) as Record<string, unknown>;
   const vm = (raw.violationMemory ?? {}) as Record<string, unknown>;
 
+  // Hard rules are clamped: no config value can lower them below `error`.
+  const severity = { ...rules };
+  for (const key of HARD_RULES) {
+    if (severity[key] !== "error") {
+      warn(`rule "${key}" is a safety rule and cannot be set to "${severity[key]}" — kept at "error"`);
+      severity[key] = "error";
+    }
+  }
+
   return {
-    rules,
+    rules: severity,
+    severity,
     outputCap: {
       maxLines: asPosInt(oc.maxLines, "outputCap.maxLines", 10_000) ?? DEFAULT_OUTPUT_CAP.maxLines,
       maxBytes: asPosInt(oc.maxBytes, "outputCap.maxBytes", 10_000_000) ?? DEFAULT_OUTPUT_CAP.maxBytes,
@@ -176,7 +226,17 @@ function loadGateConfig(): GateConfig {
 /** Loaded once per process; the gate reads `config.rules.<key>` at each check. */
 export const config: GateConfig = loadGateConfig();
 
-/** True when the rule is active. `ruleEnabled("rerunGuard")`. */
+/** True when the rule runs at all (warn or error). `ruleEnabled("rerunGuard")`. */
 export function ruleEnabled(key: RuleKey): boolean {
-  return config.rules[key];
+  return config.severity[key] !== "off";
+}
+
+/** The rule's severity: `off` skips it, `warn` records and proceeds, `error` blocks. */
+export function ruleSeverity(key: RuleKey): Severity {
+  return config.severity[key];
+}
+
+/** True only when the rule should BLOCK (severity `error`). */
+export function ruleBlocks(key: RuleKey): boolean {
+  return config.severity[key] === "error";
 }
