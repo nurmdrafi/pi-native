@@ -148,6 +148,23 @@ Tools, env keys, benchmarks, and context-shaping tables: [docs/native-tools.md](
 
 All skills are manual (`/skill:<name>`) and validator-enforced; bodies enter context only when invoked — [docs/skills.md](docs/skills.md). Subagents run on tmux, are gated off by default, and spawn sandboxed with the permission-gate re-enabled inside — [docs/subagents.md](docs/subagents.md).
 
+## Environment keys
+
+Every native-tool spawn re-sets the session keys from the live tool context (`extensions/pibash/index.ts`); subagent workers get their identity keys on spawn (`extensions/subagents/index.ts`). User-set knobs pass through the same environments:
+
+| Key                   | Set by     | Carries                                                        |
+| --------------------- | ---------- | -------------------------------------------------------------- |
+| `PI_SESSION_ID`       | pibash     | current session id                                             |
+| `PI_SESSION_FILE`     | pibash     | session file path                                              |
+| `PI_PROVIDER`         | pibash     | active model provider                                          |
+| `PI_MODEL`            | pibash     | active model id                                                |
+| `PI_REASONING_LEVEL`  | pibash     | thinking level, when one is active                             |
+| `PI_CODING_AGENT_DIR` | override   | agent config dir (default `~/.pi/agent`); forwarded to workers |
+| `PI_SUBAGENT_NAME`    | subagents  | worker display name                                            |
+| `PI_PIDX_MAX_INLINE`  | user       | pidx inline-output cap before spill (default 2000)             |
+
+Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`, `PI_SUBAGENT_SESSION`, `PI_SUBAGENT_ID`, `PI_SUBAGENT_ALLOWED`, `PI_SUBAGENT_ACTIVITY_FILE`, `PI_SUBAGENT_SURFACE`, `PI_SUBAGENT_AUTO_EXIT`), classified in `ENV_VAR_ALLOWLIST` in [scripts/doc-check.mjs](scripts/doc-check.mjs).
+
 ## Docs
 
 - [Native tools](docs/native-tools.md) — tools, env keys, performance, context shaping

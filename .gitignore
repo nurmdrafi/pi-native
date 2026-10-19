@@ -51,3 +51,6 @@ target/
 
 # S2 benchmark live workdirs
 benchmark/runs/
+
+# Tool-call observability event streams (regenerable; SCHEMA: benchmark/observability/SCHEMA.md)
+benchmark/observability/events/

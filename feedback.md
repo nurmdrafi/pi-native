@@ -1,189 +1,317 @@
-# Updated review: `pi-native`
+This is a strong, unusually disciplined architecture: the fail-open ladder, byte-exact oracle parity, bounded context output, and daemon lifecycle rules are all the right calls for a token- and latency-sensitive agent harness. The main remaining risks are not “make Rust faster”; they are **daemon correctness under concurrency/cancellation**, **pibash double serialization**, **security of the shell/daemon boundary**, and **operability when fallbacks mask real failures**. Your prior benchmark direction already identifies per-rung measurement and the pibash large-output issue as the key follow-ups. 
 
-Reviewed against the current README retrieved on October 16, 2026. This is a README-level architecture review; I have not independently run the repository's tests or reproduced its benchmarks.
+## Overall assessment
 
-My assessment: the harness has made a meaningful improvement since the earlier review. It has moved beyond optimizing instructions and skills into replacing actual Pi tool execution paths with persistent Rust daemons.
+**Rating: 8.5/10 for the stated goals** — performance, token efficiency, reliability, and portability.
 
-The key change is the introduction of `piread` and `piedit` as separate, first-class tools, while retaining the built-in tools as fallback implementations. The README documents benchmarks for both and describes how the permission gate continues to protect native edits.&#x20;
+The architecture correctly separates concerns:
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+| Layer | Responsibility | Assessment |
+|---|---|---|
+| Extension | Registration, env/session glue, cancellation, TUI, fallback selection | Good; keeps OS-specific process work out of Rust |
+| Daemon | Hot-path NDJSON execution | Good, but needs stricter timeout/backpressure policy |
+| One-shot | Transport-independent fallback | Good |
+| Built-in | Final correctness oracle | Excellent safety property |
+| Compaction | Model-visible cost control | Excellent; likely the biggest real-world win |
+| Parity tests | Byte-for-byte compatibility | Excellent; prevents silent behavioral drift |
 
-GitHub
+The biggest architectural win is not the daemon’s 0.03–0.18 ms dispatch improvement; it is the **94%+ reduction in model-visible bytes** from compaction and pointer-only outputs. That directly reduces token spend and downstream model latency. 
 
-+1
+## What is already right
 
+### Fail-open ladder
 
+The `daemon → one-shot → built-in` ladder is the correct reliability model. It turns native-tool defects into performance degradation rather than agent-breaking failures, and preserving the TypeScript implementation as the final oracle is especially valuable while the Rust tools are still evolving. 
 
-## Current engineering assessment
+Two details are particularly good:
 
-Native tool architecture
+- `details.via` records the rung without leaking into model-visible content.
+- Violation/adoption telemetry is one row per terminal fallback, not one row per ladder rung, avoiding noisy logs.
 
-Strong
+### Daemon lifecycle
 
-Performance evidence
+The ref/unref matrix is correct and addresses the classic Node child-process pitfalls:
 
-Promising
+- Idle: unref process and streams.
+- In-flight: ref all three.
+- Pending empty: unref all three.
 
-Security integration
+Your two documented bugs—unsettled top-level await and a host that never exits—are exactly the failure modes this design needs to guard against. Keeping tests for both is appropriate. 
 
-Needs implementation audit
+### Process-group isolation
 
-Cross-platform validation
+Using `setpgid(0, 0)` for daemons and `process_group(0)` for shell children is a sound split:
 
-Not established by Linux benchmarks
+- The daemon escapes group-wide signals aimed at the client/session.
+- `pibash` can still kill a timed-out command tree via `-<pid>`.
+- Avoiding `setsid()` is reasonable because it is unnecessary for a stdio daemon and introduces session/terminal complications.
 
-## 1. The strongest improvement: persistent native tools
+This is one of the strongest reliability decisions in the design. 
 
-The README now documents three Rust tools:
+### Context shaping
 
-- `piread` — native text-file reads.
-- `piedit` — native text-file edits.
-- `pidx` — session-log indexing.
+The compaction strategy is practical and agent-aware:
 
-They use different execution paths, but share a sensible design principle: keep the existing Pi orchestration and move expensive local operations into specialized native code. The read and edit tools use persistent daemons to avoid repeated process startup.&#x20;
+- `pibash`: command-aware error priority for test/build output.
+- `piread`: deterministic head/tail with continuation metadata.
+- `piedit`: bounded diff rather than full file contents.
+- `pidx`: file pointer instead of inline corpus dump.
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+The important property is that compaction is **deterministic, idempotent, UTF-8-safe, and reversible or recoverable**. That makes results cacheable, testable, and safe for parity checks. 
 
-GitHub
+## Highest-priority risks
 
+### 1. pibash still pays for large output twice
 
+Your earlier benchmark finding is the most important optimization target: `pibash` is roughly neutral for small commands but regresses on large output because the payload is serialized twice. 
 
-This is a better direction than replacing the entire coding agent with a Rust implementation. It preserves Pi's model integration, tool orchestration, and extension ecosystem while targeting specific bottlenecks.
+Recommended target architecture:
 
-## 2. Native tool benchmarks: what the numbers establish
+```text
+child stdout/stderr
+  → streaming accumulator
+  → compaction decision
+  → serialize only final model-visible envelope
+  → optional full-output spill reference
+```
 
-The README reports the following Linux x64 results using Node.js 24.&#x20;
+Specific changes:
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+- Do not retain both `full_text` and a separately serialized legacy tail result when compaction has already selected the final output.
+- Make compaction streaming where possible: retain only candidate head, tail, error lines, and counters rather than the entire decoded stream.
+- Ensure the spill file is written incrementally, not by re-reading and rewriting the full captured text.
+- Add a benchmark fixture specifically for 1 MB, 10 MB, and 100 MB command output.
 
-GitHub
+Acceptance criterion: for large-output commands, Rust should not allocate or serialize more than `O(model-visible budget + spill write throughput)`.
 
+### 2. Serial daemon processing can become a hidden latency tax
 
+Single-threaded, in-order daemon processing is excellent for determinism and simplicity, but it creates head-of-line blocking:
 
-### Reported execution speedups
+- A long `pibash` command blocks later `piread` calls.
+- A slow file read blocks a quick edit.
+- Cancellation of one request cannot easily cancel the daemon’s current work.
 
-p50 latency; lower is better. These are local tool microbenchmarks, not whole-agent speedups.
+For your current four tools, this is probably acceptable if tool calls are mostly sequential. But once subagents or parallel tool calls become common, use one of these options:
 
-ReadEditIndex
+| Option | Tradeoff |
+|---|---|
+| One daemon per tool | Simple isolation; more processes and memory |
+| Thread pool inside each daemon | Better concurrency; requires request cancellation and bounded queue |
+| Spawn long-running `pibash` work outside daemon | Keeps daemon responsive; adds process management complexity |
 
-Unicode
+My recommendation: keep `piread`, `piedit`, and `pidx` serial for now, but give `pibash` a dedicated daemon or an explicit “long command” escape hatch. Shell commands are the most likely long-running workload.
 
-#### 4.6×
+### 3. Cancellation semantics are underspecified
 
-CRLF
+The document says the extension owns cancellation, but the daemon protocol does not define what happens when a request is cancelled.
 
-#### 4.1×
+You need explicit answers for:
 
-Long lines
+- Does the client send a `cancel` frame?
+- Does the daemon cancel the child process group?
+- Does a cancelled request still write a response?
+- Can a cancelled request leave partial spill files behind?
+- Does a timeout differ from user cancellation in the envelope?
 
-#### 3.0×
+A minimal robust protocol addition:
 
-2,500 lines
+```jsonc
+{ "id": 7, "op": "cancel", "targetId": 7 }
+```
 
-#### 2.8×
+Rules:
 
-One-line
+- The daemon acknowledges cancellation immediately.
+- The active shell process group receives `SIGTERM`, then `SIGKILL` after a grace period.
+- The original request emits a terminal envelope: `cancelled: true` or an error with `kind: "CANCELLED"`.
+- Spill files are removed unless explicitly retained for debugging.
 
-#### 2.7×
+Without this, cancellation may only detach the Node await while the Rust child continues consuming CPU, writing files, or holding locks.
 
-60 KB slice
+### 4. Daemon security boundary needs tightening
 
-#### 1.7×
+The daemon receives JSON over stdio from the extension, which is a reasonable trust boundary. But `pibash` still executes arbitrary shell commands, so the security model should be explicit.
 
-60 KB blob
+Recommended invariants:
 
-#### 1.0×
+- The daemon must never read configuration, credentials, or command allowlists from an untrusted project-local file without validation.
+- Environment injection should be allowlisted, not broadly inherited by default.
+- `cwd` must be canonicalized and checked against permitted roots where your permission policy requires it.
+- Temp spill files should use `O_EXCL`, restrictive permissions, and cleanup on abnormal exit.
+- The daemon should not trust `PI_*` variables blindly; validate types, lengths, and paths.
+- Log files must not include secrets, full environments, or raw command output by default.
 
-My interpretation:
+The permission gate treating native tools as wrappers around `read` / `edit` / `bash` is good, but the native layer should not become a way to bypass path, symlink, or git-protection checks. Your backlog already flags permission-gate symlink issues as important; I would treat those as pre-production blockers rather than ordinary backlog work. 
 
-- `piread`: A convincing improvement for small and medium text reads, where dispatch and processing overhead are a significant portion of total latency.
-- `piedit`: A particularly useful improvement for large edits, where the TypeScript path previously incurred repeated normalization, string processing, and diff-rendering costs.
-- `pidx`: Strong evidence for optimizing repeated session audits through incremental indexing, provided cache invalidation remains correct.
+### 5. Fallback observability can hide systemic failure
 
-The edit benchmark also reports parity and fuzz testing, which is a positive sign. However, benchmark results do not independently prove full behavioral equivalence across all inputs or operating systems.
+Fail-open is correct, but it can quietly turn into “everything runs through the built-in” without anyone noticing.
 
-## 3. The most important remaining issues
+Add operational thresholds:
 
-P1 — Tool selection and token overhead
+- Fallback rate per tool per session.
+- Consecutive fallback count.
+- Daemon restart count.
+- Time-to-first-fallback after daemon start.
+- Percentage of requests by `via`.
+- Model-visible bytes saved per tool.
 
-The README says `piread` and `piedit` are registered under their own names rather than shadowing the built-ins. This is safer for explicit fallback behavior, but it introduces a trade-off: the model now has additional tools to choose between.
+A useful rule: if a native tool falls back more than N consecutive times, emit one prominent diagnostic and optionally disable that daemon for the remainder of the session to avoid restart churn.
 
-Recommendation: Measure actual prompt-token overhead and tool selection frequency. Confirm that normal sessions and subagents actually use `piread` and `piedit` where intended, rather than continuing to call `read` and `edit`.
+## Architecture-level improvements
 
-P1 — Bash remains a major optimization opportunity
+### Split protocol from tool schema
 
-Your native read and edit tools target file operations, but they do not accelerate arbitrary shell commands. The README already places `rg` and `fd` on the preferred search paths.&#x20;
+Right now each daemon speaks a tool-specific request shape. That is fine at four tools, but it will become repetitive.
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+Introduce a tiny shared envelope:
 
-GitHub
+```jsonc
+{ "v": 1, "id": 7, "tool": "piread", "op": "read", "params": { ... } }
+```
 
+Response:
 
+```jsonc
+{ "v": 1, "id": 7, "ok": true, "result": { ... } }
+```
 
-Recommendation: Profile Bash latency separately. Measure the shell-process startup floor, command execution time, and output serialization. Test a Rust shell such as Brush against Bash on your actual command corpus before switching. Do not assume shell replacement will improve commands dominated by external processes.
+Benefits:
 
-P1 — Failure handling and mutation safety
+- One client dispatcher.
+- Uniform cancellation, timeout, and error handling.
+- Easier to add future tools such as `pisearch`, `pigrep`, or `pifs`.
+- Versioned protocol makes daemon/client mismatch detectable.
 
-The documented edit path retains the mutation queue and permission gate, with fallback to the built-in executor if the native transport fails.&#x20;
+Keep the tool-specific result shape unchanged so parity tests remain stable.
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+### Add protocol version and handshake
 
-GitHub
+The daemon currently assumes the extension and binary match. If a user has a stale installed binary, behavior may be subtly wrong rather than obviously incompatible.
 
+Add a first-line handshake:
 
+```jsonc
+{ "op": "hello", "protocol": 1, "tool": "piread", "version": "0.4.2" }
+```
 
-Recommendation: Verify daemon crashes during writes, malformed responses, concurrent requests, stale file contents, and partial failures. A fallback after an uncertain write must not repeat an operation that may already have succeeded.
+If the extension sees an unexpected protocol or tool version, immediately use one-shot or built-in and record `protocol_mismatch`.
 
-P1 — Cross-platform performance evidence
+### Make daemon health explicit
 
-The README targets macOS and Linux, but the detailed read/edit benchmark tables are Linux x64 results.&#x20;
+“Lazy restart on death” is good, but add a lightweight health check before reusing a long-idle daemon:
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+- Check whether the process is still alive.
+- Optionally send `{"op":"ping","id":...}` with a short timeout.
+- If no response, clear the slot and restart.
 
-GitHub
+This avoids sending a real request into a zombie or half-dead pipe.
 
+For your use case, a cheap liveness check is probably enough; a ping adds one round trip but substantially improves recovery determinism.
 
+## Optimization review
 
-Recommendation: Add CI coverage for macOS ARM64 and Linux x64/ARM64 where available. Test the daemon lifecycle, executable discovery, signal handling, newline behavior, file permissions, and fallback behavior on each supported platform.
+### Keep these optimizations
 
-## 4. Documentation issues to fix
+These are high-value and should remain:
 
-I found several specific inconsistencies in the current README that should be corrected.
+- Workspace with shared `Cargo.lock` and `target/`.
+- `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
+- No Tokio, Clap, regex, or libc dependency.
+- Streaming `read_until` with reused buffers.
+- Incremental UTF-8 decoding.
+- `Cow<str>` ASCII fast paths.
+- Lazy `FuzzyView` in `piedit`.
+- Reused daemon response buffer.
+- Atomic write-plus-rename cache in `pidx`.
+- `(size, mtime_ns)` incremental invalidation.
 
-| Issue                       | Why it matters                                                                                                                                                                              | Suggested fix                                                                                      |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Future-dated verification   | The README references verification and a redesign dated October 18, 2026, although the current date is October 16, 2026.                                                                    | Confirm the intended dates and publish only completed results.                                     |
-| Edit parity case count      | One section reports 40 parity cases; the performance section reports 51 passing cases.                                                                                                      | Distinguish Rust crate tests from integration tests, or synchronize the counts.                    |
-| `pidx` cold-run figures     | The README reports 450 ms versus 220 ms on one host, but 800 ms on a slower host.                                                                                                           | Label each host and run explicitly rather than presenting the figures as one comparable benchmark. |
-| Read latency interpretation | The 60 KB blob result is described as parity and attributes a residual delta to a noise floor, while the reported analysis also identifies JSON parsing and validation as structural costs. | Separate measured variance from the identified downstream costs.                                   |
-| Portability claims          | The design promises macOS and Linux portability, but detailed native-tool results are Linux-specific.                                                                                       | Label platform coverage separately from performance coverage.                                      |
+These choices match your goal of small, fast, maintainable native tools rather than heavyweight service infrastructure. 
 
-These are documentation and evidence-quality issues, not proof of implementation defects. The README's test and benchmark descriptions provide a useful basis for auditing them.&#x20;
+### Reconsider these
 
-[image](https://www.google.com/s2/favicons?domain=https://raw.githubusercontent.com\&sz=32)
+| Item | Concern | Recommendation |
+|---|---|---|
+| `panic = "abort"` | A panic kills the daemon and drops every in-flight request | Keep it, but ensure every request has a client-side timeout and fallback |
+| Raw `extern "C"` for `setpgid` | Low dependency cost, but easy to get wrong | Keep, but add Unix-only integration tests and document platform support |
+| `preserve_order` everywhere | Needed for byte parity, but slightly more expensive | Keep for envelope boundary; consider normal maps internally where order is irrelevant |
+| SWAR JSON escaping | Good hot-path optimization | Keep, but ensure it does not complicate security-sensitive escaping |
+| 2000-line / 50 KB accumulator | Reasonable default | Make configurable through validated env vars; document memory ceiling |
+| 30 ms reader grace | Prevents tail loss | Consider adaptive grace: longer for commands known to flush late |
 
-GitHub
+### Optimization priorities
 
-+1
+In order:
 
+1. **Eliminate pibash double serialization.** Highest real-world impact for large command output. 
+2. **Define cancellation and timeout protocol.** Prevents orphaned work and ambiguous agent state.
+3. **Add daemon handshake and health checks.** Prevents stale-binary and zombie-daemon issues.
+4. **Instrument per-rung latency and fallback rate.** You need this before further micro-optimization. 
+5. **Harden permission/path/symlink checks.** Security and correctness before additional speed.
+6. **Only then optimize internal hot paths** such as fuzzy matching, diffing, or JSON escaping.
 
+## Testing gaps to close
 
-## 5. What I would prioritize next
+Your parity suite is excellent, but add these test classes:
 
-Given your goal of making the harness faster, this is the order I recommend:
+- **Cancellation:** cancel during long-running `pibash`; assert child process group dies and no orphan remains.
+- **Daemon restart storm:** kill daemon repeatedly during requests; assert no hang, duplicate response, or unsettled promise.
+- **Backpressure:** child writes megabytes while client is slow; assert no deadlock and bounded memory.
+- **Concurrent requests:** even if processed serially, assert id matching and no response interleaving.
+- **Stale binary:** protocol/version mismatch falls back cleanly.
+- **Spill cleanup:** normal exit, timeout, cancellation, and daemon kill all clean temp files.
+- **Fallback metrics:** every fallback produces exactly one structured event with the correct `sid`, tool, reason, and path.
+- **Cross-platform process groups:** macOS and Linux behavior for `setpgid`, timeout kill, and orphan prevention.
 
-1. Finish validating `piread` and `piedit`. Confirm correct tool selection, daemon recovery, and behavioral parity. Keep the built-ins as fallbacks.
-2. Benchmark the Bash tool. Collect per-command latency for common workflows such as `git status`, `rg`, `fd`, test commands, and multi-command scripts. Separate shell startup from the time spent running external programs.
-3. Test Brush as an alternative shell runtime. Compare it with Bash using your actual harness workload, including compatibility tests. Adopt it only if it improves end-to-end execution.
-4. Measure full agent tasks. Compare the baseline and optimized harness using the same tasks and model. Track task completion time, correctness, model calls, tokens, and failures—not just microbenchmark speedups.
-5. Add cross-platform native-tool CI. Ensure macOS and Linux builds remain correct as the Rust implementations evolve.
+## Recommended next pass
 
-## Final verdict
+I would sequence the next implementation pass as:
 
-Your harness is now moving in the right direction: it has targeted native implementations, persistent execution, explicit fallbacks, and benchmark-driven optimization.
+1. **Fix pibash large-output path** — single final serialization, streaming spill, benchmark at 1/10/100 MB.
+2. **Add cancellation protocol** — cancel frame, process-group kill, terminal envelope, spill cleanup.
+3. **Add daemon handshake and health check** — protocol version, tool identity, stale-binary fallback.
+4. **Add operational metrics** — per-rung latency, fallback rate, restart count, model-visible bytes.
+5. **Harden security and path policy** — symlink, cwd, env injection, temp-file cleanup.
+6. **Run a per-rung benchmark suite** — daemon, one-shot, built-in, warm/cold `pidx`, and large-output `pibash`.
 
-The next bottleneck to investigate is Bash execution, because your current Rust replacements mainly accelerate file operations and session analysis. I would not replace the shell until you have measured its actual cost, but I would make that benchmark the next engineering task.
+The architecture is already good enough that further work should prioritize **correctness under failure, cancellation, and observable performance** rather than more general optimization. Your strongest claim to maintain is: native Rust tools provide near-equivalent dispatch latency while dramatically reducing model-visible context; the remaining work is to make that claim robust under large outputs, cancellation, and real-world daemon failures.
 
-The other priority is to verify that the model uses the new tools consistently. A faster tool that the model rarely selects will have little impact on overall task duration.
+## Tool-wise improvements
 
+| Tool | Improvement area | Priority |
+|---|---|---|
+| **pibash** | Remove duplicate serialization of large output; make spill + compaction streaming; fix `seq 50000`-style regression | **P0** |
+| **pibash** | Define cancellation: cancel frame → kill child process group → terminal envelope → cleanup spill | **P0** |
+| **pibash** | Bound memory for very large stdout/stderr; test 1 MB / 10 MB / 100 MB outputs | P1 |
+| **piread** | Keep bounded memory contract; add tests for huge files, UTF-8 boundaries, binary detection, and offset edge cases | P1 |
+| **piread** | Ensure compaction never rewrites `truncation` metadata or weakens read-coverage certification | P1 |
+| **piedit** | Preserve exact bytes for untouched lines; add tests for CRLF, BOM, Unicode fuzzy matches, overlapping edits | P1 |
+| **piedit** | Optimize only after correctness: large-file fuzzy matching, diff generation, and multi-edit batching | P2 |
+| **pidx** | Add cache corruption recovery tests; validate atomic rename behavior under crash/kill | P1 |
+| **pidx** | Benchmark cold parse, warm replay, and one-file-change incremental update separately | P2 |
+| **pidx** | Consider periodic compaction if the state store grows large | P3 |
 
+## Cross-tool improvements
+
+| Scope | Improvement area | Priority |
+|---|---|---|
+| **Daemon protocol** | Add versioned handshake: protocol version, tool name, binary version | **P0** |
+| **Daemon protocol** | Add `ping` / health check and stale-daemon recovery | P1 |
+| **Daemon protocol** | Standardize error, timeout, cancellation, and malformed-request envelopes | **P0** |
+| **Cancellation** | Define client-side timeout, daemon-side cancellation, and child-process cleanup | **P0** |
+| **Security** | Fix permission-gate symlink / protected-path bypass issues first | **P0** |
+| **Security** | Validate `cwd`, paths, env injection, temp files, and secrets in logs | P1 |
+| **Reliability** | Add daemon restart-storm, broken pipe, slow client, and concurrent-request tests | P1 |
+| **Observability** | Track per-rung latency, fallback rate, restart count, and model-visible bytes | P1 |
+| **Portability** | Add Linux CI and verify macOS + Linux parity for process groups, paths, and temp files | **P0** |
+| **Benchmarking** | Build per-tool, per-rung benchmark matrix; do not average across models | P2 |
+
+## Recommended order
+
+1. Fix permission-gate symlink/protected-path security issues.   
+2. Fix `pibash` large-output duplicate encoding.   
+3. Add daemon handshake, cancellation, and timeout protocol.  
+4. Add Linux CI and macOS/Linux parity tests.   
+5. Add fallback/latency/model-visible-byte metrics.  
+6. Run the full per-tool benchmark later.
