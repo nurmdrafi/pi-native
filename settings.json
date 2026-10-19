@@ -2,8 +2,8 @@
   "$schema": "https://pi.dev/schemas/settings.schema.json",
   "lastChangelogVersion": "1.3.0",
   "theme": "dark",
-  "defaultProvider": "zai",
-  "defaultModel": "deepseek/deepseek-flash",
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-flash",
   "defaultThinkingLevel": "off",
   "modelThinkingLevels": {
     "deepseek/deepseek-flash": "off",
