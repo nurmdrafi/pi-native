@@ -232,6 +232,10 @@ function getToolExtensionPath(tool: string): string | undefined {
     video_extract: join(extBase, "video-extract", "index.ts"),
     youtube_search: join(extBase, "youtube-search", "index.ts"),
     google_image_search: join(extBase, "google-image-search", "index.ts"),
+    piread: join(extBase, "piread", "index.ts"),
+    piedit: join(extBase, "piedit", "index.ts"),
+    pibash: join(extBase, "pibash", "index.ts"),
+    pidx: join(extBase, "pidx", "index.ts"),
     safe_bash: join(SUBAGENTS_DIR, "tools", "safe-bash.ts"),
   };
   // Prefer the built-in path, but fall back to a runtime-registered extension

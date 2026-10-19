@@ -1931,6 +1931,14 @@ describe("tool registration", () => {
     });
   });
 
+  it("resolves tool-extension paths for the four native tools (load-order safe)", () => {
+    for (const tool of ["piread", "piedit", "pibash", "pidx"]) {
+      const path = (subagentsModule as any).__test__.getToolExtensionPath(tool);
+      assert.ok(path, `expected an extension path for ${tool}`);
+      assert.ok(existsSync(path), `expected the ${tool} path to exist on disk: ${path}`);
+    }
+  });
+
 
   it("rejects a top-level spawn with no agent and no fork", async () => {
     const { api, registeredTools } = createMockExtensionApi();
