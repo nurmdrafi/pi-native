@@ -11,12 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`subagents`: sandboxed children are no longer toolless.** `getToolExtensionPath` in `extensions/subagents/index.ts` now hardcodes the four first-party `-e` paths (piread, piedit, pibash, pidx); alphabetical extension load order had made runtime `registerToolExtension` a silent no-op. Regression test pins path resolution (suite 156/156). Effective for orchestrator sessions started after the edit; verified by a post-restart probe (native tools executed in-child, model `zai/glm-5.3`).
+- **Tests: `daemon-exit` child fixture root is now a CLI arg.** Drops the hardcoded `/Users/nur/...` machine path; suite green on this Linux host.
+
 - **`pibash`: the `seq 50000`-class output regression is fixed (−32% p50 one-shot).** Phase profiling attributed the output-size cost to two sources: the compression pre-pass ran three full `split_lines` passes over the stream and allocated one `String` per kept line in `dedup_repeats`, and the envelope materialized the stream twice (`full_text` clone + `read_full_output` re-read of the raw buffer or spill file). `strip_ansi`/`dedup` are now copy-on-write (borrowing the stream when it is ANSI-free / fold-free — the common piped case), the line vector is split once and shared by `error_priority_lines`/`head_tail_lines`, `fits` counts lines without materializing them, and the fold path emits through a single buffer. `OutputAccumulator::into_full_text` consumes into one materialization (zero-copy move of the raw buffer) and `cap_full_output` derives the ≤1 MiB `structuredContent` payload from that same buffer; `read_full_output`/`full_text` are gone. Spill compaction windows are maintained incrementally (rolling byte window + a line ring), so repeated `snapshot()` calls — the daemon's throttled partials — never re-split the whole tail. Measured with `custom-tools/pibash/bench-seq50000.mjs`: one-shot `seq 50000` p50 19.7 ms → 13.4 ms; `compress_output` 9.6 ms → 2.5 ms (stage attribution in `docs/custom-tools-architecture.md`). Wire bytes are unchanged — the envelope shape stays parity-pinned, so model-visible tokens are identical.
 
 ### Changed
 
 - **Test fixtures: CJK characters replaced with byte-equivalent Latin/symbol text.** Every 3-byte CJK fixture character across `custom-tools` and `tests/` is now `€` (also exactly 3 bytes in UTF-8, so all byte-count assertions hold); the accumulator's raw-byte fixtures feed `E2 82 AC` where they previously fed the old character's bytes. Multi-byte boundary coverage — the reason those fixtures exist — is unchanged; all affected suites (pibash/piedit/piread parity, diff fuzz, gate) pass. A rule was added to `AGENTS.md`: test fixtures and assertion literals use English/Latin text, with accented Latin or symbol characters for multi-byte coverage.
 - **`pibash`: a scoped seq-50000 micro-bench harness.** `custom-tools/pibash/bench-seq50000.mjs` (Node, `hrtime`, path derived from the script location — portable, no GNU-only `date`/`seq` in the harness) replaces the throwaway shell loop; it degrades with a clear message when the workload is missing.
+- **README: restructured to a landing page; detail migrated to `docs/`.** 438 → 151 lines; five docs families (native-tools, skills, subagents, design-rules, development); all original badges restored (OS badges → `docs/design-rules.md#portability`); architecture diagram is now a Mermaid request-lifecycle (gate → fail-open ladder → context shaping); quickstart verified against the installed pi package's README. doc-check re-pointed: skills table → `docs/skills.md`, extensions catalog → `extensions/README.md`; all 4 families PASS.
+- **Config: default provider/model is `zai/glm-5.3`, thinking `max`.** Verified live from child session records; deepseek variants stay off.
+- **Skills: `web-search` (tvly) now gated as `pibash(tvly *)` with model invocation enabled.** Tool name matches the native bash tool.
+
+### Added
+
+- **Research corpus: 10 reports under `research/`.** Eight dated 2026-10-19 (readme-repo-metadata, pibash-large-output, daemon-protocol, process-groups-cancellation, benchmark-observability, permission-gate-audit + adjustment plan, security-boundary, subagents incident) plus the pibash P0 implementation plan and a changelog proposal.
+- **Observability: OTel-GenAI-compatible JSONL event schema.** `benchmark/observability/SCHEMA.md` — per-tool-call events, write-time rules, aggregates, benchmark fixture design.
 
 ## [1.47.0] - 18-10-2026
 
