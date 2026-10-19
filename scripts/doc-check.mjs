@@ -353,20 +353,26 @@ export function checkSkillsInventory(root) {
   const derived = existsSync(skillsDir)
     ? readdirSync(skillsDir).filter((e) => statSync(join(skillsDir, e)).isDirectory() && existsSync(join(skillsDir, e, 'SKILL.md')))
     : [];
-  const readmePath = join(root, 'README.md');
-  if (!existsSync(readmePath)) {
-    return { name: 'skills-inventory', label: 'SKILLS INVENTORY', status: 'FAIL', findings: ['README.md not found — skills table cannot be verified'] };
+  // Canonical locations, in order: the skills table in README.md, else docs/skills.md.
+  const candidates = [
+    { path: join(root, 'README.md'), label: 'README.md' },
+    { path: join(root, 'docs', 'skills.md'), label: 'docs/skills.md' },
+  ];
+  let src = null;
+  for (const c of candidates) {
+    if (!existsSync(c.path)) continue;
+    const ls = readFileSync(c.path, 'utf8').split('\n');
+    // locate the skills table: header row whose first cell is "Skill" and last is "Invocation"
+    for (let i = 0; i < ls.length; i++) {
+      const cells = tableCells(ls[i]);
+      if (cells && /^Skill$/i.test(cells[0]) && /^Invocation$/i.test(cells[cells.length - 1])) { src = { label: c.label, lines: ls, headerIdx: i }; break; }
+    }
+    if (src) break;
   }
-  const lines = readFileSync(readmePath, 'utf8').split('\n');
-  // locate the skills table: header row whose first cell is "Skill" and last is "Invocation"
-  let headerIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const cells = tableCells(lines[i]);
-    if (cells && /^Skill$/i.test(cells[0]) && /^Invocation$/i.test(cells[cells.length - 1])) { headerIdx = i; break; }
+  if (!src) {
+    return { name: 'skills-inventory', label: 'SKILLS INVENTORY', status: 'FAIL', findings: ['skills table not found in README.md or docs/skills.md — expected a header row like `| Skill | … | Invocation |`'] };
   }
-  if (headerIdx === -1) {
-    return { name: 'skills-inventory', label: 'SKILLS INVENTORY', status: 'FAIL', findings: ['skills table not found in README.md — expected a header row like `| Skill | … | Invocation |`'] };
-  }
+  const { label: srcLabel, lines, headerIdx } = src;
   const rows = [];
   for (let i = headerIdx + 1; i < lines.length && lines[i].trim().startsWith('|'); i++) {
     if (/^[-: |]+$/.test(lines[i].trim())) continue; // separator row
@@ -375,15 +381,15 @@ export function checkSkillsInventory(root) {
   }
   const byName = new Map();
   for (const r of rows) {
-    if (byName.has(r.name)) findings.push(`README.md:${r.line}: duplicate skills table row '${r.name}' (first at line ${byName.get(r.name).line})`);
+    if (byName.has(r.name)) findings.push(`${srcLabel}:${r.line}: duplicate skills table row '${r.name}' (first at line ${byName.get(r.name).line})`);
     else byName.set(r.name, r);
   }
   for (const dir of derived) {
-    if (!byName.has(dir)) findings.push(`skills/${dir}/ has SKILL.md but README.md skills table has no row for '${dir}'`);
+    if (!byName.has(dir)) findings.push(`skills/${dir}/ has SKILL.md but the skills table (${srcLabel}) has no row for '${dir}'`);
   }
   for (const [name, r] of byName) {
-    if (!derived.includes(name)) findings.push(`README.md:${r.line}: skills table row '${name}' has no skills/${name}/SKILL.md`);
-    else if (r.invocation !== `/skill:${name}`) findings.push(`README.md:${r.line}: row '${name}' invocation '${r.invocation}' ≠ '/skill:${name}'`);
+    if (!derived.includes(name)) findings.push(`${srcLabel}:${r.line}: skills table row '${name}' has no skills/${name}/SKILL.md`);
+    else if (r.invocation !== `/skill:${name}`) findings.push(`${srcLabel}:${r.line}: row '${name}' invocation '${r.invocation}' ≠ '/skill:${name}'`);
   }
   return { name: 'skills-inventory', label: 'SKILLS INVENTORY', status: findings.length ? 'FAIL' : 'PASS', findings };
 }
@@ -397,37 +403,54 @@ export function checkExtensionsInventory(root) {
   const derived = existsSync(extDir)
     ? readdirSync(extDir).filter((e) => statSync(join(extDir, e)).isDirectory() && walkFiles(join(extDir, e)).some((f) => f.endsWith('.ts')))
     : [];
-  const readmePath = join(root, 'README.md');
-  if (!existsSync(readmePath)) {
-    return { name: 'extensions-inventory', label: 'EXTENSIONS INVENTORY', status: 'FAIL', findings: ['README.md not found — Extensions section cannot be verified'] };
+  // Canonical locations, in order: a `## Extensions` section in README.md, else the
+  // extension catalog in extensions/README.md (the whole file is the section).
+  const candidates = [
+    { path: join(root, 'README.md'), label: 'README.md', needsSection: true },
+    { path: join(root, 'extensions', 'README.md'), label: 'extensions/README.md', needsSection: false },
+  ];
+  let src = null;
+  for (const c of candidates) {
+    if (!existsSync(c.path)) continue;
+    const ls = readFileSync(c.path, 'utf8').split('\n');
+    let start = 0;
+    if (c.needsSection) {
+      start = -1;
+      for (let i = 0; i < ls.length; i++) {
+        if (/^##\s+Extensions\s*$/.test(ls[i])) { start = i + 1; break; }
+      }
+      if (start === -1) continue;
+    }
+    src = { label: c.label, lines: ls, start, needsSection: c.needsSection };
+    break;
   }
-  const lines = readFileSync(readmePath, 'utf8').split('\n');
-  // extract the `## Extensions` section (to the next same-level heading)
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^##\s+Extensions\s*$/.test(lines[i])) { start = i + 1; break; }
+  if (!src) {
+    return { name: 'extensions-inventory', label: 'EXTENSIONS INVENTORY', status: 'FAIL', findings: ['`## Extensions` section not found in README.md and extensions/README.md missing — extension inventory cannot be verified'] };
   }
-  if (start === -1) {
-    return { name: 'extensions-inventory', label: 'EXTENSIONS INVENTORY', status: 'FAIL', findings: ['`## Extensions` section not found in README.md — extension inventory cannot be verified'] };
-  }
+  const { label: srcLabel, lines, start } = src;
   let end = lines.length;
-  for (let i = start; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i])) { end = i; break; }
+  if (src.needsSection) {
+    for (let i = start; i < lines.length; i++) {
+      if (/^##\s+/.test(lines[i])) { end = i; break; }
+    }
   }
   // claims = backticked `name/` tokens (single segment + trailing slash) in the section.
   // `extensions/` itself names the section subject, not a unit; `handoff.ts` (no slash) is a file.
   const claimed = new Map();
+  // Machine-local, gitignored dirs that appear in prose but are not extension units.
+  const NON_EXTENSION_DIRS = new Set(['bin', 'npm', 'git']);
   for (let i = start; i < end; i++) {
     for (const m of lines[i].matchAll(/`([a-z0-9][a-z0-9-]*)\/`/g)) {
       if (m[1] === 'extensions') continue;
+      if (NON_EXTENSION_DIRS.has(m[1])) continue;
       if (!claimed.has(m[1])) claimed.set(m[1], i + 1);
     }
   }
   for (const dir of derived) {
-    if (!claimed.has(dir)) findings.push(`extensions/${dir}/ contains TypeScript but the README Extensions section never mentions \`${dir}/\``);
+    if (!claimed.has(dir)) findings.push(`extensions/${dir}/ contains TypeScript but the extensions inventory (${srcLabel}) never mentions \`${dir}/\``);
   }
   for (const [name, line] of claimed) {
-    if (!derived.includes(name)) findings.push(`README.md:${line}: Extensions section mentions \`${name}/\` but extensions/${name}/ has no .ts files`);
+    if (!derived.includes(name)) findings.push(`${srcLabel}:${line}: extensions inventory mentions \`${name}/\` but extensions/${name}/ has no .ts files`);
   }
   return { name: 'extensions-inventory', label: 'EXTENSIONS INVENTORY', status: findings.length ? 'FAIL' : 'PASS', findings };
 }

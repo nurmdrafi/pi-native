@@ -1,0 +1,25 @@
+# Subagents
+
+Owned first-party code at `extensions/subagents/` (`subagent` / `subagent_message` / `subagents_list` + `/subagents` command), vendored upstream with local patches folded in — agents-only tmux and permission-gate re-enabled inside sandboxed spawns. No `settings.json` → `packages` entry, so `pi update --extensions` cannot wipe it.
+
+**Gated by default** — the spawning tools are registered inactive in top-level sessions (zero prompt tokens) until a trigger activates them:
+
+- `/subagents on` / `/subagents off` — toggle for the session
+- `/subagents [agent] [task]` — any spawn auto-enables; with no agent named, the session model routes by task
+- `PI_SUBAGENTS=1` — start active (scripted opt-in)
+
+Sandboxed spawns re-enable the permission-gate extension inside the child via `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated override).
+
+Setup, headless/print-mode behavior, and triage: [`extensions/subagents/README.md`](../extensions/subagents/README.md).
+
+Agent definitions live in `agents/` — plain files, inert while the spawn tools are gated; discovery is project > global. No `model` pin: subagents inherit the harness default.
+
+A spawn runs with `--no-extensions` plus one `-e` per tool-backing extension, so agent `tools:` lists name the native tools alongside their built-in fallbacks (`piread`, `piedit`, `pibash`). Each native extension announces itself to the subagents extension via `registerToolExtension`, which is what makes those names resolve to an `-e` path — without it a sandboxed subagent would silently get the built-in implementations.
+
+| Agent             | Tools                                                           | Role                                         |
+| ----------------- | --------------------------------------------------------------- | -------------------------------------------- |
+| scout             | read, grep, find, ls                                            | read-only recon                              |
+| researcher        | read, write, bash                                               | web research via the `tvly` CLI              |
+| worker            | read, write, edit, bash (+ may spawn scout, researcher)          | general implementer                          |
+| reviewer          | read, bash, grep, find, ls (auto-loads `pre-push-review` skill) | pre-commit diff review; never commits/pushes |
+| gh-issue-verifier | read, bash, grep, find, ls                                      | verifies a diff against a GitHub issue's acceptance criteria |

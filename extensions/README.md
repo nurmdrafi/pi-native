@@ -28,6 +28,17 @@ Edits take effect on the next session start (or via `/reload-runtime` if adopted
 | `pidx/`           | Native session-log indexer registered as its own tool; compact per-session extracts, incremental over unchanged files                                                                                                               | tools                                                                                |
 | `compact-editor/` | Caps the prompt editor height so a long prompt or paste cannot push the transcript off screen; keeps the buffer head and tail with a dropped-line notice. `PI_COMPACT_EDITOR_LINES` sets the cap (default 10)                      | editor                                                                               |
 | `handoff.ts`       | `/handoff <goal>` — drafts a compaction-aware context-transfer prompt from the session, opens it in the editor, then opens a new session seeded with the draft; writes nothing to disk               | command                                                                              |
+| `self-heal/` | On `session_start` runs `scripts/sync-agent-bin.mjs` so the shell PATH pin, native binaries, and the PCRE2 `rg` stay correct after a pull, a pi update, or a fresh machine. Idempotent, never compiles, never throws, silent when healthy | session_start |
+
+### Tool-backing env vars
+
+| Var | Purpose |
+| --- | --- |
+| `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_BASH_BIN` / `PI_PIDX_BIN` | Override the native binary path (`bin/<tool>` by default). Used by the parity suites to point an extension at a throwaway binary and exercise the one-shot rung; also non-standard installs. |
+| `PI_SUBAGENT_EXTRA_EXTENSIONS` | Colon-separated extension paths re-enabled inside sandboxed subagent spawns (default re-enables `permission-gate.ts`). Set by the orchestrator, not the user. |
+| `PI_SESSION_ID` / `PI_SESSION_FILE` / `PI_PROVIDER` / `PI_MODEL` / `PI_REASONING_LEVEL` | Session context keys injected by pi and forwarded to native-tool child processes so commands see the same `PI_*` context (see `extensions/pibash/index.ts`). |
+| `PI_CODING_AGENT_DIR` | Overrides the agent config directory (`~/.pi/agent` by default). |
+| `PI_PIDX_MAX_INLINE` | Inline extract cap for `pidx` output (default 2000 chars; larger output is written to a file and referenced by pointer). |
 
 ## `permission-gate/` — rule catalog
 

@@ -1,0 +1,119 @@
+# Native tools
+
+Four Rust crates in `custom-tools/` register as their own first-class tools, so the TUI shows `piread` / `piedit` / `pibash` / `pidx` instead of shadowing the built-ins. Parameters match the built-in tool verbatim; dispatch goes through a persistent `--serve` daemon (no per-call process spawn), falling back to a one-shot CLI spawn and then the built-in implementation. Every failure path falls back rather than breaking the session.
+
+| Tool     | Replaces                       | Notes                                                             |
+| -------- | ------------------------------ | ---------------------------------------------------------------- |
+| `piread` | built-in `read` (text files)   | images stay on `read`                                             |
+| `piedit` | built-in `edit`                | edit-kind in permission-gate, so Anchor Guard and coverage binding apply unchanged; native diff/patch render |
+| `pibash` | built-in `bash`                | bash-kind in permission-gate, so the H1 cap, R10 re-run guard, and destructive analysis apply unchanged |
+| `pidx`   | Node session-log parser        | compact per-session extracts, incremental via a (size, mtime) cache |
+
+Built-in `bash` is blocked while `pibash` is registered (permission-gate "Pibash-first"), so shell work runs through the native pipeline — `pibash` runs the same schema and rules and falls back itself, so the block never strands the agent.
+
+**Tool versions** (source of truth: each crate's `Cargo.toml`): `piread` 0.2.0 · `piedit` 0.2.0 · `pibash` 0.1.0 · `pidx` 0.1.0.
+
+Native tools forward the context env keys the built-in tools inject — `PI_SESSION_ID`, `PI_SESSION_FILE`, `PI_PROVIDER`, `PI_MODEL`, `PI_REASONING_LEVEL` — so commands see the same `PI_*` context. `PI_CODING_AGENT_DIR` overrides the config directory, `PI_PIDX_MAX_INLINE` changes the inline extract cap (default 2000 chars), and `PI_READ_LINE_CAP` caps piread line width (default off; when set to a positive integer, lines over the cap are truncated to that many characters plus a `...[+N chars]` marker, leaving shorter lines and whitespace byte-identical). `PI_READ_COMPRESS` controls piread's head-tail compaction (**on by default**: a read larger than 40 lines / 2 KB is reduced to a head+tail window with an `[... omitted N chars / M lines ...]` marker, keeping the `[Showing lines A-B of C ...]` notice last; `0`/`false`/`off` restores byte-for-byte parity with the built-in `read`, which is what the parity suite and `piedit`'s exact matching depend on). `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_BASH_BIN` / `PI_PIDX_BIN` override the corresponding native binary path (`bin/<tool>` by default); they exist for the parity suites, which point an extension at a throwaway binary to exercise the one-shot rung, plus non-standard installs — not needed in normal use. `PI_COMPACT_EDITOR_LINES` caps the prompt editor height (default 10 lines); a longer buffer keeps its head and tail with an `[... N more lines ...]` notice in between, so a pasted prompt cannot push the transcript off screen.
+
+Parity is pinned by `tests/piread-parity.test.mjs`, `tests/piedit-parity.test.mjs`, and `tests/pibash-parity.test.mjs`, plus `tests/piedit-diff-fuzz.mjs`. Measured speedups and full methodology live in [`benchmark/runs/`](../benchmark/runs) and [`CHANGELOG.md`](../CHANGELOG.md). Architecture deep-dive: [`docs/custom-tools-architecture.md`](custom-tools-architecture.md).
+
+## Performance
+
+Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `native` is the replacement. The native tools replace a per-call process spawn with a persistent `--serve` daemon, so the win is the amortized spawn floor (~1.6–1.9 ms here), not output shaping. Absolute numbers are wall-clock on one machine and move with hardware and load; the Δ column is the comparison that matters. In every table below, `built-in` / `oracle` names the same stock pi TypeScript tool the native tool replaces — the parity oracle the native path must byte-match. For model-context cost (bytes actually entering the transcript) see [Context shaping](#context-shaping-what-enters-the-model) below — that is the other half of the story, and the one that compounds across turns. Sources: [`benchmark/runs/piread-microbench-2026-10-17.md`](../benchmark/runs/piread-microbench-2026-10-17.md), [`piedit-microbench-2026-10-17.md`](../benchmark/runs/piedit-microbench-2026-10-17.md), [`pibash-microbench-2026-10-17.md`](../benchmark/runs/pibash-microbench-2026-10-17.md), [`pibash-microbench-2026-10-18.md`](../benchmark/runs/pibash-microbench-2026-10-18.md) (post-fix; † rows) — regenerate with `node tests/<tool>-bench.mjs`.
+
+| Tool     | Replaces        | Representative case                 | built-in p50 | native p50   | Δ p50     |
+| -------- | --------------- | ----------------------------------- | -----------: | -----------: | --------- |
+| `piread` | built-in `read` | one-line file                       | 0.126 ms     | 0.033 ms     | **−0.09** |
+| `piread` | built-in `read` | 2500-line window                    | 0.355 ms     | 0.171 ms     | **−0.18** |
+| `piedit` | built-in `edit` | mid exact (1800 B)                  | 0.291 ms     | 0.159 ms     | **−0.13** |
+| `piedit` | built-in `edit` | 1 MiB file (588,890 B)              | 29.969 ms    | 4.258 ms     | **7.0×**  |
+| `pibash` | built-in `bash` | `printf` †                          | 4.516 ms     | 2.487 ms     | **−2.03** |
+| `pibash` | built-in `bash` | `seq 50000` †                       | 10.643 ms    | 13.463 ms    | **+2.82** |
+| `pidx`   | Node log parser | 512 sessions / 103 MB (cold → warm) | —            | 572 → 390 ms | **n/a**   |
+
+`pibash`'s `seq 50000` row above is the 2026-10-17 measured regression (+3.57 ms at p50, widening with output size; envelope shipped the payload twice — `content[0].text` + `structuredContent.output` — structural and parity-pinned). **Fixed since** (single-materialization envelope, copy-on-write compression stages, one shared line split — see [`docs/custom-tools-architecture.md`](custom-tools-architecture.md) § pibash): the † rows are re-measured 2026-10-19 on the fixed binary — daemon p50 15.78 → 13.46 ms (oracle gap +3.57 → +2.82 ms) and one-shot p50 19.7 → 13.4 ms (−32%) via `custom-tools/pibash/bench-seq50000.mjs`; wire bytes unchanged, parity pinned. Every other arm now leads the oracle by 1.4–2.7 ms; the residual `seq 50000` gap is the Tier-1 compression pre-pass — work the built-in never does (pibash's additive error-rescue feature). `pidx` is a daemonless one-shot CLI, so it has no oracle/daemon split; its figures are a live cold/warm run on this repo's corpus and have no committed bench file yet.
+
+### Re-measured 2026-10-19 (piread)
+
+Fresh dispatch-latency run on this machine — same shape as the committed 2026-10-17 numbers; absolute p50s shift with load, the Δ column is the comparison that matters. Full methodology and p95s: [`benchmark/runs/piread-microbench-2026-10-19.md`](../benchmark/runs/piread-microbench-2026-10-19.md).
+
+| corpus | built-in p50 | daemon p50 | Δ p50 | one-shot p50 |
+| --- | ---: | ---: | ---: | ---: |
+| one-line | 0.238 | 0.101 | **−0.14** | 3.268 |
+| crlf | 0.395 | 0.109 | **−0.29** | 3.148 |
+| unicode | 0.328 | 0.079 | **−0.25** | 3.122 |
+| long-lines | 0.268 | 0.106 | **−0.16** | 3.253 |
+| lines2500 | 1.383 | 0.576 | **−0.81** | 3.899 |
+| bytes60k | 0.617 | 0.571 | **−0.05** | 3.854 |
+| head60k | 0.460 | 0.189 | **−0.27** | 3.580 |
+
+Daemon peak RSS 2 MB (vmhwm); one-shot pays the ~3.3–3.9 ms spawn floor every call.
+
+<details>
+<summary>Per-tool detail</summary>
+
+**piread** vs the built-in `read` (N=200/arm, 10 warmup; p50 ms):
+
+| corpus | built-in `read` p50 | `piread` daemon p50 | `piread` one-shot p50 | Δ p50 |
+| --- | ---: | ---: | ---: | ---: |
+| one-line | 0.126 | 0.033 | 1.885 | −0.092 |
+| long-lines | 0.128 | 0.054 | 1.888 | −0.074 |
+| lines2500 | 0.355 | 0.171 | 2.064 | −0.184 |
+| bytes60k | 0.215 | 0.167 | 2.007 | −0.048 |
+| head60k | 0.170 | 0.062 | 1.877 | −0.107 |
+
+`piread` is **byte-identical** to the built-in `read` on every text case that fits the model-visible budget (see `npm run bench:model-visible:compare`); larger reads are head-tail compacted by default, so their content is a bounded window rather than the full 2000-line cap — set `PI_READ_COMPRESS=0` to restore exact parity. The daemon path wins on every corpus (~4x on small reads, ~2x on 2,500 lines), and the one-shot path pays the ~1.9 ms spawn floor.
+
+**piedit** (N=100/arm; oracle vs piedit p50 ms):
+
+| corpus | bytes | built-in p50 | piedit p50 | Δ p50 |
+| --- | ---: | ---: | ---: | ---: |
+| small-exact | 17 | 0.212 | 0.144 | −0.068 |
+| mid-exact | 1800 | 0.291 | 0.159 | −0.132 |
+| mid-multi | 1800 | 0.287 | 0.152 | −0.135 |
+| fuzzy-trailing-ws | 30 | 0.199 | 0.140 | −0.059 |
+| multiline-block | 18890 | 1.049 | 0.264 | −0.784 |
+| large-1mib | 588890 | 29.969 | 4.258 | −25.710 |
+
+**pibash** (N=60/arm; oracle vs daemon p50 ms; run of 2026-10-19, post-fix — [`benchmark/runs/pibash-microbench-2026-10-18.md`](../benchmark/runs/pibash-microbench-2026-10-18.md)):
+
+| command class | built-in p50 | pibash p50 | Δ p50 |
+| --- | ---: | ---: | ---: |
+| true | 4.052 | 2.421 | −1.631 |
+| printf | 4.516 | 2.487 | −2.029 |
+| rg-version | 5.549 | 4.040 | −1.508 |
+| seq1000 | 4.734 | 3.316 | −1.417 |
+| seq2500 | 6.380 | 3.693 | −2.688 |
+| seq50000 | 10.643 | 13.463 | +2.820 |
+| large-blob | 6.397 | 4.122 | −2.275 |
+| stderr-mix | 4.899 | 2.399 | −2.500 |
+| exit-nonzero | 4.745 | 2.300 | −2.445 |
+
+Spawn floor per session: ~1.6–1.9 ms (paid once, not per call). Daemon RSS is not reported here: the resident-set probe used by `piread`/`pibash` benchmarks reads `/proc`, so it is Linux-only and is skipped elsewhere.
+
+</details>
+
+## Context shaping: what enters the model
+
+| Case | native bytes | built-in bytes | Δ |
+| --- | ---: | ---: | ---: |
+| `read ~100ln` | 1,898 | 4,435 | **−57.2%** |
+| `read ~300ln` | 1,675 | 12,343 | **−86.4%** |
+| `read ~1000ln` | 1,945 | 41,275 | **−95.3%** |
+| `read ~1922ln` | 2,040 | 51,188 | **−96.0%** |
+| `bash 1300 lines` | 171 | 5,393 | **−96.8%** |
+| `bash 10k lines` | 173 | 10,129 | **−98.3%** |
+| `bash failing test-like` | 807 | 42,144 | **−98.1%** |
+| `bash interleaved warnings` | 258 | 2,584 | **−90.0%** |
+| **all cases (TOTAL)** | **15,569** | **273,312** | **−94.3%** |
+
+Reads and shell output converge on roughly the same ~2 KB ceiling regardless of source size — cost stops scaling with the file instead of growing linearly.
+
+**How each tool shapes:**
+
+| Tool | Strategy | Notes |
+| --- | --- | --- |
+| `pibash` | head-tail / error-priority | command-aware (`Test`/`Build`/`Git`/`Search`/`Log`/`Generic`); failures keep a 2/3 tail, successes a 2/3 head; full output spilled to a temp file |
+| `piread` | head-tail | 2/3 head : 1/3 tail; the `[Showing lines A-B of C …]` continuation notice is always kept last, so the reader still learns the file continues |
+| `piedit` | none (bounded by design) | returns a status line + diff; `renderDiff` keeps the content pair out of the boundary entirely |
+| `pidx` | pointer only | extracts written to a file; only a compact pointer line enters context, hard-capped at `PI_PIDX_MAX_INLINE` (default 2000 chars) |
