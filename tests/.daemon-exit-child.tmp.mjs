@@ -3,7 +3,7 @@ process.env.PI_NATIVE_READ = "1";
 const { mkdtempSync, writeFileSync } = await import("node:fs");
 const { tmpdir } = await import("node:os");
 const { join } = await import("node:path");
-const ROOT = "/Users/nur/.pi/agent";
+const ROOT = process.argv[2];
 const pkgLink = join(ROOT, "node_modules", "@earendil-works", "pi-coding-agent");
 
 function loadExt(name) {
