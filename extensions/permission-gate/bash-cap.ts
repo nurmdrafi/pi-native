@@ -26,6 +26,28 @@ const CAP_BYTES = 2_048;
  * omission marker in the text. When true the gate must NOT run H1 — re-truncating
  * would cut off the diagnostic lines the engine deliberately rescued.
  */
+/**
+ * The gate's own synthesized block text carries a family prefix. Detecting it
+ * on a tool_result lets the gate skip work on results it just produced itself
+ * (re-capping a block, re-reading a refusal), so this stays next to the other
+ * result-inspection helpers.
+ */
+const BLOCK_FAMILY_RE =
+  /^(Token Economy|Anchor Guard|Commitlint|Permission Gate|Toolchain|Search|Portability)[^:]*/;
+export function blockFamilyOf(event: {
+  isError?: boolean;
+  content?: unknown[];
+}): string | undefined {
+  if (!event.isError) return undefined;
+  const txt = (event.content as { text?: unknown }[] | undefined)?.[0]?.text;
+  const m = typeof txt === "string" ? BLOCK_FAMILY_RE.exec(txt) : null;
+  return m ? m[0] : undefined;
+}
+
+/**
+ * Collapse the gate's own synthesized block text, so a tool_result that IS a
+ * block is never re-capped into a second-generation message.
+ */
 export function isRustCompressed(event: {
   content?: unknown[];
   details?: unknown;

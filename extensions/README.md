@@ -20,7 +20,7 @@ Edits take effect on the next session start (or via `/reload-runtime` if adopted
 
 | Extension          | Role                                                                                                                                                                                                 | Hooks                                                                                |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `permission-gate/` | Blocks rule-violating tool calls before execution, with corrective rule text (modules: `index` wiring, `anchor-guard`, `read-coverage`, `bash-cap`, `destructive`, `commitlint`, `toolchain`, `search-guard`, `output-scrub`, `violation-memory`, `config`) | `tool_call`, `tool_result`, `before_agent_start`, `session_start`, `session_compact` |
+| `permission-gate/` | Blocks rule-violating tool calls before execution, with corrective rule text (modules: `index` wiring, `anchor-guard`, `read-coverage`, `bash-cap`, `destructive`, `commitlint`, `toolchain`, `search-guard`, `output-scrub`, `config`) | `tool_call`, `tool_result`, `session_start`, `session_compact` |
 | `subagents/`       | Interactive tmux subagents (vendored upstream at `c3e8b53`, patches folded in; spawning tools gated by default)                                                                                      | tools, commands, renderers                                                           |
 | `pibash/`         | Native shell tool (built-in `bash` is the fallback; byte-exact envelope parity pinned by `tests/pibash-parity.test.mjs`); bash-kind in permission-gate, so the H1 cap, R10, destructive analysis, and mutation tracking all apply | tools                                                                                |
 | `piread/`         | Native read pipeline registered as its own tool (S6); built-in `read` is blocked while registered (P1), images stay on `read`                                                                                                       | tools                                                                                |
@@ -49,7 +49,7 @@ Single `tool_call` interceptor; one handler, deterministic order (edit → read 
 
 Every rule is switchable from [`config.json`](permission-gate/config.json) — no source edit needed. Keys are
 descriptive (`rerunGuard`), not the terse source ID (`R10`); `config.ts` → `RULE_IDS` maps the two and is the
-single place they meet. Scalar knobs (`outputCap`, `confirm`, `violationMemory`) live beside the switches.
+single place they meet. Scalar knobs (`outputCap`, `confirm`) live beside the switches.
 
 ```json
 { "rules": { "rerunGuard": false, "destructiveConfirm": false } }

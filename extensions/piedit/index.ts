@@ -32,7 +32,6 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync } from "node:fs";
-import { memorySid, violationRecord } from "../permission-gate/violation-memory.ts";
 import { isAbsolute, join, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -74,25 +73,6 @@ function announceNativeTool(name: string, extensionPath: string): void {
   } catch {
     // Contract violations are the subagents extension's to report; a failure
     // here must not break this tool's own registration.
-  }
-}
-
-/** Violations (fallback-to-builtin) append to the existing gate log
- * logs/violation-memory.ndjson, reusing its {family, sid, ts} schema — no
- * new log file. Path derived from the extension dir (portability). */
-const PGATE_NDJSON = resolve(extDir, "../../logs/violation-memory.ndjson");
-const SESSION_ID = memorySid();
-
-function logViolation(reason: string, path: string): void {
-  try {
-    appendFileSync(
-      PGATE_NDJSON,
-      `${JSON.stringify(
-        violationRecord({ family: "Piedit (fallback)", sid: SESSION_ID, ts: Date.now(), reason, path }),
-      )}\n`,
-    );
-  } catch {
-    // Logging must never break an edit.
   }
 }
 
@@ -484,7 +464,6 @@ export default function pieditExtension(pi: ExtensionAPI): void {
   ) => {
     // Observability: one line per fallback (spec §5.2) + violation log.
     process.stderr.write(`piedit: fallback (${reason}) path=${params.path}\n`);
-    logViolation(reason, params.path);
     // Called OUTSIDE this extension's `withFileMutationQueue`: the built-in
     // executor takes the same queue itself, and re-entering it on the same
     // path would deadlock.

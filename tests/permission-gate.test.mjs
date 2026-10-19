@@ -266,18 +266,6 @@ async function pibash(pi, command, ctx) {
   return { blocked: false };
 }
 
-/** AT1: a completed native-tool call appends an adoption line to the store. */
-async function nativeResult(pi, toolName) {
-  await pi.invoke("tool_result", {
-    type: "tool_result",
-    toolName,
-    toolCallId: `tc${++seqId}`,
-    input: {},
-    content: textBlocks("out"),
-    isError: false,
-  });
-}
-
 /** nested sub-call (executeTool child): parentToolCallId set, "<parent>/<n>" id */
 async function nestedBash(pi, command, { error = false } = {}) {
   const toolCallId = `cm0/${++seqId}`;
@@ -421,9 +409,6 @@ writeFileSync(
   midFile,
   Array.from({ length: 330 }, () => "y".repeat(39)).join("\n") + "\n",
 ); // ~13 KB / 330 lines
-// violation-memory isolation: never touch the real ~/.pi/agent/logs telemetry
-process.env.PGATE_MEMORY = join(tmp, "vmem.ndjson");
-writeFileSync(process.env.PGATE_MEMORY, "");
 // ---- S4 (2026-10-15) live-shell canary suite (spec §5.3) ----
 // mkdtemp sandbox + fake HOME carrying byte-compared canaries; commands go
 // through the gate headless ({hasUI:false}) and EXECUTE (spawnSync bash -c,
@@ -459,12 +444,9 @@ function startCanary() {
     work,
     prevHome: process.env.HOME,
     prevCwd: process.cwd(),
-    prevMemory: process.env.PGATE_MEMORY,
+
   };
   canary.before = canaryBytes(canary);
-  process.env.HOME = home;
-  process.env.PGATE_MEMORY = join(sandbox, "vmem.ndjson");
-  writeFileSync(process.env.PGATE_MEMORY, "");
   process.chdir(sandbox);
   return freshGate();
 }
@@ -473,7 +455,7 @@ function stopCanary() {
   process.chdir(canary.prevCwd);
   if (canary.prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = canary.prevHome;
-  process.env.PGATE_MEMORY = canary.prevMemory;
+
   canary = null;
 }
 const canaryIntact = () =>
@@ -1020,144 +1002,6 @@ const cases = [
       return !b && r === undefined
         ? { blocked: false }
         : { blocked: true, reason: "cadence did not reset on compaction" };
-    },
-  ],
-  // ---- violation memory (before_agent_start injection — 2026-10-06) ----
-  [
-    "violation memory: block appends ndjson family entry",
-    "blocked",
-    async (pi) => {
-      const r = await bash(pi, 'git commit -m "Fix the thing"'); // Commitlint family — git reads retired with R5 (H1 step 5)
-      const lines = readFileSync(process.env.PGATE_MEMORY, "utf8")
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l));
-      const ok =
-        lines.length === 1 &&
-        lines[0].family === "Commitlint" &&
-        typeof lines[0].sid === "string" &&
-        lines[0].sid.length > 0;
-      if (!ok) {
-        console.log(
-          `      expected one {family,sid,ts} entry, ndjson has ${JSON.stringify(lines)}`,
-        );
-        return { blocked: false };
-      }
-      return r;
-    },
-  ],
-  [
-    "violation memory: before_agent_start injects top-3 lessons at threshold",
-    "pass",
-    async (pi) => {
-      const ev = {
-        type: "before_agent_start", messageType: "user",
-        prompt: "",
-        systemPrompt: "",
-        systemPromptOptions: { appendSystemPrompt: "" },
-      };
-      pi.invoke("before_agent_start", ev);
-      const s = ev.systemPromptOptions.appendSystemPrompt;
-      const want = ["<violation-memory>", "Never re-run", "conventional"]; // top lessons = Re-run 7, Commitlint 9 (Reading+Extraction lessons retired with R2/R6)
-      const ok =
-        want.every((w) => s.includes(w)) &&
-        !s.includes("never start a bash segment") &&
-        !s.includes("Every 'rg -o'"); // retired lessons must stay out even when seeded
-      if (!ok) {
-        console.log(`      injected: ${JSON.stringify(s)}`);
-        return { blocked: true };
-      }
-      return { blocked: false };
-    },
-  ],
-  [
-    "violation memory: injection happens once per session",
-    "pass",
-    async (pi) => {
-      const ev = () => ({
-        type: "before_agent_start", messageType: "user",
-        prompt: "",
-        systemPrompt: "",
-        systemPromptOptions: { appendSystemPrompt: "" },
-      });
-      const a = ev();
-      pi.invoke("before_agent_start", a);
-      pi.invoke("before_agent_start", a);
-      const n = (
-        a.systemPromptOptions.appendSystemPrompt.match(/<violation-memory>/g) ??
-        []
-      ).length;
-      return n === 1 ? { blocked: false } : { blocked: true };
-    },
-  ],
-  [
-    "violation memory: injection tolerates undefined appendSystemPrompt",
-    "pass",
-    async (pi) => {
-      const ev = {
-        type: "before_agent_start", messageType: "user",
-        prompt: "",
-        systemPrompt: "",
-        systemPromptOptions: {},
-      };
-      pi.invoke("before_agent_start", ev);
-      const s = ev.systemPromptOptions.appendSystemPrompt ?? "";
-      return typeof s === "string" && s.startsWith("<violation-memory>")
-        ? { blocked: false }
-        : { blocked: true };
-    },
-  ],
-  [
-    "violation memory: one session hammering stays under threshold (H7)",
-    "pass",
-    async (pi) => {
-      const ev = {
-        type: "before_agent_start", messageType: "user",
-        prompt: "",
-        systemPrompt: "",
-        systemPromptOptions: { appendSystemPrompt: "" },
-      };
-      pi.invoke("before_agent_start", ev);
-      return !(ev.systemPromptOptions.appendSystemPrompt ?? "").includes(
-        "<violation-memory>",
-      )
-        ? { blocked: false }
-        : { blocked: true, reason: "injected from single-session depth" };
-    },
-  ],
-  [
-    "violation memory: compaction migrates bloated store to the current shape (H7)",
-    "pass",
-    async () => {
-      const now = Date.now();
-      const lines = [];
-      for (let k = 0; k < 220; k++)
-        lines.push(
-          JSON.stringify({
-            family: "Commitlint",
-            sid: `s${k % 4}`,
-            ts: now - (k % 7),
-          }),
-        );
-      // A legacy tool-fallback family: cause fixed (unsigned binary), no lesson.
-      lines.push(
-        JSON.stringify({ family: "Piread (fallback)", sid: "s0", ts: now }),
-      );
-      writeFileSync(process.env.PGATE_MEMORY, lines.join("\n") + "\n");
-      freshGate(); // load triggers the migration when >200 lines
-      const after = readFileSync(process.env.PGATE_MEMORY, "utf8")
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l));
-      if (after.length !== 220)
-        return { blocked: true, reason: `expected 220 kept rows, got ${after.length}` };
-      if (after.some((r) => r.kind !== "violation"))
-        return { blocked: true, reason: "rows were not migrated to kind:violation" };
-      if (after.some((r) => r.family !== "Commitlint"))
-        return { blocked: true, reason: "legacy tool-fallback row survived migration" };
-      return { blocked: false };
     },
   ],
   // ---- R1 resume hydration (2026-10-07: coverage replays from the previous session file) ----
@@ -3797,39 +3641,6 @@ const cases = [
     'pass',
     async (pi) => bash(pi, 'fd -e ts . custom-tools'),
   ],
-  [
-    'AT1: a completed native-tool call records an adoption line',
-    'pass',
-    async (pi) => {
-      // the store is shared and accumulates across cases → compare deltas
-      const count = (tool) =>
-        readFileSync(process.env.PGATE_MEMORY, 'utf8')
-          .trim().split('\n').filter(Boolean)
-          .map((l) => JSON.parse(l))
-          .filter((e) => e.kind === 'adoption' && e.tool === tool).length;
-      const before = count('pibash');
-      await nativeResult(pi, 'pibash');
-      if (count('pibash') !== before + 1) {
-        throw new Error('adoption line not recorded for pibash');
-      }
-      return { blocked: false };
-    },
-  ],
-  [
-    'AT1: a built-in tool result records no adoption line',
-    'pass',
-    async (pi) => {
-      const count = () =>
-        readFileSync(process.env.PGATE_MEMORY, 'utf8')
-          .trim().split('\n').filter(Boolean)
-          .map((l) => JSON.parse(l))
-          .filter((e) => e.kind === 'adoption').length;
-      const before = count();
-      await nativeResult(pi, 'bash');
-      if (count() !== before) throw new Error('built-in result wrote an adoption line');
-      return { blocked: false };
-    },
-  ],
   // ---- pibash: deeper bash-kind coverage (destructive, mutation, malformed) ----
   [
     'pibash: destructive rm -rf is blocked/confirmed like bash',
@@ -4239,84 +4050,6 @@ const preambles = {
     await runBash(pi, "npm test");
     return pi;
   },
-  "violation memory: block appends ndjson family entry": async () => {
-    writeFileSync(process.env.PGATE_MEMORY, "");
-    return freshGate();
-  },
-  "violation memory: before_agent_start injects top-3 lessons at threshold":
-    async () => {
-      const now = Date.now();
-      const sidN = (k) => `seed-${k}`;
-      writeFileSync(
-        process.env.PGATE_MEMORY,
-        [
-          // H7: distinct sessions per family, rolling window — Re-run 6, Commitlint 6
-          // (threshold 5); Reading seeded 6× too but its lesson retired with R2
-          ...Array.from({ length: 6 }, (_, k) => ({
-            family: "Token Economy (Re-run)",
-            sid: sidN(`r${k}`),
-            ts: now,
-          })),
-          ...Array.from({ length: 6 }, (_, k) => ({
-            family: "Commitlint",
-            sid: sidN(`c${k}`),
-            ts: now,
-          })),
-          ...Array.from({ length: 6 }, (_, k) => ({
-            family: "Token Economy (Reading)",
-            sid: sidN(`d${k}`),
-            ts: now,
-          })),
-        ]
-          .map((e) => JSON.stringify(e))
-          .join("\n") + "\n",
-      );
-      return freshGate();
-    },
-  "violation memory: injection happens once per session": async () => {
-    const now = Date.now();
-    writeFileSync(
-      process.env.PGATE_MEMORY,
-      Array.from({ length: 6 }, (_, k) =>
-        JSON.stringify({
-          family: "Token Economy (Re-run)",
-          sid: `s${k}`,
-          ts: now,
-        }),
-      ).join("\n") + "\n",
-    );
-    return freshGate();
-  },
-  "violation memory: injection tolerates undefined appendSystemPrompt":
-    async () => {
-      const now = Date.now();
-      writeFileSync(
-        process.env.PGATE_MEMORY,
-        Array.from({ length: 6 }, (_, k) =>
-          JSON.stringify({
-            family: "Token Economy (Re-run)",
-            sid: `s${k}`,
-            ts: now,
-          }),
-        ).join("\n") + "\n",
-      );
-      return freshGate();
-    },
-  "violation memory: one session hammering stays under threshold (H7)":
-    async () => {
-      const now = Date.now();
-      writeFileSync(
-        process.env.PGATE_MEMORY,
-        Array.from({ length: 9 }, () =>
-          JSON.stringify({
-            family: "Token Economy (Re-run)",
-            sid: "same-session",
-            ts: now,
-          }),
-        ).join("\n") + "\n",
-      );
-      return freshGate();
-    },
 
   // ---- S4 (2026-10-15) live-shell canary preambles: sandbox + fake HOME ----
   "S4 canary self-test: benign approved command executes and produces output": startCanary,

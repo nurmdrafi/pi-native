@@ -27,8 +27,7 @@
  * binary is missing).
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync } from "node:fs";
-import { memorySid, violationRecord } from "../permission-gate/violation-memory.ts";
+
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,10 +94,6 @@ const PIBASH_BIN = resolve(extDir, "../../bin/pibash");
 
 /** Binary path; `PI_BASH_BIN` overrides (parity tests / non-standard installs). */
 const pibashBin = (): string => process.env.PI_BASH_BIN || PIBASH_BIN;
-
-/** Fallback lines land in the existing gate log, reusing its schema. */
-const PGATE_NDJSON = resolve(extDir, "../../logs/violation-memory.ndjson");
-const SESSION_ID = memorySid();
 
 /** The built-in's MAX_TIMEOUT_MS / 1000. */
 const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
@@ -169,25 +164,6 @@ function buildEnv(ctx: ExecContext | undefined): Record<string, string> {
     env[pathKey] = [binDir, ...entries].join(delimiter);
   }
   return env;
-}
-
-function logFallback(reason: string, command: string): void {
-  try {
-    appendFileSync(
-      PGATE_NDJSON,
-      `${JSON.stringify(
-        violationRecord({
-          family: "Pibash (fallback)",
-          sid: SESSION_ID,
-          ts: Date.now(),
-          reason,
-          path: command.slice(0, 200),
-        }),
-      )}\n`,
-    );
-  } catch {
-    // Logging must never break a command.
-  }
 }
 
 /** pibash's stdout contract (crate docs, `custom-tools/pibash`). */
@@ -563,7 +539,6 @@ export default function pibashExtension(pi: ExtensionAPI): void {
       // only transport failures fall through to the built-in.
       if (err instanceof ParityError) throw err.cause;
       reason = err instanceof Error ? err.message : String(err);
-      logFallback(reason, command);
       process.stderr.write(`pibash: falling back to built-in bash (${reason})\n`);
       return builtinExecute(toolCallId, params, signal, onUpdate, ctx);
     }

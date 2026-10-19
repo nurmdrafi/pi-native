@@ -21,8 +21,6 @@
     "searchMidPipe": "warn",
     "findFirst": "warn",
     "searchPortability": "warn",
-    "violationMemory": "error",
-    "adoptionTelemetry": "error",
     "cadenceNudge": "error",
     "outputScrub": "error"
   },
@@ -34,10 +32,5 @@
 
   "confirm": {
     "timeoutMs": 300000
-  },
-
-  "violationMemory": {
-    "distinctSessionsBeforeLesson": 5,
-    "windowDays": 30
   }
 }

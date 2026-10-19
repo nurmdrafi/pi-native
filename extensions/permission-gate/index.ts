@@ -58,7 +58,7 @@ import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
 
 import { toLF, validateEditAnchors } from "./anchor-guard.ts";
-import { capBashOutput, capReadOutput, isRustCompressed } from "./bash-cap.ts";
+import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed } from "./bash-cap.ts";
 import { scrubBashText } from "./output-scrub.ts";
 import {
   APPROVED_WINDOW_MS,
@@ -70,16 +70,6 @@ import {
   splitSegments,
 } from "./destructive.ts";
 import { validateCommitMessages } from "./commitlint.ts";
-import {
-  FAMILY_LESSONS,
-  MEMORY_THRESHOLD,
-  adoptionRecord,
-  blockFamilyOf,
-  memorySid,
-  mergeLessonCounts,
-  migrateRows,
-  violationRecord,
-} from "./violation-memory.ts";
 import {
   certify,
   countTextLines,
@@ -129,15 +119,6 @@ const CADENCE_CTX_TOKENS = 150_000;
 const RERUN_WINDOW_MS = 10 * 60_000;
 /** Re-block window: shorter than R10 — the verbatim re-send pattern is immediate (2026-10-08 audit: 3s and 2.5s gaps) */
 const REBLOCK_WINDOW_MS = 2 * 60_000;
-/**
- * Violation memory (2026-10-06 feedback: "LLM keeps repeating the same mistakes
- * every session"). Blocks correct within a session (98% one-shot recovery)
- * but the model is stateless across sessions and re-attempts the same families
- * in every new one (R2 cat-viewing persisted Sep→Oct in work-project logs).
- * Persisted per-family block counts pick the lessons injected into the next
- * session's system prompt — the only mechanism that can cut FIRST attempts.
- * Delete logs/violation-memory.json to reset; PGATE_MEMORY overrides the path.
- */
 export default function (pi: ExtensionAPI) {
   /**
    * In-context coverage (2026-10-05 audit): per absolute path, the union of
@@ -206,173 +187,25 @@ export default function (pi: ExtensionAPI) {
    * counts as approval for the turn it arrived in (single ask; see APPROVAL_RE) */
   let promptApproves = false;
 
-  // ---- violation memory: cross-session repeat-offense reduction ----
-  // NDJSON append-only store (2026-10-07): parallel sessions (gated subagents)
-  // made the read-modify-write JSON blob racy — last writer silently dropped
-  // counts. Appends are atomic; aggregation happens at load. The legacy JSON
-  // blob stays readable as a frozen base (pre-NDJSON telemetry, never written).
-  const memoryNdjson =
-    process.env.PGATE_MEMORY ??
-    join(homedir(), ".pi", "agent", "logs", "violation-memory.ndjson");
-  const memoryLegacy = process.env.PGATE_MEMORY
-    ? memoryNdjson.replace(/\.ndjson$/, ".json")
-    : join(homedir(), ".pi", "agent", "logs", "violation-memory.json");
-  // H7 (2026-10-08): count DISTINCT SESSIONS per family in a rolling 30-day
-  // window, not all-time block depth — one session hammering a family used to
-  // hit the threshold alone (breadth across sessions is the actual signal that
-  // a lesson belongs in the prompt). `sid` is the harness session id
-  // (memorySid), not a per-process uuid: the old per-process value made every
-  // writer disagree and counted processes instead of sessions.
-  const sid = memorySid();
-  const MEMORY_WINDOW_MS = 30 * 24 * 60 * 60_000;
-  const loadCounts = (): Record<string, number> => {
-    const distinct: Record<string, Set<string>> = {};
-    const legacy: Record<string, number> = {};
-    try {
-      const blob: unknown = JSON.parse(readFileSync(memoryLegacy, "utf8"));
-      if (blob && typeof blob === "object") {
-        for (const [k, v] of Object.entries(blob as Record<string, unknown>))
-          if (typeof v === "number") legacy[k] = v;
-      }
-    } catch {
-      // absent or corrupt legacy blob — start from NDJSON alone
-    }
-    let lines = 0;
-    try {
-      const raw = readFileSync(memoryNdjson, "utf8").split("\n");
-      for (let i = 0; i < raw.length; i++) {
-        const line = raw[i];
-        if (!line.trim()) continue;
-        lines++;
-        try {
-          const e = JSON.parse(line) as {
-            family?: string;
-            sid?: string;
-            n?: number;
-            ts?: number;
-          };
-          if (typeof e.family !== "string") continue;
-          if (typeof e.ts === "number" && Date.now() - e.ts > MEMORY_WINDOW_MS)
-            continue; // rolled out
-          const key =
-            typeof e.sid === "string" && e.sid ? e.sid : `legacy-line-${i}`;
-          (distinct[e.family] ??= new Set()).add(key);
-        } catch {
-          continue; // torn tail append — tolerate like pi's session files
-        }
-      }
-    } catch {
-      // no NDJSON yet — legacy counts (if any) stand alone
-    }
-    // Compact at load (H7) so a long-lived store does not grow unboundedly.
-    // The rewrite is also the migration: legacy rows become the current shape,
-    // legacy tool-fallback families are dropped (their cause was the unsigned
-    // binary, not the model's behaviour), and rows outside the window go away.
-    // Previously this kept one entry per family+session and silently discarded
-    // the `reason`, which is what left the store unable to explain itself.
-    if (lines > 200) {
-      try {
-        const parsed: unknown[] = [];
-        for (const line of readFileSync(memoryNdjson, "utf8").split("\n")) {
-          if (!line.trim()) continue;
-          try {
-            parsed.push(JSON.parse(line));
-          } catch {
-            // torn tail append — tolerate like pi's session files
-          }
-        }
-        const migrated = migrateRows(parsed, { now: Date.now() });
-        const tmp = `${memoryNdjson}.compact`;
-        writeFileSync(
-          tmp,
-          migrated.rows.map((e) => `${JSON.stringify(e)}\n`).join(""),
-        );
-        renameSync(tmp, memoryNdjson);
-      } catch {
-        // compaction is best-effort telemetry hygiene — never break the loop
-      }
-    }
-    const counts: Record<string, number> = {};
-    for (const [family, set] of Object.entries(distinct))
-      counts[family] = set.size;
-    // The legacy blob's depth is depth, not sessions (see mergeLessonCounts):
-    // its contribution stays a floor of 1 so MEMORY_THRESHOLD keeps counting
-    // distinct sessions instead of mixing depth into a session count.
-    return mergeLessonCounts(counts, legacy);
-  };
-  const counts = loadCounts();
-  /** record a block's family; persist top-offender telemetry for the next session's prompt */
-  const blockCall = (reason: string): { block: true; reason: string } => {
-    const colon = reason.indexOf(":");
-    const family = colon === -1 ? reason : reason.slice(0, colon); // colon-less reason → whole string, never a truncated key
-    if (FAMILY_LESSONS[family]) {
-      counts[family] = (counts[family] ?? 0) + 1;
-      try {
-        mkdirSync(dirname(memoryNdjson), { recursive: true });
-        appendFileSync(
-          memoryNdjson,
-          `${JSON.stringify(violationRecord({ family, sid, ts: Date.now(), reason }))}\n`,
-        );
-      } catch {
-        // telemetry must never break the agent loop
-      }
-    }
-    return { block: true, reason };
-  };
   /**
-   * Record a style violation WITHOUT blocking. Used for the preference families
-   * (toolchain pins, search hygiene, re-run, big-read): they encode a default,
-   * not a safety property, so a block costs a full retry for a convention the
-   * gate cannot know is wrong for this task. The violation is still counted, so
-   * the lesson and the telemetry survive; only the retry does not.
+   * A block returns the reason to the model; nothing is persisted. Session
+   * transcripts already record every call and result, so a second on-disk
+   * store of the same events was duplicate weight.
    */
-  const warnCall = (reason: string): undefined => {
-    try {
-      const colon = reason.indexOf(":");
-      const family = colon === -1 ? reason : reason.slice(0, colon);
-      if (FAMILY_LESSONS[family]) {
-        counts[family] = (counts[family] ?? 0) + 1;
-        mkdirSync(dirname(memoryNdjson), { recursive: true });
-        appendFileSync(
-          memoryNdjson,
-          `${JSON.stringify(violationRecord({ family, sid, ts: Date.now(), reason }))}\n`,
-        );
-      }
-    } catch {
-      // telemetry must never break the agent loop
-    }
-    return undefined;
-  };
+  const blockCall = (reason: string): { block: true; reason: string } => ({
+    block: true,
+    reason,
+  });
+  /** Record a style violation without blocking: the call proceeds. */
+  const warnCall = (_reason: string): undefined => undefined;
   /**
    * Apply a rule decision at its configured severity: `error` blocks, `warn`
-   * records and returns undefined (call proceeds), `off` never reaches here
-   * because the caller checks `ruleEnabled` first.
+   * records and returns undefined (call proceeds).
    */
   const enforce = (
     key: Parameters<typeof ruleSeverity>[0],
     reason: string,
   ): { block: true; reason: string } | undefined => (ruleBlocks(key) ? blockCall(reason) : warnCall(reason));
-  // AT1 (2026-10-21 audit): adoption telemetry. The NDJSON above only records
-  // BLOCKS, so the store made silent non-adoption invisible — 1 "Pibash-first"
-  // line against 27 "Pibash (fallback)" lines read as "pibash is used but
-  // degrading" when the truth was "pibash is never called". A successful call
-  // to a native tool now appends a lightweight `{kind:"adoption"}` line, so a
-  // session's native-tool usage is countable next to the built-in usage the
-  // P1/P2/P3 families already capture. Same append-only store, same
-  // best-effort discipline; loadCounts ignores non-family lines.
-  const NATIVE_TOOLS = new Set(["pibash", "piread", "piedit", "pidx"]);
-  const recordAdoption = (toolName: string): void => {
-    if (!NATIVE_TOOLS.has(toolName)) return;
-    try {
-      mkdirSync(dirname(memoryNdjson), { recursive: true });
-      appendFileSync(
-        memoryNdjson,
-        `${JSON.stringify(adoptionRecord({ tool: toolName, sid, ts: Date.now() }))}\n`,
-      );
-    } catch {
-      // telemetry must never break the agent loop
-    }
-  };
   // S4 fix 1 (2026-10-15, spec §5.2): fail-closed handler wrap — an unexpected
   // exception in ANY handler must never fail open. tool_call → generic internal
   // block (the call never runs; a rejected handler otherwise lets the tool
@@ -484,23 +317,6 @@ export default function (pi: ExtensionAPI) {
       `first — ${ctx?.hasUI ? "the user declined" : "no chat approval, no confirm dialog"}; ask in chat and wait. Never run it unprompted.`
     );
   };
-
-  on("before_agent_start", (event) => {
-    if (!ruleEnabled("violationMemory")) return;
-    if (memoryInjectedThisProcess) return; // once per process — per-run re-entry must not stack copies
-    memoryInjectedThisProcess = true;
-    const lessons = Object.entries(counts)
-      .filter(([family, n]) => n >= MEMORY_THRESHOLD && FAMILY_LESSONS[family])
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([family]) => `- ${FAMILY_LESSONS[family]}`);
-    if (lessons.length === 0) return;
-    // pi seeds appendSystemPrompt to "" today; guard anyway — undefined must never
-    // leak into the system prompt as the literal "undefined" (2026-10-07 review)
-    event.systemPromptOptions.appendSystemPrompt =
-      (event.systemPromptOptions.appendSystemPrompt ?? "") +
-      `<violation-memory>\nRecurring tool-call violations from your prior sessions (gate telemetry) — apply before the first call:\n${lessons.join("\n")}\n</violation-memory>\n`;
-  });
 
   // R-inj (2026-10-10 session audit): CLI @file args arrive as
   // `<file name="/abs/path">\n…content…\n</file>` blocks in the expanded
@@ -956,7 +772,6 @@ export default function (pi: ExtensionAPI) {
   on("tool_result", async (event) => {
     // AT1: a completed native-tool call is the adoption signal (blocked calls
     // never reach tool_result, and the gate's own blocks carry a family).
-    if (ruleEnabled("adoptionTelemetry") && !event.isError) recordAdoption(event.toolName);
     if (
       !pendingBashFull.has(event.toolCallId) &&
       !pendingBash.has(event.toolCallId)

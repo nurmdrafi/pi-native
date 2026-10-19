@@ -10,13 +10,7 @@
     "deepseek/deepseek-v4-pro": "off"
   },
   "hideThinkingBlock": true,
-  "defaultTools": ["-read", "-bash", "-edit"],
-  "compaction": {
-    "enabled": true,
-    "midTurnEnabled": true,
-    "strategy": "shake",
-    "keepRecentTokens": 12000
-  },
+  "defaultTools": ["-read", "-bash", "-edit", "-pidx"],
   "packages": [],
   "extensions": [
     "-builtin:mcp"

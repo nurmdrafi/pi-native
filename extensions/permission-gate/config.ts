@@ -25,7 +25,7 @@
  * disables enforcement. An unknown key is reported the same way, so a typo
  * (`toolchainPnmp`) is loud instead of a rule that quietly never applies.
  *
- * Scalar knobs (`outputCap`, `confirm`, `violationMemory`) live beside the
+ * Scalar knobs (`outputCap`, `confirm`) live beside the
  * switches and validate their own ranges.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -53,8 +53,6 @@ export const RULE_IDS = {
   searchMidPipe: "SS2",
   findFirst: "SS3",
   searchPortability: "PB1",
-  violationMemory: "VM",
-  adoptionTelemetry: "AT1",
   cadenceNudge: "CN",
   outputScrub: "OS",
 } as const;
@@ -102,7 +100,7 @@ export interface GateConfig {
   severity: Record<RuleKey, Severity>;
   outputCap: { maxLines: number; maxBytes: number };
   confirm: { timeoutMs: number };
-  violationMemory: { distinctSessionsBeforeLesson: number; windowDays: number };
+
 }
 
 /** Redirectable so a test can exercise a config without touching the tracked
@@ -112,7 +110,7 @@ const CONFIG_PATH =
 
 const DEFAULT_OUTPUT_CAP = { maxLines: 40, maxBytes: 2048 };
 const DEFAULT_CONFIRM = { timeoutMs: 300_000 };
-const DEFAULT_MEMORY = { distinctSessionsBeforeLesson: 5, windowDays: 30 };
+
 
 function warn(msg: string): void {
   process.stderr.write(`permission-gate config: ${msg}\n`);
@@ -193,7 +191,6 @@ function loadGateConfig(): GateConfig {
 
   const oc = (raw.outputCap ?? {}) as Record<string, unknown>;
   const cf = (raw.confirm ?? {}) as Record<string, unknown>;
-  const vm = (raw.violationMemory ?? {}) as Record<string, unknown>;
 
   // Hard rules are clamped: no config value can lower them below `error`.
   const severity = { ...rules };
@@ -213,12 +210,6 @@ function loadGateConfig(): GateConfig {
     },
     confirm: {
       timeoutMs: asPosInt(cf.timeoutMs, "confirm.timeoutMs", 3_600_000) ?? DEFAULT_CONFIRM.timeoutMs,
-    },
-    violationMemory: {
-      distinctSessionsBeforeLesson:
-        asPosInt(vm.distinctSessionsBeforeLesson, "violationMemory.distinctSessionsBeforeLesson", 1000) ??
-        DEFAULT_MEMORY.distinctSessionsBeforeLesson,
-      windowDays: asPosInt(vm.windowDays, "violationMemory.windowDays", 3650) ?? DEFAULT_MEMORY.windowDays,
     },
   };
 }

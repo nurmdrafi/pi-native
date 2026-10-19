@@ -36,9 +36,6 @@ for (const [name, body] of Object.entries(files)) if (name !== 'tiny') writeFile
 mkdirSync(join(scratch, 'src'));
 writeFileSync(join(scratch, 'src', 'do.ts'), 'export const done = true;\n');
 
-// violation-memory isolation: never touch the real ~/.pi/agent/logs telemetry
-process.env.PGATE_MEMORY = join(scratch, 'vmem.ndjson');
-writeFileSync(process.env.PGATE_MEMORY, '');
 // The fixtures exercise the BUILT-IN bash/read mechanics, so the native
 // P2/P1 first-rules must be opted out or every bash fixture would be blocked
 // by "Pibash-first" before its real family is measured (same reason
