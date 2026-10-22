@@ -312,12 +312,92 @@ fn exit_code_of(status: &std::process::ExitStatus) -> i32 {
 
 #[cfg(unix)]
 fn kill_tree(pid: u32) {
+    // Snapshot BEFORE the group signal: once the shell dies, group-escaped
+    // survivors reparent to init and become unreachable by parent walk.
+    let escapees = escaped_descendants(pid);
     signal_group(pid, "TERM");
+    signal_each(&escapees, "TERM");
 }
 
 #[cfg(unix)]
 fn kill_tree_hard(pid: u32) {
+    let escapees = escaped_descendants(pid);
     signal_group(pid, "KILL");
+    signal_each(&escapees, "KILL");
+}
+
+/// PIDs below `root` that left the shell's process group (setsid/setpgid
+/// escapees) and will never see a group signal. The shell's pgid equals its
+/// pid (`process_group(0)` at spawn), so a foreign pgrp marks an escapee.
+#[cfg(target_os = "linux")]
+fn escaped_descendants(root: u32) -> Vec<u32> {
+    // pid -> (ppid, pgrp) from one /proc scan. `comm` may contain spaces and
+    // parentheses, so parse the fields after the LAST ')'.
+    let mut children: std::collections::HashMap<u32, Vec<u32>> =
+        std::collections::HashMap::new();
+    let mut pgrp_of: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let Ok(dir) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    for entry in dir.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        let Some((_, rest)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = rest.split_whitespace();
+        let (Some(ppid), Some(pgrp)) = (fields.nth(1), fields.next()) else {
+            continue;
+        };
+        let (Ok(ppid), Ok(pgrp)) = (ppid.parse::<u32>(), pgrp.parse::<u32>()) else {
+            continue;
+        };
+        children.entry(ppid).or_default().push(pid);
+        pgrp_of.insert(pid, pgrp);
+    }
+    // Breadth-first over the descendant tree; report foreign-pgrp members.
+    let mut escapees = Vec::new();
+    let mut frontier = vec![root];
+    while let Some(p) = frontier.pop() {
+        if let Some(kids) = children.get(&p) {
+            for &pid in kids {
+                frontier.push(pid);
+                if pgrp_of.get(&pid).is_some_and(|&g| g != root) {
+                    escapees.push(pid);
+                }
+            }
+        }
+    }
+    escapees
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn escaped_descendants(_root: u32) -> Vec<u32> {
+    // No /proc on macOS/BSD: group-escaped grandchildren stay a documented
+    // limitation there (research/process-groups-cancellation.md §1.4).
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn signal_each(pids: &[u32], signal: &str) {
+    for pid in pids {
+        // Dash form, like `signal_group`: procps `kill` rejects a bare
+        // signal name as the first argument (exit 1, no signal sent).
+        let _ = Command::new("kill")
+            .arg(format!("-{signal}"))
+            .arg(pid.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 #[cfg(unix)]
@@ -431,6 +511,43 @@ mod tests {
         let outcome = run(&req, &mut acc);
         assert!(outcome.timed_out);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn timeout_kills_grandchildren_that_escape_the_process_group() {
+        // `setsid` moves the grandchild into a new session, invisible to the
+        // group signal — the exact orphan class the pre-TERM /proc snapshot
+        // exists for. Skip where util-linux setsid is unavailable.
+        if !Command::new("setsid")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+        {
+            return;
+        }
+        let mut acc = OutputAccumulator::new("pi-output-test");
+        let req = Request {
+            command: "setsid sleep 45 >/dev/null 2>&1 & sleep 0.3; sleep 45".to_string(),
+            cwd: std::env::temp_dir(),
+            timeout_seconds: Some(1.2),
+            env: None,
+        };
+        let outcome = run(&req, &mut acc);
+        assert!(outcome.timed_out);
+        // The escapee kill happens inside run(); allow scheduling slack only.
+        std::thread::sleep(Duration::from_millis(300));
+        let probe = Command::new("pgrep")
+            .args(["-f", "sleep 45"])
+            .output()
+            .expect("pgrep available");
+        let survivors = String::from_utf8_lossy(&probe.stdout);
+        assert!(
+            survivors.trim().is_empty(),
+            "process-group escapee survived the timeout kill: {survivors}"
+        );
     }
 
     #[test]
