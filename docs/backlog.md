@@ -186,10 +186,13 @@ stdout.
 worse than no gate. **Effort:** small for (1)+(2), medium for (3).
 
 
-## 3. `permission-gate` S4/S5 failures (pre-existing, unrelated)
+## 3. `permission-gate` S4/S5 failures (pre-existing, unrelated) — RESOLVED
 
-Two cases fail on `main` and have failed throughout this round — confirmed by
-running the suite against a stashed tree:
+> **Resolved on Linux (2026-10-22).** Both cases pass standalone and in the
+> full suite on this host. The symlink-confirm fix `a71d167` (2026-10-16,
+> "confirm write/edit into symlink-resolved protected paths") predates this
+> note's last edit (`d8598ed`, 2026-10-17), so the recorded failure state was
+> stale. Only open branch: a macOS re-run — unverified here.
 
 ```
 FAIL  S4 protected path: write via symlink into HOME/.ssh confirms  (expected blocked, got pass)
@@ -316,8 +319,8 @@ reminders ("read before edit" as a gate) rather than repeated admonition.
 
 **The structural limit:** nothing durable carries a lesson forward except the
 prompt. Chat corrections are compacted away, so a rule absent from the prompt
-at the moment of action will be broken again — which is precisely what
-violation-memory exists to mitigate.
+at the moment of action will be broken again — precisely what the (since
+removed, `177f3d4`) violation-memory store existed to mitigate.
 
 **Open question B — time-based relaxation.** Proposal to review: allow
 re-writing a file that was already written if ≥60 s have passed, on the
