@@ -22,8 +22,6 @@
  * | PB1 | Portability (grep -P)         | grep -P on darwin — rg / grep -E |
  * | R10 | Token Economy (Re-run)         | identical command re-run within 10 min without an edit/write/mutating-bash since is blocked |
  * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
- * | VM  | violation memory              | cross-session per-family block counts inject lessons into the next system prompt (threshold: 5 distinct sessions / 30d) |
- * | AT1 | adoption telemetry            | a completed native-tool call (pibash/piread/piedit/pidx) appends a `{kind:"adoption"}` line — non-adoption was invisible when only blocks were logged |
  * | CN  | cadence nudge (non-blocking)  | tool_result note at ~200 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
  *
  * Destructive matching is a TRIPWIRE, not a boundary — see destructive.ts.
@@ -196,11 +194,11 @@ export default function (pi: ExtensionAPI) {
     block: true,
     reason,
   });
-  /** Record a style violation without blocking: the call proceeds. */
+  /** `warn` severity: proceed without blocking. */
   const warnCall = (_reason: string): undefined => undefined;
   /**
    * Apply a rule decision at its configured severity: `error` blocks, `warn`
-   * records and returns undefined (call proceeds).
+   * returns undefined (call proceeds).
    */
   const enforce = (
     key: Parameters<typeof ruleSeverity>[0],
@@ -665,8 +663,8 @@ export default function (pi: ExtensionAPI) {
     // pins + search hygiene encode a PREFERENCE, not a safety property — a
     // pnpm reponame or an `rg` vs `grep` choice cannot be judged by the gate from
     // a command string alone, and a block there costs a whole retry for a
-    // convention the caller may have already considered. Record the violation
-    // (lessons + telemetry keep working), then let the command run.
+    // convention the caller may have already considered, then let the
+    // command run.
     const isDarwin = process.platform === "darwin";
     for (const seg of normSegs) {
       const tc = toolchainCheck(seg, cmd, ctx?.cwd, {
@@ -770,8 +768,9 @@ export default function (pi: ExtensionAPI) {
   // and this one's RETURN value overlays the truncated content onto what the
   // model sees while bookkeeping (R10 records, Re-block arming) still runs.
   on("tool_result", async (event) => {
-    // AT1: a completed native-tool call is the adoption signal (blocked calls
-    // never reach tool_result, and the gate's own blocks carry a family).
+    // Blocked calls never reach tool_result; completed ones do and get
+    // capped below. The gate's own synthesized block results are the
+    // only tool_results that pass through untouched.
     if (
       !pendingBashFull.has(event.toolCallId) &&
       !pendingBash.has(event.toolCallId)

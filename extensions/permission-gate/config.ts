@@ -60,8 +60,8 @@ export const RULE_IDS = {
 export type RuleKey = keyof typeof RULE_IDS;
 
 /**
- * ESLint-style severity. `error` blocks the call; `warn` records the violation
- * and lets the call proceed; `off` skips the rule entirely.
+ * ESLint-style severity. `error` blocks the call; `warn` lets the call
+ * proceed; `off` skips the rule entirely.
  *
  * The distinction exists because a rule is a *default*, not always an absolute.
  * Preference rules (search hygiene, toolchain pins, re-run, big-read) encode a

@@ -23,15 +23,12 @@
  *   Final line: single JSON object with all metrics.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const env = { ...process.env, PGATE_MEMORY: join(mkdtempSync(join(tmpdir(), 'gate-eval-')), 'vmem.ndjson') };
-writeFileSync(env.PGATE_MEMORY, '');
+const env = { ...process.env };
 
 const run = (script, args = []) =>
   spawnSync(process.execPath, [join('tests', script), ...args], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });

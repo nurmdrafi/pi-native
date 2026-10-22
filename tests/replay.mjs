@@ -17,8 +17,7 @@
  * Run: node tests/replay.mjs [sessionsRoot]
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -27,9 +26,6 @@ import { freshGate, bashProbe, familyOfReason } from './lib/gate-stub.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SESSIONS = resolve(process.argv[2] ?? join(homedir(), '.pi', 'agent', 'sessions'));
 const MAX_FILES = 600; // speed bound; stable over-sample below keeps runs comparable
-
-// violation-memory isolation
-process.env.PGATE_MEMORY = join(mkdtempSync(join(tmpdir(), 'pgate-replay-')), 'vmem.ndjson');
 
 let files = [];
 try {

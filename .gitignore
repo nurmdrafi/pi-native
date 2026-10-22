@@ -41,7 +41,7 @@ __pycache__/
 !custom-tools/Cargo.lock
 tavily/config.json
 tavily/session.json
-# Machine-local gate telemetry (violation-memory counts)
+# Machine-local scratch (no writer since the gate telemetry store removal)
 logs/
 # Autoresearch per-session scratch (workingDir pointer, rewritten each run)
 .auto/
