@@ -58,6 +58,43 @@ contract that `permission-gate` H1 and the bash parity suite depend on.
 **Recommendation:** (b) — the contract survives and the redundant encode goes
 away. Needs a micro-bench before/after to prove the win.
 
+**Decision (2026-10-19, goal: low latency).** Architecture stays on the
+accumulator + spill envelope (state at `f51cfc2`); the bounded streaming
+rebuild (research/pibash-implementation-plan.md) is closed — measured ~18%
+slower at 1M/2M lines with no envelope gain (`073ac87`). Reopen only if
+subagents routinely push ≥10 MB outputs or daemon RSS pressure is observed;
+the reopen path is a hybrid (accumulator below a threshold, bounded capture
+above), gated by the measurement harness. Retired with this decision: the
+single-line-overflow pending-cap and the accumulator-constant re-derivation —
+both are streaming-design-only concerns.
+
+Next perf item under this goal: eliminate the `seq50000` residual (+2.82 ms).
+Correction after reading the code: error-priority already runs only for
+Test/Build commands (`compress_output`), so a Generic stream like `seq` never
+enters it — the residual is the Tier-1 pre-pass itself (`split_lines`
+materializes a Vec<&str> with one entry per line, plus a full-corpus dedup
+scan). Approach: a fused single-scan Generic fast path — count lines, capture
+head/tail window slices, and detect ESC bytes, adjacent duplicates, and the
+omission tag in one pass; on any anomaly fall back to the exact existing
+path, so output stays byte-identical by construction. Acceptance: corpus
+equivalence test (windowed == materialized on all clean fixtures), unit +
+parity suites green, `seq50000` p50 reduced (target: at or below the oracle,
+~10.6 ms).
+
+**Done (2026-10-22).** `head_tail_windowed` in compress.rs: one fused scan
+counts lines and captures only the head/tail budget windows, bailing to the
+exact materialized path on ESC bytes, `[`, adjacent duplicates, or small
+corpora — byte-identical by construction, and `trim_overlap`/kept-everything
+are provably unreachable on the fast path. `compress_output`'s entry check
+now uses `line_count` (no materialized split). Verification: 142 unit tests +
+parity suite green, clippy clean; interleaved one-shot A/B `seq50000` p50
+~15.0 → ~13.7–13.9 ms (−1.1 to −1.3 ms); harness re-run (2026-10-22) gap
++2.37 ms — the oracle arm itself ran ~4 ms slower that day, so the A/B is
+the clean signal. Residual is no longer compression: it is daemon
+protocol/IPC cost (288 KB child pipe → 2 KB envelope). "At or below oracle"
+was not reached; further reduction is protocol-level work, not compression. Still owed either way: 1/10/100 MB fixtures with latency and
+envelope assertions, Linux AND macOS (plan Step 8).
+
 ## 2. `doc:check` is non-deterministic — FIXED
 
 > **Fixed.** All four planned changes are in `scripts/doc-check.mjs`:

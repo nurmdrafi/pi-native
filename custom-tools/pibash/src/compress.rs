@@ -17,6 +17,7 @@ use crate::truncate::{
     truncate_string_to_bytes_from_start,
 };
 use std::borrow::Cow;
+use std::collections::VecDeque;
 
 /// The compression target: the model-visible budget enforced by the
 /// permission-gate H1 cap (40 lines / 2 KB, `extensions/permission-gate/`
@@ -279,6 +280,126 @@ fn head_tail_lines(
 
 fn fits(text: &str, max_lines: usize, max_bytes: usize) -> bool {
     line_count(text) <= max_lines && js_byte_length(text) <= max_bytes
+}
+
+/// Generic-kind fast path for oversized, ANSI-free, fold-free, marker-free
+/// streams: one fused scan replaces the full line materialization
+/// (`split_lines` allocates a `Vec<&str>` with one entry per line) and the
+/// dedup pre-pass. The scan captures only the head/tail windows the budget
+/// arithmetic can ever read, and detects everything the materialized path
+/// would act on: any ESC byte (ANSI), `[` (omission-tag prefix byte), or
+/// adjacent duplicate line (fold candidate) aborts to `None`, so the caller
+/// falls back to the exact existing path — byte-identical output by
+/// construction, never by parity of reimplementation.
+///
+/// Preconditions, established by the caller: the body exceeds the budget.
+/// The fast path is taken only when `total > window`; for smaller bodies
+/// `trim_overlap` and the kept-everything branch become reachable, so they
+/// stay on the materialized path. Overlap proof for large streams: real
+/// overlap needs `total < head_kept + tail_kept <= head_budget +
+/// tail_budget < window < total` — a contradiction, so skipping
+/// `trim_overlap` is exact.
+#[must_use]
+fn head_tail_windowed(
+    text: &str,
+    max_lines: usize,
+    max_bytes: usize,
+    success: bool,
+) -> Option<Compressed> {
+    // Budget arithmetic mirrored from `head_tail_lines` (requirement 2).
+    let (head_share, tail_share): (usize, usize) = if success { (2, 1) } else { (1, 2) };
+    let content_lines = max_lines.saturating_sub(3);
+    let head_lines_budget = content_lines * head_share / (head_share + tail_share);
+    let tail_lines_budget = content_lines - head_lines_budget;
+    let head_bytes_budget = max_bytes * head_share / (head_share + tail_share);
+    let tail_bytes_budget = max_bytes - head_bytes_budget;
+
+    let window = head_lines_budget + tail_lines_budget + 4;
+    let bytes = text.as_bytes();
+
+    // Fused single scan: count lines, capture head window (fixed capacity)
+    // and tail window (ring of the last `window` lines), bail on any anomaly.
+    let mut head: Vec<(usize, usize)> = Vec::with_capacity(head_lines_budget);
+    let mut tail: VecDeque<(usize, usize)> = VecDeque::with_capacity(window);
+    let mut total = 0usize;
+    let mut start = 0usize;
+    let mut prev: Option<(usize, usize)> = None;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x1b || b == b'[' {
+            return None; // ANSI escape or omission-tag prefix byte.
+        }
+        if b == b'\n' {
+            let dup = prev.is_some_and(|(ps, pe)| {
+                pe - ps == i - start && bytes[ps..pe] == bytes[start..i]
+            });
+            if dup {
+                return None; // adjacent duplicate: a fold candidate.
+            }
+            prev = Some((start, i));
+            total += 1;
+            if head.len() < head_lines_budget {
+                head.push((start, i));
+            }
+            if tail.len() == window {
+                tail.pop_front();
+            }
+            tail.push_back((start, i));
+            i += 1;
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    if start < bytes.len() {
+        // Final line without a trailing newline; same duplicate guard.
+        let dup = prev.is_some_and(|(ps, pe)| {
+            pe - ps == bytes.len() - start && bytes[ps..pe] == bytes[start..bytes.len()]
+        });
+        if dup {
+            return None;
+        }
+        total += 1;
+        if head.len() < head_lines_budget {
+            head.push((start, bytes.len()));
+        }
+        if tail.len() == window {
+            tail.pop_front();
+        }
+        tail.push_back((start, bytes.len()));
+    }
+    if total <= window {
+        return None; // Small corpora: overlap/kept-everything branches live on
+                     // the materialized path.
+    }
+
+    let head_lines: Vec<&str> = head.iter().map(|&(s, e)| &text[s..e]).collect();
+    let tail_lines: Vec<&str> = tail.iter().map(|&(s, e)| &text[s..e]).collect();
+
+    let head_slice = take_head(&head_lines, head_lines_budget, head_bytes_budget);
+    // `from = tail_lines.len()`: walking the window from its end touches the
+    // true last lines (total > window), with identical per-line byte math.
+    let tail_slice = take_tail(
+        &tail_lines,
+        tail_lines.len(),
+        tail_lines_budget,
+        tail_bytes_budget,
+    );
+
+    let omitted_lines = total - head_slice.kept - tail_slice.kept;
+    let omitted_chars = text
+        .chars()
+        .count()
+        .saturating_sub(head_slice.text.chars().count() + tail_slice.text.chars().count());
+    let marker = omission_marker(omitted_chars, omitted_lines);
+    let content = format!("{}\n\n{marker}\n\n{}", head_slice.text, tail_slice.text);
+    Some(Compressed {
+        content,
+        strategy: Strategy::HeadTail,
+        omitted_chars,
+        partial: head_slice.partial || tail_slice.partial,
+    })
 }
 
 /// `split_lines(text).len()` without materializing the line vector — one
@@ -793,8 +914,18 @@ pub fn compress_output(
     max_bytes: usize,
 ) -> Compressed {
     // Within the model budget: nothing to compress, stay byte-identical.
-    if js_byte_length(text) <= max_bytes && split_lines(text).len() <= max_lines {
+    if js_byte_length(text) <= max_bytes && line_count(text) <= max_lines {
         return Compressed::verbatim(text);
+    }
+
+    // Generic fast path: oversized ANSI-free, fold-free, marker-free streams
+    // (e.g. `seq 50000`) skip the line materialization and the dedup scan in
+    // one fused pass. The scan itself detects every anomaly the materialized
+    // path would act on; `None` falls through to the exact path below.
+    if !matches!(kind, CommandKind::Test | CommandKind::Build)
+        && let Some(c) = head_tail_windowed(text, max_lines, max_bytes, success)
+    {
+        return c;
     }
 
     // Tier 1: deterministic structural pruning. Copy-on-write + a single
@@ -845,6 +976,61 @@ mod tests {
     /// lines never fold, fold-free output is byte-identical.
     fn dedup_repeats(s: &str) -> Cow<'_, str> {
         dedup_lines(s, &split_lines(s))
+    }
+
+    // --- Generic fast path: windowed head-tail ---------------------------------
+    // Fixtures are oversized, ANSI-free, fold-free, marker-free bodies — the
+    // exact shape the fast path exists for (e.g. `seq 50000`).
+
+    fn clean_body(lines: usize, width: usize) -> String {
+        (0..lines)
+            .map(|i| format!("row-{i:0width$}\n", width = width))
+            .collect()
+    }
+
+    fn crlf_body(lines: usize) -> String {
+        (0..lines).map(|i| format!("r{i}\r\n")).collect()
+    }
+
+    fn materialized(body: &str, success: bool) -> Compressed {
+        head_tail_lines(body, &split_lines(body), 40, 2048, success)
+    }
+
+    #[test]
+    fn windowed_matches_materialized_on_clean_oversized_streams() {
+        for success in [true, false] {
+            for body in [
+                clean_body(5000, 6),
+                clean_body(120, 40),
+                crlf_body(3000),
+                (0..2000)
+                    .map(|i| format!("é-€ line {i}\n"))
+                    .collect::<String>(), // non-ASCII, dup-free
+            ] {
+                let expected = materialized(&body, success);
+                let got = head_tail_windowed(&body, 40, 2048, success)
+                    .expect("clean oversized body must take the fast path");
+                assert_eq!(got.content, expected.content, "content mismatch");
+                assert_eq!(got.strategy, expected.strategy);
+                assert_eq!(got.omitted_chars, expected.omitted_chars);
+                assert_eq!(got.partial, expected.partial);
+            }
+        }
+    }
+
+    #[test]
+    fn windowed_declines_small_or_anomalous_bodies() {
+        // Small corpora (total at or under the window size) and anomalies
+        // (ESC, omission-tag prefix byte, adjacent duplicates) must fall back
+        // to the exact materialized path.
+        assert!(head_tail_windowed(&clean_body(41, 4), 40, 2048, true).is_none());
+        assert!(head_tail_windowed(&"a".repeat(3000), 40, 2048, true).is_none());
+        let esc = format!("{}\x1b[0m", clean_body(5000, 5));
+        assert!(head_tail_windowed(&esc, 40, 2048, true).is_none());
+        let dup = "same\n".repeat(5000);
+        assert!(head_tail_windowed(&dup, 40, 2048, true).is_none());
+        let marker = format!("x\n[... omitted 10 lines ...]\n{}", clean_body(5000, 5));
+        assert!(head_tail_windowed(&marker, 40, 2048, true).is_none());
     }
 
     #[test]
