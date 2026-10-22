@@ -374,6 +374,25 @@ grows past the cap:
 - **`snapshot`**: produces the oracle-shaped result plus an optional
   `fullOutputPath` reference.
 
+### Large-output fixtures (Step 8)
+
+`custom-tools/pibash/bench-large-output.mjs` pins this pipeline at
+1/10/100 MB — three shapes per size (uniform lines, one giant line, stderr
+mix) plus `yes | head -c` throughput, non-zero exit after 100 MB, and
+SIGTERM death mid-stream. The daemon arm measures the model-visible
+envelope, `child_bytes` (`truncation.totalBytes`), and `spill_bytes` (stat
+of `fullOutputPath`); the oneshot arm measures peak RSS under
+`/usr/bin/time` (`ru_maxrss`: KiB on Linux, bytes on macOS, normalized by
+one helper). Assertions pin current behavior, not goals: `child_bytes`
+byte-exact, `spill_bytes == child_bytes`, envelope ≤ 8192 B flat as output
+grows — compression-classified streams render ≈2 KB, unclassified ones
+(`yes | head -c`) fall to the parity-locked 2000-line tail window (4111 B
+measured) — and per-class RSS caps record the accumulator's by-design
+scaling until spill (100 MB class measured 1003 MB peak). Reports land in
+`benchmark/runs/`; the 1 MB class also runs in the Node suite
+(`tests/pibash-large-output.test.mjs`). Wall time is recorded, never
+asserted.
+
 ### Compression
 
 A **shadow pre-pass** runs over the complete output before the legacy

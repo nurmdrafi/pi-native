@@ -15,7 +15,7 @@
 ├── extensions/               # Always-on TS extensions (permission-gate, subagents, handoff)
 ├── agents/                   # Subagent definitions
 ├── custom-tools/             # Rust workspace: piread, piedit, pibash, pidx
-├── benchmark/                # Model-graded benchmark tasks + validators
+├── benchmark/                # Model-graded benchmark tasks + validators; runs/ = wall-clock harness reports
 ├── scripts/                  # Repo tooling (bootstrap, doc-check, agents-lint, gate-eval)
 ├── prompts/                  # /command prompt templates (/issue, /ship, /update-changelog)
 ├── tests/                    # Node test runner suite (permission-gate, parity, doc-check)

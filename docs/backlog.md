@@ -92,8 +92,18 @@ parity suite green, clippy clean; interleaved one-shot A/B `seq50000` p50
 +2.37 ms — the oracle arm itself ran ~4 ms slower that day, so the A/B is
 the clean signal. Residual is no longer compression: it is daemon
 protocol/IPC cost (288 KB child pipe → 2 KB envelope). "At or below oracle"
-was not reached; further reduction is protocol-level work, not compression. Still owed either way: 1/10/100 MB fixtures with latency and
-envelope assertions, Linux AND macOS (plan Step 8).
+was not reached; further reduction is protocol-level work, not compression. Step 8 landed 2026-10-22
+(`3391c41`): `custom-tools/pibash/bench-large-output.mjs` (12 fixtures,
+1/10/100 MB × uniform/giant-line/stderr-mix, plus `yes | head -c`, non-zero
+exit, SIGTERM death) and the 1 MB regression class in
+`tests/pibash-large-output.test.mjs`. Assertions pin current behavior:
+byte-exact `child_bytes`, `spill_bytes == child_bytes`, envelope ≤ 8192 B
+flat across 1→100 MB (unclassified streams render the parity-locked
+2000-line tail window — 4111 B measured — hence 8 KB, not 2 KB), and
+per-class RSS caps recording the by-design scaling (100 MB peak 1003 MB on
+`yes | head -c`). Wall time is recorded, never asserted (noise). Report:
+`benchmark/runs/pibash-large-output-2026-10-22.md`. Still owed: one macOS
+run of the same harness (parsing and unit normalization are in place).
 
 ## 2. `doc:check` is non-deterministic — FIXED
 
