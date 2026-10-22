@@ -276,7 +276,11 @@ fn spawn_reader<R: Read + Send + 'static>(
     tx: mpsc::Sender<(Stream, Vec<u8>)>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
+        // 64 KB matches the Linux pipe capacity: one read syscall drains a
+        // full pipe buffer, cutting syscalls, per-read Vec allocations, and
+        // channel sends ~8x for large streams (macOS pipes are 16 KB — a
+        // larger read buffer simply never fills past that, still correct).
+        let mut buffer = [0u8; 64 * 1024];
         loop {
             match source.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
