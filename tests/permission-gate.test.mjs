@@ -204,6 +204,32 @@ async function editApplied(pi, path, oldText, newText, T) {
   return { blocked: false };
 }
 
+/** multi-edit variant of editApplied: applies every (disjoint) edit to disk —
+ * the tool applies edits[] as one overlay against the original content */
+async function editsApplied(pi, path, editList) {
+  const toolCallId = `tc${++seqId}`;
+  const input = { path, edits: editList };
+  const block = await pi.invoke("tool_call", {
+    type: "tool_call",
+    toolName: "edit",
+    toolCallId,
+    input,
+  });
+  if (block) return { blocked: true, reason: block.reason };
+  let content = readFileSync(path, "utf8");
+  for (const e of editList) content = content.replace(e.oldText, e.newText);
+  writeFileSync(path, content);
+  await pi.invoke("tool_result", {
+    type: "tool_result",
+    toolName: "edit",
+    toolCallId,
+    input,
+    content: textBlocks("ok"),
+    isError: false,
+  });
+  return { blocked: false };
+}
+
 async function bash(
   pi,
   command,
@@ -645,8 +671,8 @@ const cases = [
     async (pi) => read(pi, fileA, { offset: 2, limit: 1 }, { outputLines: 1 }),
   ],
   [
-    "window outside just-edited span passes",
-    "pass",
+    "window outside just-edited span passes (§8: unchanged lines stay certified — the redundant re-read now blocks)",
+    "blocked",
     async (pi) => read(pi, fileA, { offset: 3, limit: 1 }, { outputLines: 1 }),
   ],
   // ---- B3/H9 (2026-10-08): true post-edit spans via position-sorted overlay math ----
@@ -693,8 +719,8 @@ const cases = [
     },
   ],
   [
-    "B4: re-read below a line-count-changing edit is allowed",
-    "pass",
+    "B4: re-read below a line-count-changing edit is allowed (§8: the shifted span stays certified — the redundant re-read now blocks)",
+    "blocked",
     async (pi) => {
       const f = join(tmp, "b4.ts");
       writeFileSync(
@@ -3742,6 +3768,73 @@ const cases = [
       return { blocked: false };
     },
   ],
+  [
+    "S8 §8: write then edit keeps whole-file coverage — later edits on self-authored lines pass",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "ag8-write-edit.ts");
+      const w = await write(pi, f, lineText(60), { apply: true });
+      if (w.blocked) return w;
+      // this edit straddles the write's [1,∞] span — the legacy single-delta
+      // shift dropped it wholesale, wiping coverage for every other line
+      const e1 = await editApplied(
+        pi,
+        f,
+        "line 30",
+        "authored A\nauthored B\nauthored C",
+      );
+      if (e1.blocked) return e1;
+      const e2 = await edit(pi, f, [
+        { oldText: "line 7", newText: "line seven" },
+      ]);
+      if (e2.blocked) return e2;
+      return edit(pi, f, [{ oldText: "line 60", newText: "line sixty" }]);
+    },
+  ],
+  [
+    "S8 §8 test-spec: line-shifting second edit still certifies the first edit's inserted text",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "ag8-spec.ts");
+      writeFileSync(f, lineText(40));
+      await read(pi, f, { offset: 1, limit: 40 }, { outputLines: 40 });
+      const e1 = await editApplied(
+        pi,
+        f,
+        "line 20",
+        "INSERTED ONE\nINSERTED TWO",
+      );
+      if (e1.blocked) return e1;
+      const e2 = await editApplied(pi, f, "line 9", "line 9\nextra line");
+      if (e2.blocked) return e2;
+      // the session authored INSERTED ONE/TWO one edit earlier — must pass
+      // with no fresh read (backlog §8 repro sequence)
+      return edit(pi, f, [
+        { oldText: "INSERTED ONE\nINSERTED TWO", newText: "INSERTED ONE" },
+      ]);
+    },
+  ],
+  [
+    "S8 §8: multi-edit call rebases between-region spans by per-edit deltas",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "ag8-multi.ts");
+      writeFileSync(f, lineText(200));
+      await read(pi, f, { offset: 45, limit: 66 }, { outputLines: 66 });
+      const edits = [
+        { oldText: "line 50", newText: "line 50\nn1\nn2\nn3\nn4\nn5" }, // +5 at 50
+        { oldText: "line 100\nline 101", newText: "line 100" }, // −1 at 100
+      ];
+      const e = await editsApplied(pi, f, edits);
+      if (e.blocked) return e;
+      // old lines 79–80 now sit at 84–85 (below the +5 region, above the −1).
+      // The certified span [45,110] straddled firstEditedLine — the legacy
+      // shift dropped it entirely, so this edit M2-blocked as never-read.
+      return edit(pi, f, [
+        { oldText: "line 79\nline 80", newText: "line 79" },
+      ]);
+    },
+  ],
 ];
 
 // ---- runner: each case replays its preamble on a fresh gate, then the probe ----
@@ -3823,7 +3916,7 @@ const preambles = {
       throw new Error(`preamble edit unexpectedly blocked: ${r.reason}`);
     return pi;
   },
-  "window outside just-edited span passes": async () => {
+  "window outside just-edited span passes (§8: unchanged lines stay certified — the redundant re-read now blocks)": async () => {
     const pi = freshGate();
     await read(pi, fileA); // S5 M2: certify before the edit
     const r = await edit(pi, fileA, [{ oldText: "b", newText: "x" }]);

@@ -350,6 +350,18 @@ irrelevant). Keep the disk-change (mtime/size/hash) invalidation as is.
 **Test:** apply edit → line-shifting second edit elsewhere → third edit whose
 oldText is the first edit's inserted text → must pass without a fresh read.
 
+**Resolved 2026-10-25** (`shiftSpansForEdit` per-edit regions, permission-gate):
+the post-edit result now rebases prior certified spans by the cumulative
+delta of the regions ABOVE each span (not one call-total delta) and SPLITS
+straddling spans into unchanged head + shifted tail instead of dropping them
+— the drop had wiped a write's `[1,∞]` on the first edit and false-blocked
+the next edits on lines already in context. newText spans were already
+certified via the post-application `edited` spans; the gap was the rebasing
+math. Two legacy R1 cases flipped expectation (their "allowed" verdicts were
+the collateral of the drop): redundant re-reads of still-certified content
+now correctly block. `permission-gate` 276/277 (PB1 pre-existing, fails on
+HEAD), `read-coverage` 6/6, `piedit-parity` 58/58, microbench unchanged.
+
 ## Closed this round (for context)
 
 - `piread`/`piedit` event-loop drain: they ref'd `stdin`/`stdout` but not

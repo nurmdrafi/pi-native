@@ -151,6 +151,7 @@ export default function (pi: ExtensionAPI) {
       path: string;
       spans?: LineSpan[];
       firstEditedLine?: number;
+      regions?: { start: number; end: number; delta: number }[];
       delta?: number;
       preStat?: { mtimeMs: number; size: number };
       fuzzy?: boolean;
@@ -401,6 +402,7 @@ export default function (pi: ExtensionAPI) {
         path,
         spans: checked?.spans,
         firstEditedLine: checked?.firstEditedLine,
+        regions: checked?.regions,
         delta: checked?.delta,
         preStat: checked?.preStat,
         fuzzy: checked?.fuzzy,
@@ -955,7 +957,12 @@ export default function (pi: ExtensionAPI) {
         if (cur && entry.firstEditedLine !== undefined) {
           coverage.set(entry.path, {
             ...cur,
-            spans: shiftSpansForEdit(cur.spans, entry.firstEditedLine, entry.delta ?? 0),
+            spans: shiftSpansForEdit(
+              cur.spans,
+              entry.firstEditedLine,
+              entry.delta ?? 0,
+              entry.regions,
+            ),
           });
         }
         for (const s of entry.spans)

@@ -56,6 +56,8 @@ Fill `benchmark/arms.json` candidate arm (baseline config + `PI_NATIVE_EDIT=1`, 
 
 **Steps 7–8 status.** Step 8 items 1–2 are complete and green (crate 25/25, parity 40/40, permission-gate 246/246, `doc:check` 4/4, sabotage smoke red→green). **Step 7's S2 pair run and the `s8-verdict` file were not produced** — no in-repo `s2-run/1` baseline records exist, so the pair has no comparison target (same gap noted for S5). The latency evidence is the Step 6 micro-bench instead; the adoption verdict is deferred to the next bench cycle. MASTER §3 S8 is marked `done (gate overridden)` with the outcome line pointing at the measured numbers.
 
+**2026-10-25 bench cycle.** Second micro-bench run (`benchmark/runs/piedit-microbench-2026-10-25.md`) reproduces the Step 6 numbers within noise — 1 MiB p50 4.27 vs 4.26 ms, every class under the in-process oracle — so the adoption verdict stands on two stable runs; only the S2 pair remains blocked (no `s2-run` baselines).
+
 ## Contingencies
 
 - **Step 0 abort** → no Steps 1–8; S8 recorded as a measured negative; proceed to S7 (gate steering).

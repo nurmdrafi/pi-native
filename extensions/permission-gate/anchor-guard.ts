@@ -96,6 +96,7 @@ export async function validateEditAnchors(
       spans?: LineSpan[];
       origSpans?: { i: number; start: number; end: number }[];
       firstEditedLine?: number;
+      regions?: { start: number; end: number; delta: number }[];
       delta?: number;
       preStat?: { mtimeMs: number; size: number };
       fuzzy?: boolean;
@@ -293,6 +294,23 @@ export async function validateEditAnchors(
   return {
     spans: edited.length ? edited : undefined,
     origSpans: origSpans.length ? origSpans : undefined,
+    // backlog §8: per-edit ORIGINAL regions + deltas — tool_result rebases
+    // prior certified spans by the regions above each span (not one total
+    // delta) and splits straddlers instead of dropping them
+    regions: origSpans.length
+      ? origSpans.map((os) => {
+          const newLines = String(
+            (edits[os.i] as EditEntry)?.newText ?? "",
+          )
+            .split("\n")
+            .length;
+          return {
+            start: os.start,
+            end: os.end,
+            delta: newLines - (os.end - os.start + 1),
+          };
+        })
+      : undefined,
     firstEditedLine:
       edited.length && firstEditedLine !== Infinity
         ? firstEditedLine

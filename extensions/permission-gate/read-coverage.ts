@@ -128,26 +128,69 @@ export function coversAll(spans: LineSpan[], win: LineSpan): boolean {
   return false;
 }
 
+/** one edit region of an edit call, in ORIGINAL 1-based line coordinates:
+ * the matched `oldText` span [start, end] and its line-count delta. */
+export interface EditRegion {
+  start: number;
+  end: number;
+  delta: number;
+}
+
 /**
- * Re-map certified spans after a successful exact-anchor edit. Lines
- * strictly above the first edited line keep their numbers; lines from the
- * first edited line down shifted by `delta` (new − old line count of the
- * edit call). Straddling spans are dropped — their content changed.
- * Exact for single-edit calls; multi-edit calls shift by the cumulative
- * delta (spans between edit regions over-shift and simply stay decertified
- * on mismatch — conservative, never blocks a legitimate read of new
- * content since partial overlap always passes).
+ * Re-map certified spans after a successful edit call.
+ *
+ * With `regions` (per-edit original spans + deltas, the exact-anchor edit
+ * path): every span rebases by the cumulative delta of the regions ABOVE it
+ * only, and a span straddling a region SPLITS — the unchanged head keeps
+ * its original line numbers, the tail below the region shifts. Nothing
+ * still byte-identical in context is dropped (backlog §8, 2026-10-18: the
+ * old wholesale straddler drop wiped a write's [1,∞] on the first edit and
+ * false-blocked later edits on lines the session itself had put in context;
+ * a single total delta also over-shifted spans between a multi-edit call's
+ * regions).
+ *
+ * Legacy path (no `regions`, e.g. a write result): spans at/below
+ * firstEditedLine shift by the one `delta`; straddlers drop; no
+ * firstEditedLine at all (full rewrite) drops everything.
  */
 export function shiftSpansForEdit(
   spans: LineSpan[],
-  firstEditedLine: number,
+  firstEditedLine: number | undefined,
   delta: number,
+  regions?: EditRegion[],
 ): LineSpan[] {
+  if (regions === undefined || regions.length === 0) {
+    const out: LineSpan[] = [];
+    for (const s of spans) {
+      if (firstEditedLine === undefined) continue; // full rewrite: nothing survives
+      if (s.end < firstEditedLine) out.push(s);
+      else if (s.start >= firstEditedLine)
+        out.push({ ...s, start: s.start + delta, end: s.end + delta });
+    }
+    return out.sort((a, b) => a.start - b.start);
+  }
+  const sortedRegions = [...regions].sort((a, b) => a.start - b.start);
   const out: LineSpan[] = [];
   for (const s of spans) {
-    if (s.end < firstEditedLine) out.push(s);
-    else if (s.start >= firstEditedLine)
-      out.push({ ...s, start: s.start + delta, end: s.end + delta });
+    let curStart = s.start;
+    let shift = 0; // cumulative delta of the regions above the remainder
+    for (const r of sortedRegions) {
+      if (r.end < curStart) {
+        shift += r.delta; // region entirely above the remaining span
+      } else if (r.start > s.end) {
+        break; // region below — every later region is further below
+      } else {
+        // region overlaps the remaining span: emit the unchanged head,
+        // skip the changed lines, continue with the tail
+        if (r.start > curStart)
+          out.push({ start: curStart + shift, end: r.start - 1 + shift });
+        curStart = r.end + 1;
+        shift += r.delta;
+        if (curStart > s.end) break;
+      }
+    }
+    if (curStart <= s.end)
+      out.push({ start: curStart + shift, end: s.end + shift });
   }
   return out.sort((a, b) => a.start - b.start);
 }

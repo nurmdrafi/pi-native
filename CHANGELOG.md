@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`piedit`/Anchor Guard: an edit no longer decertifies whole-file coverage (backlog §8).** `shiftSpansForEdit` (`extensions/permission-gate/read-coverage.ts`) now rebases prior certified spans by the per-edit deltas of the regions above each span and splits straddling spans into unchanged head + shifted tail instead of dropping them — the wholesale drop wiped a write's `[1,∞]` on the first edit and false-blocked the next edits on lines already in context (three consecutive blocks in the 2026-10-18 dropx-admin session). Two legacy R1 cases flipped expectation: redundant re-reads of still-certified content now correctly block. Gate suite 276/277 (the one failure is pre-existing and non-piedit), read-coverage 6/6, parity 58/58, micro-bench unchanged (1 MiB p50 4.27 ms).
 - **`subagents`: sandboxed children are no longer toolless.** `getToolExtensionPath` in `extensions/subagents/index.ts` now hardcodes the four first-party `-e` paths (piread, piedit, pibash, pidx); alphabetical extension load order had made runtime `registerToolExtension` a silent no-op. Regression test pins path resolution (suite 156/156). Effective for orchestrator sessions started after the edit; verified by a post-restart probe (native tools executed in-child, model `zai/glm-5.3`).
 - **Tests: `daemon-exit` child fixture root is now a CLI arg.** Drops the hardcoded `/Users/nur/...` machine path; suite green on this Linux host.
 
