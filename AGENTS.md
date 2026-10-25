@@ -22,6 +22,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - Cite `path:line`; never restate file contents, output, diffs.
 - Between tool calls: max one short sentence.
 - Estimates: plans, task lists, and progress reports state wall-clock time per item and for the total, with confidence ("~15 min, low"). Cannot estimate → say so and name the blocking unknown.
+- Estimate calibration: anchor to observed pace (tool rounds × ~1 min/round from recent tasks of the same kind), quote a range ("2-4 min"), never pad. A quoted estimate beaten by ~2x+ means the next quote of that kind drops to the observed band — recalibrate immediately, don't repeat the miss.
 
 ## Workflow & TDD
 - TDD always: failing test first → watch fail → minimum code → refactor. No implementation before failing test.

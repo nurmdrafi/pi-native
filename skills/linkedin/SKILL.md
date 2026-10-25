@@ -31,5 +31,6 @@ Scope steering: `/skill:linkedin post` / `human` / `plan` … — read only the 
 | Inbox triage | `references/inbox.md` | |
 | Repurpose existing content | `references/repurpose.md` | assigns hook formulas per piece |
 | De-slop / detect AI text | `references/human.md` | `scripts/detect.py`, `scripts/humanize.py` |
+| Fast path, all tasks | `references/workflow.md` | round budget, one-shot fetch, draft-to-threshold |
 
 Source: Jakeschincariol/linkedin-agent-skill (MIT), adapted to this layout — upstream sub-skills li-* became references; full clone at `git/linkedin-agent-skill`.
