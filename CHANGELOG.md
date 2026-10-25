@@ -7,6 +7,20 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.55.0] - 25-10-2026
+
+### Added
+
+- **Live progress UI for `after-pull.sh`.** Each counted step (npm deps, piread, piedit, pibash, auto-heal) renders one line with spinner and elapsed time, resolving to `ok (Ns)`; failures surface the last log lines. Piped/CI runs print plain lines with no control characters. Preview without a build: `sh scripts/progress-demo.sh`.
+
+### Changed
+
+- **Agent instructions now require time estimates.** Plans, task lists, and progress reports state per-item and total wall-clock estimates with confidence; operations expected to run >2 min announce duration up front and a revised estimate unprompted once overrun. Worker subagent reports include elapsed vs. estimate.
+
+### Fixed
+
+- **Native binary installs no longer fail over a running daemon.** `install_native` stages the copy and renames into place, avoiding the `Text file busy` failure hit whenever a pull ran while a session served from `bin/<tool>`.
+
 ## [1.54.0] - 26-10-2026
 
 ### Changed

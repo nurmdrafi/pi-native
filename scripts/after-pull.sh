@@ -16,6 +16,11 @@ echo "== after-pull: syncing setup ($(uname -s))"
 # Shared installer: copy + chmod + macOS adhoc re-sign. A bare `cp` leaves the
 # signature hashes stale and the kernel SIGKILLs the binary on exec.
 . "$ROOT/scripts/lib/install-native.sh"
+. "$ROOT/scripts/lib/progress.sh"
+
+# 5 counted steps: deps, piread, piedit, pibash, auto-heal. The pidoc health
+# check stays un-wrapped — its FAIL/WARN rows are the deliverable, not noise.
+ui_total 5
 
 # 1. Node deps + host pi package links. Fresh install only when the manifest
 #    moved in this pull or node_modules is missing; link-pi self-validates.
@@ -27,12 +32,13 @@ if command -v npm >/dev/null 2>&1; then
     changed=1
   fi
   if [ "$changed" = 1 ]; then
-    echo "-- after-pull: deps changed or missing → npm install"
-    npm install --no-audit --no-fund || echo "!! npm install failed — run it manually" >&2
+    ui_run "npm deps (manifest moved or node_modules missing) + host links" \
+      npm install --no-audit --no-fund
+  else
+    ui_run "npm deps up to date + host links" node scripts/link-pi.mjs
   fi
-  node scripts/link-pi.mjs || echo "!! link-pi.mjs failed" >&2
 else
-  echo "!! npm not found — install Node (nvm recommended), then: sh scripts/bootstrap.sh" >&2
+  ui_step "npm deps — npm not found (install Node, then: sh scripts/bootstrap.sh)"
 fi
 
 # 2. pidoc shim (bin/ is gitignored, so git never delivers it)
@@ -42,6 +48,14 @@ cat > bin/pidoc <<EOF
 exec node "$ROOT/skills/pidoc/scripts/pidoc.mjs" "\$@"
 EOF
 chmod +x bin/pidoc
+
+# 2b. Kill daemons started from older binaries BEFORE any install: a live
+#     daemon keeps bin/<tool> busy ("Text file busy") and the cp fails.
+#     Each session lazily restarts them from the fresh binaries on its
+#     next native tool call (one-shot fallback covers the gap).
+if command -v pkill >/dev/null 2>&1; then
+  pkill -f "$ROOT/bin/(pibash|piread|piedit) --serve" 2>/dev/null || true
+fi
 
 # 3. piread (native read tool, default-on — PI_NATIVE_READ=0 opts out;
 #    falls back to the built-in read without the binary). Always rebuilt —
@@ -54,13 +68,12 @@ if [ -d "$PIREAD_CRATE/src" ] && [ -f "$PIREAD_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
   if [ -n "$CARGO" ]; then
-      if (cd custom-tools && "$CARGO" build --release -p piread) && install_native "$PIREAD_TARGET" bin/piread; then
-        echo "== piread: rebuilt + installed to bin/piread"
-      else
-        echo "!! piread rebuild failed — extension falls back to the built-in read" >&2
-      fi
+      ui_run "piread: build + install (cargo --release)" \
+        sh -c 'cd custom-tools && exec "$1" build --release -p piread' sh "$CARGO" \
+        && install_native "$PIREAD_TARGET" bin/piread \
+        || echo "!! piread: falls back to the built-in read" >&2
   else
-    echo "== piread: cargo not found — extension falls back to the built-in read"
+    ui_step "piread: cargo not found — extension falls back to the built-in read"
   fi
 fi
 
@@ -73,13 +86,12 @@ if [ -d "$PIEDIT_CRATE/src" ] && [ -f "$PIEDIT_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
   if [ -n "$CARGO" ]; then
-      if (cd custom-tools && "$CARGO" build --release -p piedit) && install_native "$PIEDIT_TARGET" bin/piedit; then
-        echo "== piedit: rebuilt + installed to bin/piedit"
-      else
-        echo "!! piedit rebuild failed — extension falls back to the built-in edit" >&2
-      fi
+      ui_run "piedit: build + install (cargo --release)" \
+        sh -c 'cd custom-tools && exec "$1" build --release -p piedit' sh "$CARGO" \
+        && install_native "$PIEDIT_TARGET" bin/piedit \
+        || echo "!! piedit: falls back to the built-in edit" >&2
   else
-    echo "== piedit: cargo not found — extension falls back to the built-in edit"
+    ui_step "piedit: cargo not found — extension falls back to the built-in edit"
   fi
 fi
 
@@ -92,13 +104,12 @@ if [ -d "$PIBASH_CRATE/src" ] && [ -f "$PIBASH_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
   if [ -n "$CARGO" ]; then
-      if (cd custom-tools && "$CARGO" build --release -p pibash) && install_native "$PIBASH_TARGET" bin/pibash; then
-        echo "== pibash: rebuilt + installed to bin/pibash"
-      else
-        echo "!! pibash rebuild failed — extension falls back to the built-in bash" >&2
-      fi
+      ui_run "pibash: build + install (cargo --release)" \
+        sh -c 'cd custom-tools && exec "$1" build --release -p pibash' sh "$CARGO" \
+        && install_native "$PIBASH_TARGET" bin/pibash \
+        || echo "!! pibash: falls back to the built-in bash" >&2
   else
-    echo "== pibash: cargo not found — extension falls back to the built-in bash"
+    ui_step "pibash: cargo not found — extension falls back to the built-in bash"
   fi
 fi
 
@@ -106,13 +117,7 @@ fi
 #     while long-lived pi sessions keep serving from pre-pull daemons.
 #     Each session lazily restarts them from the fresh binaries on its
 #     next native tool call (one-shot fallback covers the gap).
-if command -v pkill >/dev/null 2>&1; then
-  pkill -f "$ROOT/bin/(pibash|piread|piedit) --serve" 2>/dev/null || true
-fi
-
-# 5b. Portable auto-heal: shell PATH pin + native-binary/PCRE2 check. Idempotent,
-#     never compiles (that is step 6's --fix), so a pull stays fast. Works on
-#     macOS and Linux, zsh and bash.
+ui_step "auto-heal: stale daemons + PATH pin"
 if command -v node >/dev/null 2>&1; then
   node scripts/sync-agent-bin.mjs || true
 fi
@@ -124,5 +129,7 @@ if command -v node >/dev/null 2>&1; then
 else
   echo "!! node not found — cannot verify setup" >&2
 fi
+
+ui_finish "after-pull"
 
 exit 0

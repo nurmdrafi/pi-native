@@ -30,8 +30,13 @@ install_native() {
   fi
 
   mkdir -p "$(dirname "$_native_dest")" || return 1
-  cp "$_native_src" "$_native_dest" || return 1
-  chmod +x "$_native_dest" || return 1
+  # Stage + rename, never cp over a live binary: a running daemon keeps
+  # bin/<tool> executing, cp fails with "Text file busy", while rename()
+  # swaps the directory entry — the old inode keeps serving the daemon,
+  # the next start picks up the fresh binary.
+  _native_tmp=${_native_dest}.new
+  cp "$_native_src" "$_native_tmp" || return 1
+  chmod +x "$_native_tmp" || return 1
 
   # macOS only: re-sign adhoc so the kernel accepts the copied image.
   case $(uname -s 2>/dev/null) in
@@ -39,12 +44,13 @@ install_native() {
       if command -v codesign >/dev/null 2>&1; then
         # --force replaces the invalidated signature; a failure here is not
         # fatal (the binary may still run) but must be visible.
-        codesign --force --sign - "$_native_dest" 2>/dev/null ||
+        codesign --force --sign - "$_native_tmp" 2>/dev/null ||
           echo "!! install_native: codesign failed for $_native_dest — the kernel may refuse to exec it" >&2
       else
         echo "!! install_native: codesign not found on macOS — $_native_dest may be unexecutable" >&2
       fi
       ;;
   esac
+  mv -f "$_native_tmp" "$_native_dest" || { rm -f "$_native_tmp"; return 1; }
   return 0
 }
