@@ -414,14 +414,24 @@ passes R1 while a rendered-head re-read still blocks).
 pre-fix gate code at start), R1c 5 (all valid; each followed by an
 rg-then-read), R1b 0. Post-fix session on HEAD: 0 R1 false blocks.
 
-**No new rule rung.** Research (2026-10-25): Claude Code dials its
-read-requirement per model; Command Code's read tool keeps a partial-view
-ledger plus self-expiring dedup — the same shape as our §9 rendered-runs
-certification plus compaction invalidation; Codex community threads show
-removing the gate regresses into edit thrash. With zero post-fix false
-blocks a rung has no evidence to pay for; re-evaluate only if a future audit
-shows R1 false blocks surviving §9 — that would be a
-`renderedSpansFromBlocks` bug, not a policy gap.
+**Rung added on user decision (same day): R1x `reReadConsume` — the
+Command-Code-style self-expiring middle.** Research summary: Claude Code
+dials its read-requirement per model; Command Code's read tool keeps a
+partial-view ledger plus "unchanged-read dedup that consumes itself on hit";
+Codex community threads show removing the gate regresses into edit thrash.
+Our `off`/`warn` dials already existed (`reReadGuard`); the missing rung was
+the self-expiring one. With `PGATE_RE_READ_CONSUME=1` (or
+`rules.reReadConsume` at any non-off level; default off), the first R1 block
+spends exactly the certification it cited — `subtractSpan` clips the covering
+span out of the coverage map, so an identical resend passes and re-certifies
+while neighboring windows keep their edit anchors. Worst case becomes one
+wasted turn instead of a window-guessing loop. The live motivating case:
+a piread of a range whose DISPLAY elided mid-body was R1-blocked as "already
+in context" — §9 models only piread's own `details.compaction`, not the
+display layer, so this false class survives §9 and R1x self-heals it.
+Default behavior unchanged (gate 278/279, only pre-existing PB1);
+`tests/pgate-reread-consume.test.mjs` 5/5 pins block-once-then-pass plus
+precise clipping.
 
 **Perf:** `benchmark/runs/piread-microbench-2026-10-25.md` (local;
 `benchmark/runs/` is gitignored) — daemon p50s within noise of the 10-17 run

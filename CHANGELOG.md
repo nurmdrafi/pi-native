@@ -7,6 +7,12 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.50.0] - 25-10-2026
+
+### Added
+
+- **New rung R1x (`reReadConsume`): self-expiring re-read guard, default off.** With `PGATE_RE_READ_CONSUME=1` or `rules.reReadConsume` armed (any non-off level), the first `Token Economy (Re-read)` block spends exactly the certification it cited — the covering span is clipped out of the coverage map (`subtractSpan` in `read-coverage.ts`) — so an identical resend passes and re-certifies; spans outside the window keep their edit anchors. Worst case becomes one wasted turn instead of a window-guessing loop. Research backing (2026-10-25): commandcode.ai's read tool ships "unchanged-read dedup that consumes itself on hit"; Claude Code dials its read-requirement per model; Codex community threads show removing the gate regresses into edit thrash. Motivated by a live false block observed while building it: display-layer elision certifies whole windows although the bytes were never shown — a residual §9 does not model. Default behavior unchanged: gate suite 278/279 (only the pre-existing PB1 darwin case). New `tests/pgate-reread-consume.test.mjs` (5/5) plus `subtractSpan` unit tests in `read-coverage.test.mjs`.
+
 ## [1.49.0] - 25-10-2026
 
 ### Added
