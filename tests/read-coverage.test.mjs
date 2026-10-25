@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shiftSpansForEdit } from "../extensions/permission-gate/read-coverage.ts";
+import { shiftSpansForEdit, renderedSpansFromBlocks } from "../extensions/permission-gate/read-coverage.ts";
 import { globToRegex } from "../extensions/permission-gate/search-guard.ts";
 
 test("shiftSpansForEdit keeps above, shifts below, drops straddlers", () => {
@@ -59,6 +59,55 @@ test("shiftSpansForEdit without regions keeps the legacy drop-straddlers path", 
   // write result: no regions, no firstEditedLine — the whole prior union goes
   const spans = [{ start: 1, end: Infinity }];
   assert.deepEqual(shiftSpansForEdit(spans, undefined, 0), []);
+});
+
+// Backlog §9 (2026-10-25): a compacted (elided) read certified its FULL
+// requested window, so the omitted middle was R1-blocked as already-in-context
+// while its bytes were never rendered. The parser below maps only the
+// rendered runs onto file lines; piread's compress.rs emits exactly one
+// "[... omitted D chars / N lines ...]" marker with blank separators.
+test("renderedSpansFromBlocks maps head/marker/tail onto file lines", () => {
+  const mk = (n, off) => Array.from({ length: n }, (_, i) => `L${off + i}`);
+  const content = [
+    {
+      type: "text",
+      text: [
+        ...mk(3, 225),
+        "",
+        "[... omitted 1942 chars / 24 lines ...]",
+        "",
+        ...mk(2, 252),
+      ].join("\n"),
+    },
+  ];
+  assert.deepEqual(renderedSpansFromBlocks(content, 225), [
+    { start: 225, end: 227 },
+    { start: 252, end: 253 },
+  ]);
+});
+
+test("renderedSpansFromBlocks without a line-omission marker is undefined", () => {
+  assert.equal(
+    renderedSpansFromBlocks([{ type: "text", text: "a\nb" }], 1),
+    undefined,
+  );
+  // chars-only marker omits no whole lines — legacy whole-window certification
+  assert.equal(
+    renderedSpansFromBlocks(
+      [{ type: "text", text: "a\n[... omitted 10 chars ...]\nb" }],
+      1,
+    ),
+    undefined,
+  );
+});
+
+test("renderedSpansFromBlocks strips the trailing continuation notice", () => {
+  const text =
+    "h1\nh2\n\n[... omitted 5 chars / 3 lines ...]\n\nt1\n\n[Showing lines 1-10 of 40. Use offset=11 to continue.]";
+  assert.deepEqual(renderedSpansFromBlocks([{ type: "text", text }], 1), [
+    { start: 1, end: 2 },
+    { start: 6, end: 6 },
+  ]);
 });
 
 test("globToRegex survives '?' globs and matches single-level", () => {

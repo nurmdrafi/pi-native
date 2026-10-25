@@ -76,6 +76,7 @@ import {
   hashFile,
   hashText,
   normPath,
+  renderedSpansFromBlocks,
   shiftSpansForEdit,
   snapshot,
 } from "./read-coverage.ts";
@@ -867,15 +868,28 @@ export default function (pi: ExtensionAPI) {
           read.win.end === Infinity &&
           !truncated &&
           !elided;
-        certify(
-          coverage,
-          read.path,
-          wholeFile
-            ? { start: 1, end: Infinity }
-            : { start: read.win.start, end: read.win.start + lines - 1 },
-          "read",
-          snap,
-        );
+        if (wholeFile) {
+          certify(coverage, read.path, { start: 1, end: Infinity }, "read", snap);
+        } else {
+          // §9 (2026-10-25): under head-tail compaction only the rendered
+          // head/tail runs entered context — the omitted middle stays
+          // uncertified, so it remains readable. Runs only when the result
+          // reports compaction; every other read keeps the window math.
+          const spans = elided
+            ? renderedSpansFromBlocks(content, read.win.start)
+            : undefined;
+          if (spans && spans.length > 0) {
+            for (const s of spans) certify(coverage, read.path, s, "read", snap);
+          } else {
+            certify(
+              coverage,
+              read.path,
+              { start: read.win.start, end: read.win.start + lines - 1 },
+              "read",
+              snap,
+            );
+          }
+        }
       }
       return;
     }

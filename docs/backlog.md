@@ -377,6 +377,16 @@ read-coverage certifies only those, not the requested window.
 **Test:** windowed read with mid-body elision → a re-read of exactly the
 elided sub-range must be allowed.
 
+**Resolved 2026-10-25** (gate-side only — no Rust/protocol change): the read
+result handler parses the compaction marker piread already emits
+(`renderedSpansFromBlocks` in `read-coverage.ts`) and certifies only the
+rendered head/tail runs whenever `details.compaction` reports elision; every
+other read keeps the window math, and results without compaction details
+fall back to whole-window certification. Perf-gated per instruction: suite
+timings flat (gate 0.92 s vs 0.96 s baseline, parity 2.87 s vs 3.16 s),
+non-elided reads execute zero new code. read-coverage 9/9, gate 278/279
+(one pre-existing non-piedit failure), bench-suite 38/38.
+
 ## Closed this round (for context)
 
 - `piread`/`piedit` event-loop drain: they ref'd `stdin`/`stdout` but not

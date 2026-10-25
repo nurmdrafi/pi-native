@@ -227,6 +227,12 @@ These are high-value and should remain:
 - Atomic write-plus-rename cache in `pidx`.
 - `(size, mtime_ns)` incremental invalidation.
 
+2026-10-25 disposition (piedit): incremental UTF-8 decoding is retired by
+measurement — the 1 MiB edit class runs 4.27 ms p50 end-to-end, 7× under the
+in-process oracle (`benchmark/runs/piedit-microbench-2026-10-25.md`), and
+decoding is a small slice of that; the remaining cost is IPC + write.
+Whole-buffer decoding stays unless a decode-bound class ever appears.
+
 These choices match your goal of small, fast, maintainable native tools rather than heavyweight service infrastructure. 
 
 ### Reconsider these

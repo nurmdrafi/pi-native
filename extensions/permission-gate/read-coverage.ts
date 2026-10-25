@@ -195,24 +195,19 @@ export function shiftSpansForEdit(
   return out.sort((a, b) => a.start - b.start);
 }
 
-/** fallback line count from text blocks when details.truncation is absent */
-export function countTextLines(content: unknown[]): {
-  lines: number;
-  truncated: boolean;
-} {
-  const text = content
+/** text of a tool_result's text blocks, joined like countTextLines */
+function blocksToText(content: unknown[]): string {
+  return content
     .filter((b) => (b as { type?: unknown })?.type === "text")
     .map((b) => String((b as { text?: unknown })?.text ?? ""))
     .join("\n");
-  if (!text) return { lines: 0, truncated: false };
-  const lines = text.split("\n");
-  // (piread no longer appends a "[piread native]" marker line: the rung is now
-  // carried on details.via, which never enters content, so line numbering here
-  // matches the built-in read directly.)
-  // strip the read tool's trailing truncation note ("[N more lines in file…]"
-  // or "[Showing lines A-B of N…]") and the blank separator line before it —
-  // the note is separated by "\n\n", so without this every windowed read
-  // would over-certify one line past its real content
+}
+
+/** strip the read tool's trailing truncation note ("[N more lines in file…]"
+ * or "[Showing lines A-B of N…]") and the blank separator line before it —
+ * the note is separated by "\n\n", so without this every windowed read
+ * would over-certify one line past its real content */
+function stripTailNotice(lines: string[]): { lines: string[]; truncated: boolean } {
   const last = lines[lines.length - 1] ?? "";
   if (
     /^\[\d+ more lines? in file\./.test(last) ||
@@ -220,7 +215,69 @@ export function countTextLines(content: unknown[]): {
   ) {
     lines.pop();
     if (lines[lines.length - 1] === "") lines.pop();
-    return { lines: lines.length, truncated: true };
+    return { lines, truncated: true };
   }
-  return { lines: lines.length, truncated: false };
+  return { lines, truncated: false };
+}
+
+/** fallback line count from text blocks when details.truncation is absent */
+export function countTextLines(content: unknown[]): {
+  lines: number;
+  truncated: boolean;
+} {
+  const text = blocksToText(content);
+  if (!text) return { lines: 0, truncated: false };
+  // (piread no longer appends a "[piread native]" marker line: the rung is now
+  // carried on details.via, which never enters content, so line numbering here
+  // matches the built-in read directly.)
+  const stripped = stripTailNotice(text.split("\n"));
+  return { lines: stripped.lines.length, truncated: stripped.truncated };
+}
+
+/** Omission marker emitted by piread's head-tail compaction (compress.rs):
+ * "[... omitted D chars / N lines ...]" standing alone. The chars-only
+ * variant omits no whole lines, so it needs no span math. */
+const OMISSION_MARKER_LINE =
+  /^\[\.\.\. omitted \d+ chars \/ (\d+) lines \.\.\.\]$/;
+
+/** Rendered line spans of a possibly-elided read body (backlog §9): walks
+ * the text, treats each line-omission marker (and the blank separators
+ * piread pads it with) as a gap of the marker's stated line count, and maps
+ * the surviving runs onto file lines starting at `startLine`. Only the
+ * rendered runs entered context, so only they may certify. Returns undefined
+ * when no line-omission marker is present — callers keep their legacy
+ * whole-window certification. Under-certifies (never over) when a real
+ * blank line sits directly at an elision boundary: dropped, not counted. */
+export function renderedSpansFromBlocks(
+  content: unknown[],
+  startLine: number,
+): LineSpan[] | undefined {
+  const text = blocksToText(content);
+  if (!text) return undefined;
+  const { lines } = stripTailNotice(text.split("\n"));
+  const omits: { at: number; lines: number }[] = [];
+  const skip = new Set<number>();
+  for (let i = 0; i < lines.length; i++) {
+    const m = OMISSION_MARKER_LINE.exec(lines[i].trim());
+    if (!m) continue;
+    omits.push({ at: i, lines: Number(m[1]) });
+    if (i > 0 && lines[i - 1].trim() === "") skip.add(i - 1);
+    if (i + 1 < lines.length && lines[i + 1].trim() === "") skip.add(i + 1);
+  }
+  if (omits.length === 0) return undefined;
+  const spans: LineSpan[] = [];
+  let cursor = startLine;
+  for (let i = 0; i < lines.length; i++) {
+    const om = omits.find((o) => o.at === i);
+    if (om) {
+      cursor += om.lines;
+      continue;
+    }
+    if (skip.has(i)) continue;
+    const last = spans[spans.length - 1];
+    if (last && last.end === cursor - 1) last.end = cursor;
+    else spans.push({ start: cursor, end: cursor });
+    cursor++;
+  }
+  return spans;
 }

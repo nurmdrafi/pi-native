@@ -515,7 +515,7 @@ test('list: tasks, arms, and run counts per task × arm (spec §7.5)', () => {
   const { resultsDir } = reportSetup([
     mkRec({ runId: 's1', task: 'bugfix/task-syn', arm: 'baseline' }),
     mkRec({ runId: 's2', task: 'bugfix/task-syn', arm: 'baseline', grade: 'FAIL' }),
-    mkRec({ runId: 's3', task: 'bugfix/task-syn', arm: 'candidate' }),
+    mkRec({ runId: 's3', task: 'bugfix/task-syn', arm: 'piedit-native' }),
   ]);
   const r = runCli('list', '--tasks-dir', synTasksRoot(), '--results-dir', resultsDir);
   assert.equal(r.status, 0, r.stderr);
@@ -523,9 +523,9 @@ test('list: tasks, arms, and run counts per task × arm (spec §7.5)', () => {
   assert.ok(r.stdout.includes('bugfix'));
   assert.ok(r.stdout.includes('Synthetic: fix double() off-by-one'));
   assert.ok(r.stdout.includes('baseline'));
-  assert.ok(r.stdout.includes('candidate'));
+  assert.ok(r.stdout.includes('piedit-native'));
   assert.ok(/bugfix\/task-syn\s*×\s*baseline:\s*2/.test(r.stdout), 'run count per task × arm');
-  assert.ok(/bugfix\/task-syn\s*×\s*candidate:\s*1/.test(r.stdout));
+  assert.ok(/bugfix\/task-syn\s*×\s*piedit-native:\s*1/.test(r.stdout));
   rmSync(resultsDir, { recursive: true, force: true });
 });
 

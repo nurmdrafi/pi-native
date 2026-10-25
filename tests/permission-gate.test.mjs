@@ -3835,6 +3835,99 @@ const cases = [
       ]);
     },
   ],
+  // ---- backlog §9 (2026-10-25): elided reads certify only rendered runs ----
+  [
+    "R1 §9: an elided read leaves the omitted middle uncertified — re-read allowed",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "r1s9.ts");
+      writeFileSync(f, lineText(300));
+      const head = Array.from({ length: 21 }, (_, i) => `line ${225 + i}`);
+      const tail = Array.from({ length: 21 }, (_, i) => `line ${270 + i}`);
+      const text = [
+        ...head,
+        "",
+        "[... omitted 1942 chars / 24 lines ...]",
+        "",
+        ...tail,
+      ].join("\n");
+      const toolCallId = `tc${++seqId}`;
+      const input = { path: f, offset: 225, limit: 66 };
+      const block = await pi.invoke("tool_call", {
+        type: "tool_call",
+        toolName: "piread",
+        toolCallId,
+        input,
+      });
+      if (block) return { blocked: true, reason: block.reason };
+      await pi.invoke("tool_result", {
+        type: "tool_result",
+        toolName: "piread",
+        toolCallId,
+        input,
+        content: textBlocks(text),
+        details: {
+          truncation: { truncated: false, outputLines: 66, totalLines: 300 },
+          compaction: {
+            strategy: "head-tail",
+            originalChars: 3600,
+            visibleChars: 1100,
+            omittedChars: 1942,
+            partial: false,
+          },
+        },
+        isError: false,
+      });
+      // the omitted middle (246–269) was never rendered — must stay readable
+      return read(pi, f, { offset: 246, limit: 24 }, { outputLines: 24 });
+    },
+  ],
+  [
+    "R1 §9: an elided read still certifies the rendered head",
+    "blocked",
+    async (pi) => {
+      const f = join(tmp, "r1s9-head.ts");
+      writeFileSync(f, lineText(300));
+      const head = Array.from({ length: 21 }, (_, i) => `line ${225 + i}`);
+      const tail = Array.from({ length: 21 }, (_, i) => `line ${270 + i}`);
+      const text = [
+        ...head,
+        "",
+        "[... omitted 1942 chars / 24 lines ...]",
+        "",
+        ...tail,
+      ].join("\n");
+      const toolCallId = `tc${++seqId}`;
+      const input = { path: f, offset: 225, limit: 66 };
+      const block = await pi.invoke("tool_call", {
+        type: "tool_call",
+        toolName: "piread",
+        toolCallId,
+        input,
+      });
+      if (block) return { blocked: true, reason: block.reason };
+      await pi.invoke("tool_result", {
+        type: "tool_result",
+        toolName: "piread",
+        toolCallId,
+        input,
+        content: textBlocks(text),
+        details: {
+          truncation: { truncated: false, outputLines: 66, totalLines: 300 },
+          compaction: {
+            strategy: "head-tail",
+            originalChars: 3600,
+            visibleChars: 1100,
+            omittedChars: 1942,
+            partial: false,
+          },
+        },
+        isError: false,
+      });
+      // the rendered head (225–245) IS in context — a re-read stays blocked
+      return read(pi, f, { offset: 228, limit: 3 }, { outputLines: 3 });
+    },
+  ],
 ];
 
 // ---- runner: each case replays its preamble on a fresh gate, then the probe ----

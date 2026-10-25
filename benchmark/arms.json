@@ -6,9 +6,9 @@
     "baseline": true
   },
   {
-    "name": "candidate",
-    "description": "Placeholder for the arm under evaluation — fill in when a real comparison starts.",
-    "config": "TODO: replace with the candidate's exact configuration (extensions enabled, env vars, flags, model settings) before running. Until then do not use this arm.",
+    "name": "piedit-native",
+    "description": "S8 adoption pair arm: the native edit pipeline (Rust piedit daemon + permission-gate) against the baseline's built-in edit.",
+    "config": "Run the agent with the permission-gate extension loaded and the native edit pipeline on: PI_NATIVE_EDIT=1 (default-on — verify it is not explicitly disabled). All other native toggles stay at their defaults. Verify with: bin/piedit --version (expect a version, not ENOENT) and echo \"PI_NATIVE_EDIT is '${PI_NATIVE_EDIT:-unset}'\" (unset or 1 — never 0).",
     "baseline": false
   }
 ]
