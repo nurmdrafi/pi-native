@@ -9,7 +9,8 @@ export const APP_URL = process.env.E2E_APP_URL || "http://localhost:3000"
 export async function getAppPage(): Promise<Page> {
   let browser
   try {
-    browser = await chromium.connectOverCDP(CDP_ENDPOINT)
+    // noDefaults: Chrome 155+ rejects browser-level Browser.setDownloadBehavior
+    browser = await chromium.connectOverCDP(CDP_ENDPOINT, { noDefaults: true })
   } catch {
     throw new Error(
       `Cannot connect to Chrome at ${CDP_ENDPOINT}.\n` +

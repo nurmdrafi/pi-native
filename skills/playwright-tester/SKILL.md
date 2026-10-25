@@ -77,7 +77,7 @@ Native canvas/gesture components (maps, drawings, editors) bind real container-l
 
 ## Scaffold
 
-Copy from `{baseDir}/assets/`: `playwright.config.ts`, `e2e/fixtures/*.ts` (`cdp`, `api`, `report`), `e2e/example.spec.ts`. All e2e code lives in target repo (`e2e/`). Add `"e2e": "playwright test"` to package.json. Env: `E2E_APP_URL`, `E2E_AUTH_TOKEN_KEY`, `E2E_EMAIL`, `E2E_PASSWORD`, `E2E_ITERATIONS` — credentials never hardcoded. Adapt only `ADAPT` markers: selectors, endpoints, token key, server-managed fields.
+Copy from `{baseDir}/assets/`: `playwright.config.ts`, `e2e/fixtures/*.ts` (`cdp`, `api`, `report`), `e2e/example.spec.ts`. E2e code lives in the target repo — inside its existing e2e directory when one exists (`e2e/`, `__tests__/e2e/`, `tests/e2e/`), else `e2e/` when scaffolding fresh. Chrome 155+: `connectOverCDP` must pass `{ noDefaults: true }` (default connect issues browser-level `Browser.setDownloadBehavior`, which Chrome 155+ rejects); the copied `cdp` fixture already does. Add `"e2e": "playwright test"` to package.json. Env: `E2E_APP_URL`, `E2E_AUTH_TOKEN_KEY`, `E2E_EMAIL`, `E2E_PASSWORD`, `E2E_ITERATIONS` — credentials never hardcoded. Adapt only `ADAPT` markers: selectors, endpoints, token key, server-managed fields.
 
 ## References
 
