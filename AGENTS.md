@@ -21,6 +21,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - ≤5 lines ordinary replies; longer only for proposals, reports, plans, blockers.
 - Cite `path:line`; never restate file contents, output, diffs.
 - Between tool calls: max one short sentence.
+- Estimates: plans, task lists, and progress reports state wall-clock time per item and for the total, with confidence ("~15 min, low"). Cannot estimate → say so and name the blocking unknown.
 
 ## Workflow & TDD
 - TDD always: failing test first → watch fail → minimum code → refactor. No implementation before failing test.

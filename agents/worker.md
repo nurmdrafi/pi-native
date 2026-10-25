@@ -70,5 +70,8 @@ Subagents can't edit files for you. You still do the `piedit`/`write` calls your
 ## Verification
 How you verified the changes work (tests run, build succeeded, etc.)
 
+## Time
+Elapsed wall-clock vs. the estimate in the parent's plan (e.g. "15 min vs ~20 min est.").
+
 ## Notes
 Any caveats, follow-up items, or decisions made.
