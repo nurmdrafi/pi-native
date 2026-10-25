@@ -440,6 +440,29 @@ precise clipping.
 unicode class reads 0.041 ms p50 vs the oracle's 0.128 ms — decode cost is
 already amortized by the daemon.
 
+## 11. gate-config suite was red: config.json/README drift + missing fail-closed coverage — FIXED
+
+The AG2/R1x rungs grew `RULE_IDS` without updating the tracked
+`config.json` (both keys missing, silently on built-in fallback) or the
+`extensions/README.md` rule table (no R1x row), and
+`tests/gate-config.test.mjs` — the suite built to catch exactly this — was
+left red. Fixed with the keys explicit at their fallback values and the R1x
+row added, plus the audit's other findings:
+
+- `asPosInt` warned `ignoring ...=undefined` for absent `outputCap`/`confirm`
+  section keys on every redirected or malformed load; absent is not invalid,
+  so `undefined` now keeps the default silently.
+- The `$schema` pointer in `config.json` referenced a `config.schema.json`
+  that never existed in git history; dropped rather than adding a second
+  key-sync surface.
+- Coverage added (suite now 22/22): fail-closed against missing files,
+  malformed JSON, non-object configs, non-object `rules`; env-beats-file
+  precedence both directions; built-in defaults pinned from the source sets;
+  `HARD_RULES` clamp under env demotion; camelCase→SCREAMING_SNAKE env
+  casing; `outputCap`/`confirm` override + rejection; the
+  `ruleEnabled`/`ruleBlocks` warn-vs-error contract.
+- Still red, pre-existing and unrelated: PB1 `grep -P` darwin (278/279).
+
 ## Closed this round (for context)
 
 - `piread`/`piedit` event-loop drain: they ref'd `stdin`/`stdout` but not

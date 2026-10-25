@@ -7,6 +7,20 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.51.0] - 25-10-2026
+
+### Fixed
+
+- **Config audit: tracked `config.json` and the README rule table had drifted from `RULE_IDS`.** `editRegionGuard` and `reReadConsume` were missing from `extensions/permission-gate/config.json` (silently on built-in fallback, so behavior was unchanged) and R1x had no row in `extensions/README.md`; `tests/gate-config.test.mjs` — the suite that exists to catch exactly this drift — was left red after the AG2/R1x rungs. Both keys are now explicit at their fallback values (`error` / `off`), R1x is documented, and the dangling `$schema` pointer to a `config.schema.json` that never existed in git history is gone.
+
+### Changed
+
+- **`asPosInt` no longer warns on absent section keys.** Loading a config without `outputCap`/`confirm` sections — every `PGATE_CONFIG` redirect, every malformed-file fallback — printed three `ignoring ...=undefined` stderr warnings. Absent is not invalid: `undefined` now keeps the documented default silently; rejected values still warn. Default severities untouched.
+
+### Added
+
+- **Config contract coverage in `tests/gate-config.test.mjs` (now 22/22):** fail-closed against missing files, malformed JSON, non-object configs and non-object `rules`; env-beats-`config.json` precedence in both directions; built-in defaults pinned from the source sets (`OFF_BY_DEFAULT`/`WARN_BY_DEFAULT`); the `HARD_RULES` clamp under env demotion; camelCase→`PGATE_SCREAMING_SNAKE` env casing for multi-boundary keys; `outputCap`/`confirm` override and rejection; the `ruleEnabled`/`ruleBlocks` warn-vs-error contract. Gate suite stays 278/279 (only the pre-existing PB1 darwin case).
+
 ## [1.50.0] - 25-10-2026
 
 ### Added
