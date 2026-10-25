@@ -88,7 +88,8 @@ function parseSkill(skillDir) {
 
   // Directory layout (harness convention per agentskills.io)
   const ALLOWED = new Set(["SKILL.md", "scripts", "references", "assets",
-    "package.json", "package-lock.json", "node_modules", ".gitignore"]);
+    "package.json", "package-lock.json", "node_modules", ".gitignore",
+    "reference"]); // "reference" (singular): vendored upstream skills only (e.g. impeccable)
   for (const e of fs.readdirSync(skillDir)) {
     if (!ALLOWED.has(e)) errors.push(`nonstandard top-level entry "${e}" — executables → scripts/, docs → references/, static data → assets/`);
   }

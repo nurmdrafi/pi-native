@@ -87,7 +87,7 @@ export function checkMdCommands(root) {
   const OPTIONAL_TOOLCHAINS = new Set(['cargo', 'rustc', 'rustup', 'rustfmt', 'perf', 'valgrind', 'hyperfine', 'llvm-profdata', 'llvm-bolt', 'inferno-collapse-perf', 'inferno-flamegraph', 'loom']);
   // Docs that legitimately example foreign build artifacts (e.g. `./target/release/app`) —
   // reference/ docs are on-demand material, not harness runbooks.
-  const isReferenceDoc = (md) => /\/references\//.test(md.slice(root.length + 1));
+  const isReferenceDoc = (md) => /\/references?\//.test(md.slice(root.length + 1)); // singular "reference/": vendored upstream skills
 
   // bare script name → resolve against skills/*/scripts/ (sibling-skill references)
   const harnessScript = (tok) => existsSync(join(root, 'skills')) && readdirSync(join(root, 'skills')).some((s) => existsSync(join(root, 'skills', s, 'scripts', tok)));
@@ -248,7 +248,11 @@ export function checkMdCommands(root) {
           if (/^\/tmp\//.test(tok)) { onDemandRefs.push(`${rel}  <<< ${line.slice(0,70)}`); continue; } // downloaded on demand — absence is not a doc bug
           if (MAC_ONLY.has(tok)) { macOnlyRefs.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
           if (OPTIONAL_TOOLCHAINS.has(tok)) { optionalToolchainRefs.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
-          if (!hasBin(tok)) { binFail.push(`${rel}  <<< ${line.slice(0,70)}`); continue; }
+          if (!hasBin(tok)) {
+            // fenced blocks resolve sibling-skill scripts exactly like inline prose does
+            if (harnessScript(tok)) { binSeen.add(tok); continue; }
+            binFail.push(`${rel}  <<< ${line.slice(0,70)}`); continue;
+          }
           binSeen.add(tok);
           if (INTERPRETERS.has(tok)) continue;
           const sub = subCmd(seg, tok);
