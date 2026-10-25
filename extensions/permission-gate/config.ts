@@ -38,6 +38,7 @@ export const RULE_IDS = {
   editAnchorGuard: "AG",
   editRegionGuard: "AG2",
   reReadGuard: "R1",
+  reReadConsume: "R1x",
   largeReadGuard: "R1b",
   locateFirst: "R1c",
   nativeReadFirst: "P1",
@@ -91,9 +92,15 @@ export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
   "largeReadGuard",
 ] as RuleKey[]);
 
+/** Behavior modifiers that ship OFF: enabling changes what a block DOES
+ * rather than whether it fires, so the safe default is inert. */
+export const OFF_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
+  "reReadConsume",
+] as RuleKey[]);
+
 /** Defaults are fail-closed: active rules block unless demoted above. */
 const DEFAULTS: Record<RuleKey, Severity> = Object.fromEntries(
-  (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, WARN_BY_DEFAULT.has(k) ? "warn" : "error"]),
+  (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, OFF_BY_DEFAULT.has(k) ? "off" : WARN_BY_DEFAULT.has(k) ? "warn" : "error"]),
 ) as Record<RuleKey, Severity>;
 
 export interface GateConfig {

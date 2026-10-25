@@ -79,6 +79,7 @@ import {
   renderedSpansFromBlocks,
   shiftSpansForEdit,
   snapshot,
+  subtractSpan,
 } from "./read-coverage.ts";
 import type { CoverageEntry, LineSpan } from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
@@ -520,6 +521,15 @@ export default function (pi: ExtensionAPI) {
             ) ?? prior.spans[0];
           const lo = sp.start;
           const hi = sp.end;
+          // R1x (reReadConsume, opt-in — default off): a Command-Code-style
+          // self-expiring dedup. The block spends exactly the certification
+          // it cited (the covering span, clipped), so an identical resend
+          // passes instead of looping the model through window guesses;
+          // spans outside the window keep their anchors. Guards residual
+          // false blocks (e.g. display-layer elision §9 cannot model).
+          if (ruleEnabled("reReadConsume")) {
+            coverage.set(path, { ...prior, spans: subtractSpan(prior.spans, win) });
+          }
           return blockCall(
             `Token Economy (Re-read): ${lo === hi ? `line ${lo}` : `lines ${lo}–${hi === Infinity ? "EOF" : hi}`} of '${shown}' are already in context ` +
               `(${prior.kind}, file unchanged). Read another window via piread or act on what is there.`,

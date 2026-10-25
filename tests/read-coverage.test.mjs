@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shiftSpansForEdit, renderedSpansFromBlocks } from "../extensions/permission-gate/read-coverage.ts";
+import { shiftSpansForEdit, renderedSpansFromBlocks, subtractSpan } from "../extensions/permission-gate/read-coverage.ts";
 import { globToRegex } from "../extensions/permission-gate/search-guard.ts";
 
 test("shiftSpansForEdit keeps above, shifts below, drops straddlers", () => {
@@ -121,4 +121,31 @@ test("globToRegex survives '?' globs and matches single-level", () => {
   const q = globToRegex("a?c");
   assert.ok(q.test("abc"));
   assert.ok(!q.test("a/c"));
+});
+
+test("subtractSpan splits a straddling span into both uncovered sides", () => {
+  assert.deepEqual(subtractSpan([{ start: 1, end: 60 }], { start: 10, end: 20 }), [
+    { start: 1, end: 9 },
+    { start: 21, end: 60 },
+  ]);
+});
+
+test("subtractSpan keeps disjoint spans and drops a fully covered one", () => {
+  const spans = [
+    { start: 1, end: 9 },
+    { start: 10, end: 20 },
+    { start: 30, end: 40 },
+  ];
+  assert.deepEqual(subtractSpan(spans, { start: 10, end: 20 }), [
+    { start: 1, end: 9 },
+    { start: 30, end: 40 },
+  ]);
+});
+
+test("subtractSpan clips an Infinity tail past a finite window", () => {
+  assert.deepEqual(subtractSpan([{ start: 1, end: Infinity }], { start: 10, end: 20 }), [
+    { start: 1, end: 9 },
+    { start: 21, end: Infinity },
+  ]);
+  assert.deepEqual(subtractSpan([{ start: 1, end: Infinity }], { start: 1, end: Infinity }), []);
 });
