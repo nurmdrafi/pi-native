@@ -56,3 +56,6 @@ benchmark/runs/
 
 # Tool-call observability event streams (regenerable; SCHEMA: benchmark/observability/SCHEMA.md)
 benchmark/observability/events/
+
+# External reference clones (refetch on demand)
+/git/
