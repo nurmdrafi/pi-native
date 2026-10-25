@@ -391,7 +391,12 @@ export default function (pi: ExtensionAPI) {
       // Anchor Guard off: skip validation and coverage registration entirely —
       // the built-in editor's own validation is then the only check.
       const checked = ruleEnabled("editAnchorGuard")
-        ? await validateEditAnchors(event.input, ctx?.cwd, coverage.get(path))
+        ? await validateEditAnchors(
+            event.input,
+            ctx?.cwd,
+            coverage.get(path),
+            ruleEnabled("editRegionGuard"),
+          )
         : undefined;
       if (checked && "block" in checked) {
         // S5 M3: the hash disproved the certified spans/stat — drop them, or

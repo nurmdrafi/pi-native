@@ -90,6 +90,10 @@ export async function validateEditAnchors(
   },
   cwd?: string,
   cov?: CoverageEntry,
+  /** AG2 (editRegionGuard): when false, the M2 check downgrades to
+   * Claude-Code parity — the path having been read this session suffices;
+   * the per-anchor region-intersect is skipped. Never-read still blocks. */
+  regionGuard = true,
 ): Promise<
   | { block: true; reason: string; stale?: boolean }
   | {
@@ -274,21 +278,22 @@ export async function validateEditAnchors(
             : `read it with the piread tool (piread {path:'${String(input.path)}'}) first.`),
       };
     }
-    for (const os of origSpans) {
-      const covered = cov.spans.some(
-        (cs) => cs.start <= os.end && os.start <= cs.end,
-      );
-      if (!covered) {
-        return {
-          block: true,
-          reason:
-            `Anchor Guard (Unread): '${shown}' edits[${os.i}] targets lines ` +
-            `${os.start}–${os.end}, not in certified context — read lines ` +
-            `${os.start}–${os.end} with the piread tool ` +
-            `(piread {path:'${String(input.path)}', offset:${os.start}, limit:${os.end - os.start + 1}}) first.`,
-        };
+    if (regionGuard)
+      for (const os of origSpans) {
+        const covered = cov.spans.some(
+          (cs) => cs.start <= os.end && os.start <= cs.end,
+        );
+        if (!covered) {
+          return {
+            block: true,
+            reason:
+              `Anchor Guard (Unread): '${shown}' edits[${os.i}] targets lines ` +
+              `${os.start}–${os.end}, not in certified context — read lines ` +
+              `${os.start}–${os.end} with the piread tool ` +
+              `(piread {path:'${String(input.path)}', offset:${os.start}, limit:${os.end - os.start + 1}}) first.`,
+          };
+        }
       }
-    }
   }
 
   return {

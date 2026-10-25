@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
  * sync with the README rule table and each module's header. */
 export const RULE_IDS = {
   editAnchorGuard: "AG",
+  editRegionGuard: "AG2",
   reReadGuard: "R1",
   largeReadGuard: "R1b",
   locateFirst: "R1c",
