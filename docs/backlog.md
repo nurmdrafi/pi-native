@@ -362,6 +362,21 @@ the collateral of the drop): redundant re-reads of still-certified content
 now correctly block. `permission-gate` 276/277 (PB1 pre-existing, fails on
 HEAD), `read-coverage` 6/6, `piedit-parity` 58/58, microbench unchanged.
 
+## 9. R1: display-elided read ranges still count as in-context
+
+2026-10-25 piedit session: a piread window whose display elided the mid-body
+(`[... omitted ...]`) certified the FULL window, so re-reading the elided
+range was R1-blocked as redundant while the bytes were never rendered — the
+model must guess narrower windows until partial overlap passes. Not a
+corruption risk (elided bytes are re-derivable), pure round-trip friction.
+
+**Fix shape:** piread's truncation metadata carries the actually-rendered
+sub-ranges (head/tail bounds are already known at shaping time), and
+read-coverage certifies only those, not the requested window.
+
+**Test:** windowed read with mid-body elision → a re-read of exactly the
+elided sub-range must be allowed.
+
 ## Closed this round (for context)
 
 - `piread`/`piedit` event-loop drain: they ref'd `stdin`/`stdout` but not
