@@ -2430,14 +2430,9 @@ const cases = [
     },
   ],
   [
-    "PB1: grep -P blocked on darwin",
-    process.platform === "darwin" ? "blocked" : "pass",
-    async (pi) => {
-      const r = await bash(pi, "grep -Prn 'foo\\.bar' src/", approveUi());
-      return r.blocked && !r.reason.startsWith("Portability (grep -P)")
-        ? { blocked: false, reason: `wrong family: ${r.reason.slice(0, 60)}` }
-        : r;
-    },
+    "PB1: grep -P is advisory (warn) on darwin — detection pinned in search-guard units",
+    "pass",
+    async (pi) => bash(pi, "grep -Prn 'foo\\.bar' src/", approveUi()),
   ],
   [
     "SS1: unscoped recursive grep blocked",
