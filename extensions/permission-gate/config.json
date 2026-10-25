@@ -1,10 +1,11 @@
 {
-  "$schema": "./config.schema.json",
   "_comment": "Permission-gate rule switches. Set a rule to false to disable it. Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; the keys here are the stable, human-readable names. Env overrides: PGATE_<KEY>=0 disables one rule for a single run without editing this file. Inert rules stay inert regardless of the value (see each rule's README row).",
 
   "rules": {
     "editAnchorGuard": "error",
+    "editRegionGuard": "error",
     "reReadGuard": "error",
+    "reReadConsume": "off",
     "largeReadGuard": "warn",
     "locateFirst": "error",
     "nativeReadFirst": "error",

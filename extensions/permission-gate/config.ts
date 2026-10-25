@@ -144,6 +144,7 @@ function asSeverity(v: unknown, where: string): Severity | undefined {
 
 /** Positive integer within bounds, else undefined (caller keeps the default). */
 function asPosInt(v: unknown, where: string, max: number): number | undefined {
+  if (v === undefined) return undefined; // absent ≠ invalid: keep the default, silently
   const n = Number(v);
   if (!Number.isInteger(n) || n <= 0 || n > max) {
     warn(`ignoring ${where}=${JSON.stringify(v)} (expected a positive integer ≤ ${max})`);
