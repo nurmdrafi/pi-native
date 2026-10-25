@@ -151,7 +151,8 @@ FLAG NOT IN HELP: tvly search --include-raw-content
 All of these flags ARE in the respective `--help` output. Same command, same
 binary, same PATH — a rerun passes.
 
-**Investigated 2026-10-17 (unresolved, parked).** Findings so far:
+**Investigated 2026-10-17; fixed 2026-10-19 in `89c5984`.** Findings that led
+to the fix (kept for the diagnostic trail):
 
 - Every flag is genuinely present: `pi --help` lists `--extension`/`--session`,
   `pidx --help` lists `--out`, `docker run --help` lists `--rm`, and
@@ -179,7 +180,7 @@ the `catch` treats a timeout exactly like a missing flag; (b) ambient state unde
 `npm run` (`npm_lifecycle_*`, `NODE_OPTIONS`, stdio) making pi/pidx emit empty
 stdout.
 
-**Fix (not yet applied):**
+**Fix applied in `89c5984`** (the four steps below, in order):
 1. Distinguish "probe failed" from "flag absent": inspect the caught error, and
    on timeout/ENOENT/empty stdout retry once with a larger timeout before
    reporting. A probe that never succeeded is its own finding class, never
@@ -192,7 +193,8 @@ stdout.
    stdout) asserting it reports "unresolved", not "flag missing".
 
 **Impact:** a red CI gate that goes green on retry trains people to ignore it —
-worse than no gate. **Effort:** small for (1)+(2), medium for (3).
+worse than no gate. Closed: the probe now reports `HELP PROBE UNRESOLVED`
+instead of misreporting, and runtime fell 45 s → 7.9 s.
 
 
 ## 3. `permission-gate` S4/S5 failures (pre-existing, unrelated) — RESOLVED
