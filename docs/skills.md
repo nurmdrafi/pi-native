@@ -15,6 +15,7 @@ All skills are **manual** — invoke with `/skill:<name>`; none auto-load. Bodie
 | fallow-audit         | Dead-code / unused-export / unused-dependency cleanup              | `/skill:fallow-audit`         |
 | frontend-design      | New web components/pages/apps from scratch                         | `/skill:frontend-design`      |
 | impeccable           | Design quality for existing UI — audit/critique/polish, 24 verb commands (vendored upstream, Apache-2.0; sync: `scripts/sync-impeccable.mjs`) | `/skill:impeccable`           |
+| linkedin             | LinkedIn writing suite — posts/comments/DMs/plans/profile in user's voice, mandatory humanizer pass (vendored upstream, MIT) | `/skill:linkedin`             |
 | github-actions       | Author/harden CI workflows: SHA-pinned actions, actionlint          | `/skill:github-actions`       |
 | grill-me             | One-question-at-a-time stress-testing of a plan                    | `/skill:grill-me`             |
 | harness-engineer     | Meta: audit/improve this harness                                   | `/skill:harness-engineer`     |
