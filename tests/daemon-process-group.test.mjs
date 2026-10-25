@@ -26,6 +26,24 @@ const pgidOf = (pid) =>
 
 const myPgid = await pgidOf(process.pid);
 
+/** Poll until the daemon's pgid leaves the client's group (exec + setpgid
+ *  done) or the budget runs out; returns the last observed pgid. The old
+ *  fixed 250 ms sleep raced daemon startup under `npm run check` load: a
+ *  pre-setpgid child still carries the client's pgid — a false FAIL that
+ *  vanished when the file ran standalone. Observed under `npm test`
+ *  parallelism: 2+ s pre-isolate is normal, and the tail can pass 5 s, so
+ *  the budget is generous; an idle run still settles in the first poll. */
+const pgidAfterSettle = async (pid, myPgid, budgetMs = 15_000) => {
+  const t0 = Date.now();
+  let pgid = "";
+  do {
+    pgid = await pgidOf(pid);
+    if (pgid !== "" && pgid !== myPgid) return pgid;
+    await new Promise((r) => setTimeout(r, 100));
+  } while (Date.now() - t0 < budgetMs);
+  return pgid;
+};
+
 let failures = 0;
 const check = (name, cond, detail) => {
   if (cond) console.log(`PASS  ${name}`);
@@ -36,8 +54,7 @@ for (const tool of ["piread", "piedit", "pibash"]) {
   const bin = join(ROOT, "bin", tool);
   const proc = spawn(bin, ["--serve"], { stdio: ["pipe", "pipe", "ignore"] });
   proc.stdin.on("error", () => {});
-  await new Promise((r) => setTimeout(r, 250));
-  const pgid = await pgidOf(proc.pid);
+  const pgid = await pgidAfterSettle(proc.pid, myPgid);
   check(
     `${tool} --serve runs in its own process group (pgid ${pgid} != client ${myPgid})`,
     pgid !== "" && pgid !== myPgid,
