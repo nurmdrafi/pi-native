@@ -7,6 +7,31 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.53.0] - 26-10-2026
+
+### Changed
+
+- **Backlog §5 resolved: `piread` compaction tail from the real EOF —
+  implemented, measured, dropped. No production change; `piread` stays
+  byte-identical to 1.52.0.** Compaction's tail currently comes from the end
+  of the truncation window (~line 2000), not the file's end. The full fix —
+  a backward `tail(1)`-style probe sourcing the tail from the file's last
+  lines, the omission marker's line count promoted to the file-level gap so
+  `renderedSpansFromBlocks` certifies the EOF tail with zero coverage
+  changes, both continuation-notice forms split off and kept last, overlap
+  fallback to the body tail — passed every suite (`cargo test` 74/74,
+  piread-huge 9/9, gate 279/279, `npm run check` green) but measured a
+  stable +33% daemon p50 on the compacting microbench arm (lines2500:
+  0.181 → 0.241 ms, twice, 20–30× run noise; the second open/seek/read per
+  oversized read). Per the standing perf rule (measurable loss ⇒ drop), the
+  runtime change was reverted. Kept: the design note with the measurement
+  and the re-adoption path
+  (`docs/specs/2026-10-26-piread-compaction-eof-tail.md`), and a
+  `renderedSpansFromBlocks` gap-cursor property test
+  (`tests/read-coverage.test.mjs`, 13/13) locking the parser behavior any
+  re-adoption relies on. Post-revert microbench: flat vs baseline
+  (lines2500 0.186 ms).
+
 ## [1.52.0] - 26-10-2026
 
 ### Fixed

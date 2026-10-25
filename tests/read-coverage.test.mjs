@@ -101,6 +101,31 @@ test("renderedSpansFromBlocks without a line-omission marker is undefined", () =
   );
 });
 
+// Backlog §5 (2026-10-26): EOF-sourced compaction tails were implemented,
+// measured (+33% p50 on the compacting bench arm — the backward-tail file
+// probe), and dropped per the perf gate; the runtime shape never ships.
+// This locks the parser's gap-cursor property for any re-adoption: a marker
+// whose line count is the file-level gap must land the tail run exactly on
+// the file's last lines — no over-certification of the never-rendered
+// middle, no loss of the tail. See
+// docs/specs/2026-10-26-piread-compaction-eof-tail.md.
+test("renderedSpansFromBlocks maps an EOF-sourced tail onto file-end lines", () => {
+  const tail = Array.from({ length: 13 }, (_, i) => `E${String(5989 + i).padStart(6, "0")}`);
+  const text = [
+    ...Array.from({ length: 24 }, (_, i) => `E${String(i + 1).padStart(6, "0")}`),
+    "",
+    "[... omitted 15808 chars / 5964 lines ...]",
+    "",
+    ...tail,
+    "",
+    "[Showing lines 1-2000 of 6002. Use offset=2001 to continue.]",
+  ].join("\n");
+  assert.deepEqual(renderedSpansFromBlocks([{ type: "text", text }], 1), [
+    { start: 1, end: 24 },
+    { start: 5989, end: 6001 },
+  ]);
+});
+
 test("renderedSpansFromBlocks strips the trailing continuation notice", () => {
   const text =
     "h1\nh2\n\n[... omitted 5 chars / 3 lines ...]\n\nt1\n\n[Showing lines 1-10 of 40. Use offset=11 to continue.]";

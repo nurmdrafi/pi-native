@@ -236,6 +236,20 @@ the file would be more useful.
 byte ranges, and it changes the parity story further. Worth a design note before
 code.
 
+**Resolved (2026-10-26): implemented, measured, dropped — perf gate.** Design
+note: `docs/specs/2026-10-26-piread-compaction-eof-tail.md` (head/tail split
+ranges accepted; marker's line count becomes the file-level gap so
+`renderedSpansFromBlocks` needs zero changes — its cursor walk lands the tail
+on the file's last lines; parity suite untouched via `PI_READ_COMPRESS=0`).
+The implementation passed every suite (cargo 74/74, piread-huge 9/9, gate
+279/279, check green) but cost a stable +33% daemon p50 on the compacting
+microbench arm (lines2500: 0.181 → 0.241 ms; the backward tail-probe's second
+open/seek/read per oversized read), 20–30× run noise — dropped per the
+standing perf rule. Kept: the spec (incl. the reuse-the-scan's-fd re-adoption
+path, est. +0.03 ms) and a `renderedSpansFromBlocks` gap-cursor property test.
+Re-open only if a bounded p50 cost on oversized reads is accepted as a
+product decision.
+
 ## 6. `tests/` scratch files
 
 `tests/.child.tmp.mjs`, `.childwd`, `.crossrung`, `.iso2`, `.mkchild`, `.mkwd`,
