@@ -30,7 +30,7 @@ Pick by what the post actually is. Never default to type 1.
 
 ## Rules
 
-- **2 to 4 sentences.** Longer reads as a hijack. Shorter reads as filler.
+- **3 to 5 sentences, 200-320 characters.** Longer reads as a hijack. Shorter reads as filler. See House format below.
 - **Never open with "Great post"**, "Love this", "So true", "Couldn't agree
   more", "This resonates", or the author's first name followed by an
   exclamation mark. All six are invisible.
@@ -43,34 +43,47 @@ Pick by what the post actually is. Never default to type 1.
 - **Disagreement is allowed and works**, but the agreement has to come first
   and be real.
 
-## Output
+## House format (user directive, 2026-10-25)
 
-Give **two options of different types**, labelled, plus a one-line reason for
-the one you would post. Run both through `/li-human` first - a comment with an
-em dash in it is more obviously machine-written than a post, because comments
-are short and people read them closely.
+Every comment ships in this shape. It overrides any earlier option style.
+
+1. **Type.** Default to 4 (extend one line) or 5 (real question) - neither needs the user's own data. Type 1 (datum) or 6 (receipt) at most once a week: check `~/.pi/agent/linkedin/log.md` first.
+2. **Length.** 200-320 characters, 3-5 sentences, sentence lengths visibly uneven: one short sentence, one long one.
+3. **Plain words only.** No figure of speech that needs decoding. If a reader whose first language is not English could not parse it in one pass, rewrite it. Banned: puns on idioms, jokes that need setup ("the week the weather ate").
+4. **No own metrics or project names** when the type 1/6 quota is closed, and never a number from an unrelated domain (fiber kilometres under an aerial-imagery post). The comment serves the author's post, not the user's proof list.
+5. **Anchor on one line of the post**, quoted short, then build past it.
+6. **Detector.** Run `scripts/detect.py`. A short plain comment often scores REVIEW on specificity because it carries no number - ship the readable one, say the score, never stuff a number in to lift it.
+
+### Output block - always this, nothing added
 
 ```
-COMMENT OPTIONS  (on @author's post about hiring)
+POST: <author> - <what the post actually is, one line>
 
-[6 · Receipt]
-We tried the no-resume version of this for 3 hires last year. Two were the
-best hires we made. The third was a disaster, and the difference was whether
-they had done the actual job before, not how they interviewed.
+COMMENT
+<3-5 sentences>
 
-[3 · Respectful disagree]
-Agree on the signal problem. But the fix that worked for us was not removing
-the resume, it was giving every candidate the same 90-minute paid task. Same
-outcome, far less argument internally.
+WHAT IT SAYS
+<one or two plain lines decoding every metaphor or claim in the comment>
 
-Post the first. It is your own data and it concedes a failure, which is the
-part people reply to.
+SHORTER
+<one-line version, same type>
 ```
+
+Then append the log row: `date | comment | <type> | target | link`.
+
+Hard requirements, no exceptions:
+
+- **SHORTER is never skipped.** Every comment ships with a shorter version, same type, 8-15 words, plain enough to stand alone if the long one is dropped. Batch mode includes it per post.
+- **WHAT IT SAYS is never skipped.** It is the reader's check that the long version is understandable; if the gloss needs a metaphor explained, the metaphor goes, not the gloss.
+- **One comment, not a menu.** No "option A / option B", no type labels inside the comment text.
+- Both versions must already have a detect score attached when they are shown.
+
+<!-- replaced 2026-10-25: the old "two options of different types" output. User asked for one fixed pattern: one comment, a plain-English gloss, one shorter alternate. -->
 
 ## Batch mode
 
 If the user wants an engagement round, ask for the 5-10 posts as pasted text
-in one message, return one comment each in a single block, and keep a running
+in one message, return one comment each plus its SHORTER line, and keep a running
 note of who they have already commented on this week in
 `~/.pi/agent/linkedin/log.md`. Commenting on the same three people every day is
 visible and it looks like what it is.
