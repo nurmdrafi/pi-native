@@ -7,6 +7,12 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.49.0] - 25-10-2026
+
+### Added
+
+- **`piread` huge-input lock-in suite (`tests/piread-huge.test.mjs`, 7/7).** Closes the feedback tool-table P1 pair: bounded model-visible bytes on 80k-line and 9 MB inputs, UTF-8 partial cuts without U+FFFD, binary delegation on a 2 MB NUL file, deep-offset and continuation windows byte-identical to the built-in, truncation metadata preserved verbatim through shaping, and the §9 rendered-runs certification proven end-to-end through a real gate. No production change — the contract already held; the gap was coverage. Session-audit backing (315 reads, 7 sessions): every R1 false block (13/15) was the pre-fix §9 elision class; post-fix sessions show zero, so no read-rule rung was added (research note in `docs/backlog.md` §10: Claude Code per-model dials, Command Code partial-view ledger ≙ our design, Codex shows no-gate thrash). Micro-bench refreshed: daemon p50s unchanged vs 2026-10-17.
+
 ## [1.48.0] - 25-10-2026
 
 ### Fixed

@@ -387,6 +387,49 @@ timings flat (gate 0.92 s vs 0.96 s baseline, parity 2.87 s vs 3.16 s),
 non-elided reads execute zero new code. read-coverage 9/9, gate 278/279
 (one pre-existing non-piedit failure), bench-suite 38/38.
 
+## 10. `piread` P1 pair resolved: coverage lock-ins + read-gate audit (2026-10-25)
+
+Feedback tool-table P1s ("bounded memory contract: huge files, UTF-8
+boundaries, binary detection, offset edge cases"; "compaction never rewrites
+truncation metadata or weakens read-coverage certification") were half
+covered: the parity matrix had UTF-8/binary/offset fixtures and Rust unit
+tests pinned the compaction budget, but nothing end-to-end exercised huge
+inputs through the daemon with shaping ON (the parity suite deliberately
+pins `PI_READ_COMPRESS=0`).
+
+**Outcome: the contract already held — no production change.** New
+`tests/piread-huge.test.mjs` (7/7) locks it in: an 80k-line whole read stays
+bounded (~2.4 KB visible) with the truncator's notice verbatim (total lines
+and continuation offset unrewritten by compaction, notice kept last), the
+`offset=2001` continuation is byte-identical to the built-in, deep windows
+are verbatim, a 45 KB single multi-byte line takes the partial cut without
+U+FFFD, a 9 MB single line delegates to the built-in's empty-body truncation
+(daemon survives), a 2 MB NUL file byte-matches the built-in, and the §9
+interplay runs end-to-end through a real gate (re-read of the elided gap
+passes R1 while a rendered-head re-read still blocks).
+
+**Session audit** (adapted `/tmp/ag-audit.mjs` → `/tmp/piread-audit.mjs`,
+7 sessions, 315 reads): 20 read blocks — R1 15 (13 false, 87%, every one the
+§9 elision class and every one pre-`fed7ec4`; the 07:52 session had loaded
+pre-fix gate code at start), R1c 5 (all valid; each followed by an
+rg-then-read), R1b 0. Post-fix session on HEAD: 0 R1 false blocks.
+
+**No new rule rung.** Research (2026-10-25): Claude Code dials its
+read-requirement per model; Command Code's read tool keeps a partial-view
+ledger plus self-expiring dedup — the same shape as our §9 rendered-runs
+certification plus compaction invalidation; Codex community threads show
+removing the gate regresses into edit thrash. With zero post-fix false
+blocks a rung has no evidence to pay for; re-evaluate only if a future audit
+shows R1 false blocks surviving §9 — that would be a
+`renderedSpansFromBlocks` bug, not a policy gap.
+
+**Perf:** `benchmark/runs/piread-microbench-2026-10-25.md` (local;
+`benchmark/runs/` is gitignored) — daemon p50s within noise of the 10-17 run
+(0.033–0.063 ms class, oracle still beaten everywhere), spawn floor
+1.796 ms. "Incremental UTF-8 decoding" stays retired for piread too: the
+unicode class reads 0.041 ms p50 vs the oracle's 0.128 ms — decode cost is
+already amortized by the daemon.
+
 ## Closed this round (for context)
 
 - `piread`/`piedit` event-loop drain: they ref'd `stdin`/`stdout` but not
