@@ -7,6 +7,13 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.54.0] - 26-10-2026
+
+### Changed
+
+- **Perf-audit round: every custom tool re-measured against its built-in counterpart; no droppable aspect found — no production change.** All three micro-benches (`tests/{piread,pibash,piedit}-bench.mjs`) re-run twice on the shipping binaries. `piread` and `piedit` daemon arms lead the in-process oracle on every corpus in both runs (piedit large-1mib ~7x: 4.2 vs 30 ms). `pibash` is at-or-below oracle on 8 of 9 classes within noise; the one above-oracle arm, seq50000 (+0.66/+0.85 ms p50, +5–7%, stable across both runs), is the known §1 residual: a parity-pinned envelope (`content[0].text` + `structuredContent.output`) already minimized by the single-materialization fix (+3.57 → +0.7 ms), costing zero model tokens, with the in-process oracle arm skipping the serialization a real session pays on both sides. Dropping it would break the byte-parity contract the bash parity suite and permission-gate H1 depend on — verdict keep. First post-fix pibash record written (`benchmark/runs/pibash-microbench-2026-10-25.md`); audit detail in `docs/backlog.md` §12.
+- **Model-visible cost-control gap analysis: contract already held on every surface — no new budget.** `pibash` (Tier-1 `compress.rs` 40/2 KB + H1) and `piread` (windowing + on-by-default compaction + H1b 300/8 KB) are bounded twice over. `piedit`'s unbounded `details.diff`/`patch` never reach the model — the tool-result wire payload is content blocks only (adapter serializes `content`; `details`/`structuredContent` documented not-sent-to-model), and its `content` is the one-line success text. `subagents` steered-turn payloads are requested semantic content with no lossless continuation mechanism to cut against; status/activity fields already carry MAX_* caps. `pidx` is pointer-by-default with a hard cap on the `stdout:true` opt-in. Findings recorded in `docs/backlog.md` §12; no code changed.
+
 ## [1.53.0] - 26-10-2026
 
 ### Changed

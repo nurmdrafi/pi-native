@@ -19,35 +19,35 @@ Parity is pinned by `tests/piread-parity.test.mjs`, `tests/piedit-parity.test.mj
 
 ## Performance
 
-Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `native` is the replacement. The native tools replace a per-call process spawn with a persistent `--serve` daemon, so the win is the amortized spawn floor (~1.6–1.9 ms here), not output shaping. Absolute numbers are wall-clock on one machine and move with hardware and load; the Δ column is the comparison that matters. In every table below, `built-in` / `oracle` names the same stock pi TypeScript tool the native tool replaces — the parity oracle the native path must byte-match. For model-context cost (bytes actually entering the transcript) see [Context shaping](#context-shaping-what-enters-the-model) below — that is the other half of the story, and the one that compounds across turns. Sources: [`benchmark/runs/piread-microbench-2026-10-17.md`](../benchmark/runs/piread-microbench-2026-10-17.md), [`piedit-microbench-2026-10-17.md`](../benchmark/runs/piedit-microbench-2026-10-17.md), [`pibash-microbench-2026-10-17.md`](../benchmark/runs/pibash-microbench-2026-10-17.md), [`pibash-microbench-2026-10-18.md`](../benchmark/runs/pibash-microbench-2026-10-18.md) (post-fix; † rows) — regenerate with `node tests/<tool>-bench.mjs`.
+Dispatch latency, p50 ms — `built-in` is the stock pi tool (bash/read/edit), `native` is the replacement. The native tools replace a per-call process spawn with a persistent `--serve` daemon, so the win is the amortized spawn floor (~1.8–2.0 ms here), not output shaping. Absolute numbers are wall-clock on one machine and move with hardware and load; the Δ column is the comparison that matters. In every table below, `built-in` / `oracle` names the same stock pi TypeScript tool the native tool replaces — the parity oracle the native path must byte-match. For model-context cost (bytes actually entering the transcript) see [Context shaping](#context-shaping-what-enters-the-model) below — that is the other half of the story, and the one that compounds across turns. Sources: [`benchmark/runs/piread-microbench-2026-10-25.md`](../benchmark/runs/piread-microbench-2026-10-25.md), [`piedit-microbench-2026-10-25.md`](../benchmark/runs/piedit-microbench-2026-10-25.md), [`pibash-microbench-2026-10-25.md`](../benchmark/runs/pibash-microbench-2026-10-25.md) (regenerated in the 2026-10-26 audit round) — regenerate with `node tests/<tool>-bench.mjs`.
 
 | Tool     | Replaces        | Representative case                 | built-in p50 | native p50   | Δ p50     |
 | -------- | --------------- | ----------------------------------- | -----------: | -----------: | --------- |
-| `piread` | built-in `read` | one-line file                       | 0.126 ms     | 0.033 ms     | **−0.09** |
-| `piread` | built-in `read` | 2500-line window                    | 0.355 ms     | 0.171 ms     | **−0.18** |
-| `piedit` | built-in `edit` | mid exact (1800 B)                  | 0.291 ms     | 0.159 ms     | **−0.13** |
-| `piedit` | built-in `edit` | 1 MiB file (588,890 B)              | 29.969 ms    | 4.258 ms     | **7.0×**  |
-| `pibash` | built-in `bash` | `printf` †                          | 4.516 ms     | 2.487 ms     | **−2.03** |
-| `pibash` | built-in `bash` | `seq 50000` †                       | 10.643 ms    | 13.463 ms    | **+2.82** |
+| `piread` | built-in `read` | one-line file                       | 0.130 ms     | 0.052 ms     | **−0.08** |
+| `piread` | built-in `read` | 2500-line window                    | 0.361 ms     | 0.179 ms     | **−0.18** |
+| `piedit` | built-in `edit` | mid exact (1800 B)                  | 0.288 ms     | 0.154 ms     | **−0.13** |
+| `piedit` | built-in `edit` | 1 MiB file (588,890 B)              | 29.683 ms    | 4.218 ms     | **7.0×**  |
+| `pibash` | built-in `bash` | `printf`                             | 1.829 ms     | 1.767 ms     | **−0.06** |
+| `pibash` | built-in `bash` | `seq 50000`                          | 12.439 ms    | 13.292 ms    | **+0.85** |
 | `pidx`   | Node log parser | 512 sessions / 103 MB (cold → warm) | —            | 572 → 390 ms | **n/a**   |
 
-`pibash`'s `seq 50000` row above is the 2026-10-17 measured regression (+3.57 ms at p50, widening with output size; envelope shipped the payload twice — `content[0].text` + `structuredContent.output` — structural and parity-pinned). **Fixed since** (single-materialization envelope, copy-on-write compression stages, one shared line split — see [`docs/custom-tools-architecture.md`](custom-tools-architecture.md) § pibash): the † rows are re-measured 2026-10-19 on the fixed binary — daemon p50 15.78 → 13.46 ms (oracle gap +3.57 → +2.82 ms) and one-shot p50 19.7 → 13.4 ms (−32%) via `custom-tools/pibash/bench-seq50000.mjs`; wire bytes unchanged, parity pinned. Every other arm now leads the oracle by 1.4–2.7 ms; the residual `seq 50000` gap is the Tier-1 compression pre-pass — work the built-in never does (pibash's additive error-rescue feature). `pidx` is a daemonless one-shot CLI, so it has no oracle/daemon split; its figures are a live cold/warm run on this repo's corpus and have no committed bench file yet.
+`pibash`'s `seq 50000` row is the one arm above the built-in oracle. Original regression (2026-10-17): +3.57 ms at p50, widening with output size — the envelope shipped the payload twice (`content[0].text` + `structuredContent.output`), structural and parity-pinned. **Fixed since** (single-materialization envelope, copy-on-write compression stages, one shared line split — see [`docs/custom-tools-architecture.md`](custom-tools-architecture.md) § pibash; `custom-tools/pibash/bench-seq50000.mjs`): daemon p50 15.78 → 13.46 ms on 2026-10-19, wire bytes unchanged, parity pinned. Re-audited 2026-10-26 (two runs, [`benchmark/runs/pibash-microbench-2026-10-25.md`](../benchmark/runs/pibash-microbench-2026-10-25.md)): the residual is +0.66/+0.85 ms — the parity-pinned envelope plus the Tier-1 compression pre-pass (work the built-in never does; the in-process oracle arm also skips the serialization a real session pays on both sides). Accepted — nothing further is droppable without breaking byte-parity (backlog §12). The other eight classes sit at-or-below the oracle within ±0.44 ms. `pidx` is a daemonless one-shot CLI, so it has no oracle/daemon split; its figures are a live cold/warm run on this repo's corpus and have no committed bench file yet.
 
-### Re-measured 2026-10-19 (piread)
+### Run-to-run stability (piread, 2026-10-26 audit)
 
-Fresh dispatch-latency run on this machine — same shape as the committed 2026-10-17 numbers; absolute p50s shift with load, the Δ column is the comparison that matters. Full methodology and p95s: [`benchmark/runs/piread-microbench-2026-10-19.md`](../benchmark/runs/piread-microbench-2026-10-19.md).
+Two same-day runs on identical binaries (the second regenerated the record file): the daemon leads the oracle on every corpus in both, Δ p50 stable within ±0.04 ms across runs; absolute p50s shift with load, the Δ column is the comparison that matters. Latest run below; methodology and p95s: [`benchmark/runs/piread-microbench-2026-10-25.md`](../benchmark/runs/piread-microbench-2026-10-25.md).
 
 | corpus | built-in p50 | daemon p50 | Δ p50 | one-shot p50 |
 | --- | ---: | ---: | ---: | ---: |
-| one-line | 0.238 | 0.101 | **−0.14** | 3.268 |
-| crlf | 0.395 | 0.109 | **−0.29** | 3.148 |
-| unicode | 0.328 | 0.079 | **−0.25** | 3.122 |
-| long-lines | 0.268 | 0.106 | **−0.16** | 3.253 |
-| lines2500 | 1.383 | 0.576 | **−0.81** | 3.899 |
-| bytes60k | 0.617 | 0.571 | **−0.05** | 3.854 |
-| head60k | 0.460 | 0.189 | **−0.27** | 3.580 |
+| one-line | 0.130 | 0.052 | **−0.08** | 1.921 |
+| crlf | 0.133 | 0.041 | **−0.09** | 1.894 |
+| unicode | 0.128 | 0.042 | **−0.09** | 1.884 |
+| long-lines | 0.129 | 0.046 | **−0.08** | 1.881 |
+| lines2500 | 0.361 | 0.179 | **−0.18** | 2.053 |
+| bytes60k | 0.221 | 0.170 | **−0.05** | 2.066 |
+| head60k | 0.182 | 0.064 | **−0.12** | 1.896 |
 
-Daemon peak RSS 2 MB (vmhwm); one-shot pays the ~3.3–3.9 ms spawn floor every call.
+Daemon peak RSS ~2 MB (vmhwm, Linux probe); one-shot pays the ~1.9–2.1 ms spawn floor every call.
 
 <details>
 <summary>Per-tool detail</summary>
@@ -56,40 +56,42 @@ Daemon peak RSS 2 MB (vmhwm); one-shot pays the ~3.3–3.9 ms spawn floor every 
 
 | corpus | built-in `read` p50 | `piread` daemon p50 | `piread` one-shot p50 | Δ p50 |
 | --- | ---: | ---: | ---: | ---: |
-| one-line | 0.126 | 0.033 | 1.885 | −0.092 |
-| long-lines | 0.128 | 0.054 | 1.888 | −0.074 |
-| lines2500 | 0.355 | 0.171 | 2.064 | −0.184 |
-| bytes60k | 0.215 | 0.167 | 2.007 | −0.048 |
-| head60k | 0.170 | 0.062 | 1.877 | −0.107 |
+| one-line | 0.130 | 0.052 | 1.921 | −0.078 |
+| crlf | 0.133 | 0.041 | 1.894 | −0.092 |
+| unicode | 0.128 | 0.042 | 1.884 | −0.086 |
+| long-lines | 0.129 | 0.046 | 1.881 | −0.083 |
+| lines2500 | 0.361 | 0.179 | 2.053 | −0.182 |
+| bytes60k | 0.221 | 0.170 | 2.066 | −0.051 |
+| head60k | 0.182 | 0.064 | 1.896 | −0.118 |
 
-`piread` is **byte-identical** to the built-in `read` on every text case that fits the model-visible budget (see `npm run bench:model-visible:compare`); larger reads are head-tail compacted by default, so their content is a bounded window rather than the full 2000-line cap — set `PI_READ_COMPRESS=0` to restore exact parity. The daemon path wins on every corpus (~4x on small reads, ~2x on 2,500 lines), and the one-shot path pays the ~1.9 ms spawn floor.
+`piread` is **byte-identical** to the built-in `read` on every text case that fits the model-visible budget (see `npm run bench:model-visible:compare`); larger reads are head-tail compacted by default, so their content is a bounded window rather than the full 2000-line cap — set `PI_READ_COMPRESS=0` to restore exact parity. The daemon path wins on every corpus (~2.5x on small reads, ~2x on 2,500 lines, re-confirmed in the 2026-10-26 audit rerun), and the one-shot path pays the ~1.9 ms spawn floor.
 
 **piedit** (N=100/arm; oracle vs piedit p50 ms):
 
 | corpus | bytes | built-in p50 | piedit p50 | Δ p50 |
 | --- | ---: | ---: | ---: | ---: |
-| small-exact | 17 | 0.212 | 0.144 | −0.068 |
-| mid-exact | 1800 | 0.291 | 0.159 | −0.132 |
-| mid-multi | 1800 | 0.287 | 0.152 | −0.135 |
-| fuzzy-trailing-ws | 30 | 0.199 | 0.140 | −0.059 |
-| multiline-block | 18890 | 1.049 | 0.264 | −0.784 |
-| large-1mib | 588890 | 29.969 | 4.258 | −25.710 |
+| small-exact | 17 | 0.204 | 0.142 | −0.062 |
+| mid-exact | 1800 | 0.288 | 0.154 | −0.134 |
+| mid-multi | 1800 | 0.282 | 0.147 | −0.135 |
+| fuzzy-trailing-ws | 30 | 0.190 | 0.135 | −0.055 |
+| multiline-block | 18890 | 1.080 | 0.268 | −0.812 |
+| large-1mib | 588890 | 29.683 | 4.218 | −25.465 |
 
-**pibash** (N=60/arm; oracle vs daemon p50 ms; run of 2026-10-19, post-fix — [`benchmark/runs/pibash-microbench-2026-10-18.md`](../benchmark/runs/pibash-microbench-2026-10-18.md)):
+**pibash** (N=60/arm; oracle vs daemon p50 ms; 2026-10-26 audit run — [`benchmark/runs/pibash-microbench-2026-10-25.md`](../benchmark/runs/pibash-microbench-2026-10-25.md)):
 
 | command class | built-in p50 | pibash p50 | Δ p50 |
 | --- | ---: | ---: | ---: |
-| true | 4.052 | 2.421 | −1.631 |
-| printf | 4.516 | 2.487 | −2.029 |
-| rg-version | 5.549 | 4.040 | −1.508 |
-| seq1000 | 4.734 | 3.316 | −1.417 |
-| seq2500 | 6.380 | 3.693 | −2.688 |
-| seq50000 | 10.643 | 13.463 | +2.820 |
-| large-blob | 6.397 | 4.122 | −2.275 |
-| stderr-mix | 4.899 | 2.399 | −2.500 |
-| exit-nonzero | 4.745 | 2.300 | −2.445 |
+| true | 1.829 | 1.760 | −0.069 |
+| printf | 1.829 | 1.767 | −0.062 |
+| rg-version | 4.300 | 4.193 | −0.107 |
+| seq1000 | 3.233 | 3.226 | −0.007 |
+| seq2500 | 4.152 | 3.711 | −0.441 |
+| seq50000 | 12.439 | 13.292 | +0.853 |
+| large-blob | 4.241 | 4.257 | +0.015 |
+| stderr-mix | 1.752 | 1.731 | −0.021 |
+| exit-nonzero | 1.737 | 1.726 | −0.010 |
 
-Spawn floor per session: ~1.6–1.9 ms (paid once, not per call). Daemon RSS is not reported here: the resident-set probe used by `piread`/`pibash` benchmarks reads `/proc`, so it is Linux-only and is skipped elsewhere.
+Spawn floor per session: ~1.8–2.0 ms (paid once, not per call). Daemon RSS is not reported here: the resident-set probe used by `piread`/`pibash` benchmarks reads `/proc`, so it is Linux-only and is skipped elsewhere.
 
 </details>
 

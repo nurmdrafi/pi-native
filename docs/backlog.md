@@ -32,6 +32,15 @@ first, with the reason it is first.
 > making it stream from the spill file — a deliberate follow-up, not part of
 > this fix. Model-visible tokens unchanged: display text is the same
 > compressed ≤40-line/2 KB body, parity-pinned.
+>
+> **Re-audited (2026-10-26, perf-audit round):** fresh two-run micro-bench
+> puts the residual at **+0.66 / +0.85 ms** p50 vs the in-process oracle
+> (13.29 vs 12.44–12.62 ms); the other 8 classes sit at-or-below oracle
+> within ±0.44 ms noise. That residual is accepted option-(c) territory:
+> parity-pinned envelope (§1), already minimized by this fix, zero model
+> tokens, and the oracle arm skips the in-window serialization a real
+> session pays on both sides (~0.5–1.2 ms for a 350 KB round-trip on this
+> host). Nothing further is droppable; see §12.
 
 **Symptom.** `pibash` is the only arm slower than the built-in oracle on a
 representative case: **+3.57 ms at p50** (`12.216` → `15.783` ms), and the gap
@@ -476,6 +485,65 @@ row added, plus the audit's other findings:
   casing; `outputCap`/`confirm` override + rejection; the
   `ruleEnabled`/`ruleBlocks` warn-vs-error contract.
 - Still red, pre-existing and unrelated: PB1 `grep -P` darwin (278/279).
+
+## 12. Perf audit (all tools vs built-ins) + model-visible cost-control gap analysis (2026-10-26) — RESOLVED, no change
+
+Two questions, one round: (1) does any tool aspect measurably lose to its
+built-in counterpart (the §5 method: micro-bench arms, daemon p50 vs
+in-process oracle, never asserted, stability across 2+ runs)? (2) does any
+surface lack a pibash-style model-visible budget (head-tail compaction with
+line/byte caps)?
+
+**Perf audit — no droppable aspect found.**
+
+- `piread`: daemon leads the oracle on all 7 corpora in both runs (10-25
+  record + same-day rerun; e.g. one-line 0.042/0.052 vs 0.138/0.130,
+  lines2500 0.186/0.179 vs 0.399/0.361 ms).
+- `piedit`: daemon leads on all 6 corpora in both runs; large-1mib
+  4.27/4.22 vs 30.27/29.68 ms (~7x).
+- `pibash`: 8 of 9 classes at-or-below oracle within noise (|Δ| ≤ 0.44 ms,
+  most ≤ 0.11). The one above-oracle arm, seq50000 (+0.66/+0.85 ms,
+  +5–7%, stable across 2 runs, above the noise band), is the §1 residual:
+  the parity-pinned envelope (`content[0].text` +
+  `structuredContent.output`) already minimized by the
+  single-materialization fix (d103bb3: +3.57 → +0.7 ms), costing zero
+  model tokens, with the oracle arm skipping the in-window serialization a
+  real session pays on both sides (~0.5–1.2 ms for a 350 KB round-trip on
+  this host). Dropping it breaks the byte-parity contract the bash parity
+  suite and permission-gate H1 depend on (§1 options a–c; (b) shipped, the
+  residual is accepted (c)). Verdict: keep. First post-fix record:
+  `benchmark/runs/pibash-microbench-2026-10-25.md` (regenerated this
+  round — the 10-17 record predates d103bb3; piread/piedit 10-25 records
+  regenerated same-day, both within noise of their prior values).
+
+**Gap analysis — contract already held on every surface.**
+
+- `pibash`: Tier-1 `compress.rs` (40 lines / 2 KB) + H1 (40/2 KB, with the
+  Rust-compressed pass-through). Held.
+- `piread`: windowing + on-by-default compaction (`PI_READ_COMPRESS`) +
+  H1b post-cap (300 lines / 8 KB). Held, belt and suspenders.
+- `piedit`: `content` is the one-line success text — bounded by
+  construction. `details.diff`/`details.patch` are unbounded but never
+  model-visible: the tool-result wire payload is content blocks only —
+  both LLM adapters serialize `content` alone (Anthropic
+  `convertToolResult` → `convertContentBlocks(content)`; Bedrock
+  `convertToolResultContent(content)`, same shape), while `details`/
+  `structuredContent` stay harness-side for UI/compaction bookkeeping.
+  Bounding them would also deviate from the built-in
+  edit, which returns the same unbounded diff (parity-pinned). Not
+  applicable — the contract is held at the adapter layer.
+- `permission-gate`: its synthesized outputs are fixed strings with spill
+  pointers; H1/H1b are the cost-control layer itself. Held.
+- `subagents`: status/activity fields carry MAX_* caps (200/72/120). The
+  subagent final answer and ask_question payloads arrive as steered turns
+  of requested semantic content — the answer is the deliverable, and unlike
+  bash noise there is no continuation-window mechanism that would make a
+  head-tail cut lossless. No budget warranted.
+- `pidx`: pointer-by-default; `stdout:true` opt-in hard-capped
+  (`MAX_INLINE_CHARS`); unknown-param rejection guards the 40 KB
+  wrong-success path (session 01a14440 root-cause guard). Held.
+
+No production change; every suite stays as shipped in 1.53.0.
 
 ## Closed this round (for context)
 
