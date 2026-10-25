@@ -7,6 +7,34 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.52.0] - 26-10-2026
+
+### Fixed
+
+- **The last standing gate-suite failure: PB1's e2e expectation predated
+  the 2026-10-21 warn demotion.** `searchPortability` (PB1) ships `warn` —
+  taught, counted, not blocking — and its tracked `config.json` value, README
+  row, and sibling SS/TC e2e cases were all updated at demotion time, but the
+  one darwin case still expected a `blocked`, leaving
+  `tests/permission-gate.test.mjs` at 278/279 and `npm run check` red on it
+  ever since. The case now expects a pass like its demoted siblings, and
+  PB1's *detection* (the part a `warn` rule can silently lose) is unit-pinned
+  in `tests/search-guard-locate.test.mjs`: `grep -P`/`--perl-regexp` raise
+  the Portability family on darwin; `rg -P` (the suggested remedy) and
+  off-darwin `grep -P` do not. Detection code unchanged; no severity touched.
+  Gate suite 279/279 — first fully green run.
+
+- **`daemon-process-group` flaked under parallel test load: a fixed 250 ms
+  sleep raced daemon startup.** Under `npm test` parallelism a freshly
+  spawned `--serve` child can sit in the client's process group for seconds
+  before exec/scheduling lets it reach `setpgid` (observed 2+ s pre-isolate,
+  tail beyond 5 s) — a false FAIL that vanished when the file ran standalone.
+  The check now polls `ps` until the pgid leaves the client's group (100 ms
+  interval, 15 s budget; an idle run settles in the first poll, ~260 ms
+  measured). Production daemons untouched; under full `npm run check` load
+  the file legitimately takes ~13 s — inside the new budget, outside the old
+  sleep.
+
 ## [1.51.0] - 25-10-2026
 
 ### Fixed
