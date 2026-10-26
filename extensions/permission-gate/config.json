@@ -23,6 +23,7 @@
     "findFirst": "warn",
     "searchPortability": "warn",
     "cadenceNudge": "error",
+    "loopGuard": "error",
     "outputScrub": "error"
   },
 

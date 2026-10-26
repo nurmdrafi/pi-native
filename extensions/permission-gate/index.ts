@@ -23,6 +23,7 @@
  * | R10 | Token Economy (Re-run)         | identical command re-run within 10 min without an edit/write/mutating-bash since is blocked |
  * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
  * | CN  | cadence nudge (non-blocking)  | tool_result note at ~200 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
+ * | LG1 | loop guard                      | same-target churn: note at 4th landed same-path edit/write in a user turn, one-shot block of that path's next mutation at the 7th; 3 consecutive tool errors note once; resets per user turn + compaction |
  *
  * Destructive matching is a TRIPWIRE, not a boundary — see destructive.ts.
  * Change history lives in git log; this table lists what is CURRENTLY enforced.
@@ -180,6 +181,62 @@ export default function (pi: ExtensionAPI) {
   /** cadence nudge state — user turns seen; reset on session_compact/session_start */
   let turnsSeen = 0;
   let cadenceFired = false;
+  /** LG1 (2026-10-26, week of session evidence): the observed grind is
+   * same-target churn (task.md x9, index.ts x8 inside single user-turns),
+   * NOT error streaks (none exceeded 3 all week). Note at the 4th landed
+   * same-path mutation; the 7th arms a one-shot block of that path's next
+   * mutation; 3 consecutive tool errors note once. Reset per user turn. */
+  let lg1Mutations = new Map<string, number>();
+  let lg1Noted = new Set<string>();
+  let lg1Armed: string | undefined;
+  let lg1ErrStreak = 0;
+  let lg1ErrNoted = false;
+  const LG1_NOTE_AT = 4;
+  const LG1_ARM_AT = 7;
+  function lg1Reset(): void {
+    lg1Mutations.clear();
+    lg1Noted.clear();
+    lg1Armed = undefined;
+    lg1ErrStreak = 0;
+    lg1ErrNoted = false;
+  }
+  /** one-shot block of an armed path's next mutation — called from the
+   * edit/write tool_call paths after malformed-input validation */
+  function lg1GateMutation(path: string): string | undefined {
+    if (!ruleEnabled("loopGuard") || lg1Armed !== path) return undefined;
+    const n = lg1Mutations.get(path) ?? LG1_ARM_AT;
+    lg1Armed = undefined;
+    return `Loop Guard (LG1): ${path} was edited ${n} times this turn — possible loop. Stop: summarize what you tried and what remains, then ask the user before continuing.`;
+  }
+  /** landed-mutation counter; the note text rides the landing result */
+  function lg1RecordMutation(path: string): string | undefined {
+    if (!ruleEnabled("loopGuard")) return undefined;
+    const n = (lg1Mutations.get(path) ?? 0) + 1;
+    lg1Mutations.set(path, n);
+    if (n === LG1_ARM_AT) {
+      lg1Armed = path;
+      return `Loop Guard (LG1): ${path} edited ${n} times this turn — if you are circling, state what is left to finish or ask the user.`;
+    }
+    if (n === LG1_NOTE_AT && !lg1Noted.has(path)) {
+      lg1Noted.add(path);
+      return `Loop Guard (LG1): ${path} edited ${n} times this turn — if you are circling, state what is left to finish or ask the user.`;
+    }
+    return undefined;
+  }
+  /** consecutive tool errors (bash + edit/write): note once at 3, never blocks */
+  function lg1RecordResult(isError: boolean): string | undefined {
+    if (!ruleEnabled("loopGuard")) return undefined;
+    if (!isError) {
+      lg1ErrStreak = 0;
+      return undefined;
+    }
+    lg1ErrStreak++;
+    if (lg1ErrStreak === 3 && !lg1ErrNoted) {
+      lg1ErrNoted = true;
+      return "Loop Guard (LG1): 3 consecutive tool errors — if the same fix keeps failing, stop and ask the user instead of retrying.";
+    }
+    return undefined;
+  }
   /** R10: bumped on every successful edit/write — a mutation makes verify re-runs legitimate */
   let mutationSeq = 0;
   /** H2: last user-approved destructive command (verbatim) + when */
@@ -369,6 +426,8 @@ export default function (pi: ExtensionAPI) {
     turnsSeen++;
     const prompt = event.messageType === "user" ? event.prompt : "";
     promptApproves = APPROVAL_RE.test(prompt);
+    // LG1: a new user turn is the loop boundary — churn/error counters reset
+    lg1Reset();
   });
 
   on("tool_call", async (event, ctx) => {
@@ -379,6 +438,8 @@ export default function (pi: ExtensionAPI) {
           "Permission Gate (Malformed): edit call has no path string — re-send the tool call with input.path.",
         );
       const path = normPath(event.input.path, ctx?.cwd);
+      const lg1Block = lg1GateMutation(path);
+      if (lg1Block) return blockCall(lg1Block);
       // S4 fix 8: symlink-resolved protected targets confirm through the
       // same H2 ladder as destructive bash — a write into <fake-home>/.ssh
       // via an in-cwd link must never land silently
@@ -547,6 +608,8 @@ export default function (pi: ExtensionAPI) {
           "Permission Gate (Malformed): write call has no path string — re-send the tool call with input.path.",
         );
       const path = normPath(event.input.path, ctx?.cwd);
+      const lg1Block = lg1GateMutation(path);
+      if (lg1Block) return blockCall(lg1Block);
       // S4 fix 8: same symlink-resolved protected-path confirm as edit
       const prot = ruleEnabled("destructiveConfirm")
         ? protectedPathReason("write", path)
@@ -945,18 +1008,30 @@ export default function (pi: ExtensionAPI) {
         isMutatingCommand(String(event.input?.command ?? ""))
       )
         mutationSeq++;
+      const lg1ErrNote = lg1RecordResult(event.isError === true);
+      if (lg1ErrNote)
+        return {
+          content: [
+            ...(event.content ?? []),
+            { type: "text", text: lg1ErrNote },
+          ],
+        };
       return;
     }
     const entry = pendingEdits.get(event.toolCallId);
     if (entry === undefined) return;
     pendingEdits.delete(event.toolCallId);
     if (!entry.path) return; // malformed pathless call — nothing to track
+    let lg1Note: string | undefined;
     if (event.isError) {
       // failed edit/write: content may have drifted — a re-read is legitimate
       coverage.delete(entry.path);
+      lg1Note = lg1RecordResult(true);
     } else {
       // R10: a successful edit/write mutates the tree — verify re-runs become legitimate
       mutationSeq++;
+      // LG1: count the landed mutation; may arm the one-shot loop block
+      lg1Note = lg1RecordMutation(entry.path);
       // item 6 (2026-10-11): prior spans describe the exact pre-edit bytes.
       // Drop the path's coverage when any anchor was fuzzy (its line-shift
       // contribution is unknown) or the file drifted between certification
@@ -1003,6 +1078,13 @@ export default function (pi: ExtensionAPI) {
       const cur = coverage.get(entry.path);
       if (cur) cur.hash = await hashFile(entry.path);
     }
+    if (lg1Note)
+      return {
+        content: [
+          ...(event.content ?? []),
+          { type: "text", text: lg1Note },
+        ],
+      };
   });
 
   // cadence nudge (2026-10-11): NON-blocking — appended once to the next real
@@ -1036,6 +1118,8 @@ export default function (pi: ExtensionAPI) {
     // summary starts a fresh turn budget
     turnsSeen = 0;
     cadenceFired = false;
+    // LG1: compaction starts a fresh turn budget like cadence
+    lg1Reset();
     pendingReads.clear();
     pendingEdits.clear();
     pendingBash.clear();

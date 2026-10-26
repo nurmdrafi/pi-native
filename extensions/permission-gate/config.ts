@@ -56,6 +56,7 @@ export const RULE_IDS = {
   findFirst: "SS3",
   searchPortability: "PB1",
   cadenceNudge: "CN",
+  loopGuard: "LG1",
   outputScrub: "OS",
 } as const;
 

@@ -7,6 +7,12 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.59.0] - 26-10-2026
+
+### Added
+
+- **LG1 loop guard — action-side stop conditions (1b).** Evidence-first redesign: a week of this repo's sessions showed the grind is same-target churn (worst: task.md ×9, index.ts ×8 within single user-turns) while consecutive-error streaks never exceeded 3 — so error-streak thresholds would never have fired. LG1 notes (non-blocking, rides the tool_result) at the 4th landed same-path edit/write in a user turn; the 7th arms a one-shot block of that path's next mutation ("summarize what you tried, then ask the user"); 3 consecutive tool errors note once. Counters reset per user turn and on compaction; `loopGuard` is config-switchable like every rule. Measured: permission-gate 284/284 PASS (4 new LG1 cases), gate-config 26/26 PASS, typecheck + agents-lint + doc-check clean; rule count 22 → 23 (README map corrected).
+
 ## [1.58.0] - 26-10-2026
 
 ### Added
