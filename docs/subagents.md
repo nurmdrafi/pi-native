@@ -8,6 +8,8 @@ Owned first-party code at `extensions/subagents/` (`subagent` / `subagent_messag
 - `/subagents [agent] [task]` — any spawn auto-enables; with no agent named, the session model routes by task
 - `PI_SUBAGENTS=1` — start active (scripted opt-in)
 
+**Invoked from the current session only** — spawn subagents via the `/subagents` slash command in the existing session; never run a subagent as a detached/background session.
+
 Sandboxed spawns re-enable the permission-gate extension inside the child via `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated override).
 
 Setup, headless/print-mode behavior, and triage: [`extensions/subagents/README.md`](../extensions/subagents/README.md).
