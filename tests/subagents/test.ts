@@ -2792,3 +2792,66 @@ describe("tmux.ts", () => {
     });
   });
 });
+
+// --- Spawn concurrency queue ---
+
+describe("spawn-queue.ts", () => {
+  it("caps concurrent slots and wakes waiters FIFO on release", async () => {
+    const { SpawnQueue } = await import("../../extensions/subagents/spawn-queue.ts");
+    const q = new SpawnQueue(2);
+    await q.acquire();
+    await q.acquire();
+    assert.equal(q.running, 2);
+    let thirdDone = false;
+    const third = q.acquire().then(() => { thirdDone = true; });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(thirdDone, false, "third acquire must wait for a slot");
+    assert.equal(q.waiting, 1);
+    q.release();
+    await third;
+    assert.equal(thirdDone, true, "release must wake the waiter");
+    q.release();
+    q.release();
+    assert.equal(q.running, 0);
+  });
+
+  it("treats max < 1 as unlimited", async () => {
+    const { SpawnQueue } = await import("../../extensions/subagents/spawn-queue.ts");
+    const q = new SpawnQueue(0);
+    for (let i = 0; i < 5; i++) await q.acquire();
+    assert.equal(q.running, 5);
+    assert.equal(q.waiting, 0);
+  });
+});
+
+// --- Detached-subagent persistence on session end ---
+
+describe("pending-detached persistence", () => {
+  it("writes sidecars at shutdown and rediscovers them within maxAge", () => {
+    const { writePendingDetachedSubagents, findPendingDetached } = subagentsModule;
+    const root = createTestDir();
+    const parent = join(root, "s1");
+    mkdirSync(parent, { recursive: true });
+    const now = Date.now();
+    const paths = writePendingDetachedSubagents([
+      { id: "aa11", name: "worker-a", task: "t", surface: "%1", startTime: now - 1000, sessionFile: "/tmp/x.jsonl", parentArtifactDir: parent },
+      { id: "bb22", name: "worker-b", task: "t2", surface: "%2", startTime: now - 2000, sessionFile: "/tmp/y.jsonl" },
+    ] as any, now);
+    assert.equal(paths.length, 1, "entries without parentArtifactDir are skipped");
+    assert.ok(existsSync(join(parent, "subagent-pending", "aa11.json")));
+    const found = findPendingDetached(root, now + 60_000);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].name, "worker-a");
+    assert.equal(found[0].sessionFile, "/tmp/x.jsonl");
+    assert.equal(findPendingDetached(root, now + 49 * 3600_000).length, 0, "aged out after maxAge");
+  });
+
+  it("ignores corrupt sidecar files", () => {
+    const { findPendingDetached } = subagentsModule;
+    const root = createTestDir();
+    const pendingDir = join(root, "s2", "subagent-pending");
+    mkdirSync(pendingDir, { recursive: true });
+    writeFileSync(join(pendingDir, "zz.json"), "{not json");
+    assert.deepEqual(findPendingDetached(root, Date.now()), []);
+  });
+});

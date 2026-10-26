@@ -22,6 +22,23 @@ Spawning tools are registered but gated (zero prompt tokens) until a trigger:
 `PI_SUBAGENTS=1` at process start, `/subagents on`, or any
 `/subagents <agent> [task]` spawn. Subagent sessions always register active.
 
+## Concurrency
+
+Parallel spawns share one provider quota; several simultaneous children
+429-storm it and every run slows to retry backoff. Spawns are therefore
+capped: extra ones queue FIFO and launch as slots free. `PI_SUBAGENT_MAX_CONCURRENT`
+sets the cap (default 3; values < 1 mean unlimited). A slot is held from launch
+until the child's watcher settles.
+
+## Detached subagents
+
+When a parent session ends while children still run, their watchers abort and
+nothing can be delivered to the dying session. Each orphan is persisted as a
+`subagent-pending/<id>.json` sidecar under the parent session's artifacts dir
+(name, session file, surface, timestamps); the next session in the same project
+surfaces them at start. The child keeps running in its tmux pane — its result
+lands in its session file, recoverable via `subagent_message`.
+
 ## How a spawn works
 
 1. A tmux pane is split off (parent pane, or the `pi-agents` detached session).

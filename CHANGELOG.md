@@ -7,6 +7,17 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.56.0] - 26-10-2026
+
+### Added
+
+- **Subagent spawn concurrency cap.** A FIFO queue (`extensions/subagents/spawn-queue.ts`) limits simultaneous children to `PI_SUBAGENT_MAX_CONCURRENT` (default 3; values < 1 mean unlimited); extra spawns wait and launch as slots free, each slot held from launch until the child's watcher settles. Root cause: parallel spawns share one provider quota, and 6-8 simultaneous workers 429-stormed it — 10 of 19 delivered results in one session were rate-limit failures and runs stretched to 13-19 min.
+- **Detached-subagent sidecars.** When a parent session ends while children still run, each orphan is persisted as `subagent-pending/<id>.json` under the parent session's artifacts (name, session file, surface, timestamps) before the watchers abort, and the next session in the project surfaces the orphans at start (48 h window). Previously the detached steer could not be delivered to the dying session and the loss was invisible — three 13-19 min runs vanished silently on 2026-10-06. Children keep running in their panes; results stay recoverable via their session files.
+
+### Changed
+
+- **`handoff.ts` moved to `extensions/handoff/index.ts`**, matching the directory convention of every other extension; loader path and references updated, no behavior change.
+
 ## [1.55.0] - 25-10-2026
 
 ### Added

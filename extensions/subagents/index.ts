@@ -60,6 +60,9 @@ import {
   type ActivityReadResult,
   type SubagentActivityState,
 } from "./activity.ts";
+import { SpawnQueue, resolveMaxConcurrent } from "./spawn-queue.ts";
+import { findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
+export { findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
 
 /** Absolute path to `pi-extension/subagents`. https://github.com/nodejs/node/issues/37845 */
 const SUBAGENTS_DIR = dirname(fileURLToPath(import.meta.url));
@@ -621,6 +624,7 @@ interface RunningSubagent {
   surface: string;
   startTime: number;
   sessionFile: string;
+  parentArtifactDir?: string;
   launchScriptFile?: string;
   activityFile?: string;
   activity?: SubagentActivityState;
@@ -644,6 +648,10 @@ interface RunningSubagent {
 
 /** All currently running subagents, keyed by id. */
 const runningSubagents = new Map<string, RunningSubagent>();
+
+/** Caps simultaneous children: parallel spawns share one provider quota and
+ * 429-storm it. `PI_SUBAGENT_MAX_CONCURRENT` (default 3, <1 = unlimited). */
+const spawnQueue = new SpawnQueue(resolveMaxConcurrent(process.env.PI_SUBAGENT_MAX_CONCURRENT));
 
 // When this extension is loaded inside a subagent that itself spawns children
 // (e.g. a worker delegating to scout/researcher), `subagent-done.ts` runs in the
@@ -1333,6 +1341,7 @@ async function launchSubagent(
       surface,
       startTime,
       sessionFile: subagentSessionFile,
+      parentArtifactDir: artifactDir,
       launchScriptFile,
       cli: "claude",
       sentinelFile,
@@ -1475,6 +1484,7 @@ async function launchSubagent(
     surface,
     startTime,
     sessionFile: subagentSessionFile,
+    parentArtifactDir: artifactDir,
     launchScriptFile,
     activityFile,
     interactive: effectiveInteractive,
@@ -1696,10 +1706,33 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     if (!prevAbort || prevAbort.signal.aborted) {
       (globalThis as any)[POLL_ABORT_KEY] = new AbortController();
     }
+
+    // Surface subagents orphaned by a previous session in this project.
+    try {
+      const sessionDir = (ctx as any).sessionManager?.getSessionDir?.();
+      if (sessionDir) {
+        const pending = findPendingDetached(join(sessionDir, "artifacts"), Date.now());
+        if (pending.length > 0) {
+          ctx.ui.notify?.(
+            `${pending.length} subagent(s) detached mid-run by a previous session — ` +
+              `results recoverable from their session files (subagent-pending/ sidecars)`,
+            "warning",
+          );
+        }
+      }
+    } catch {
+      // Discovery is best-effort.
+    }
   });
 
   // Clean up on session shutdown
   pi.on("session_shutdown", (_event, _ctx) => {
+    // Persist orphans before aborting: the dying session cannot receive the
+    // detached steer, so the loss would otherwise be invisible. The next
+    // session_start in this project surfaces these sidecars.
+    if (runningSubagents.size > 0) {
+      writePendingDetachedSubagents([...runningSubagents.values()], Date.now());
+    }
     if (widgetInterval) {
       clearInterval(widgetInterval);
       widgetInterval = null;
@@ -1843,9 +1876,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // Launch the subagent (creates pane, sends command). Release the name
         // reservation once it registers in runningSubagents (or launch fails) —
         // from then on uniqueRunningName tracks it via the running map.
+        await spawnQueue.acquire();
         let running;
         try {
           running = await launchSubagent(params, ctx);
+        } catch (err) {
+          spawnQueue.release();
+          throw err;
         } finally {
           if (reservedName) reservedNames.delete(reservedName);
         }
@@ -1906,7 +1943,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
               },
               { triggerTurn: true, deliverAs: "steer" },
             );
-          });
+          })
+          .finally(() => spawnQueue.release());
 
         // Return immediately
         return {
@@ -2282,6 +2320,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           ].join("\n"),
         });
 
+        await spawnQueue.acquire();
+
         // Register as a running subagent for widget tracking
         const running: RunningSubagent = {
           id,
@@ -2290,6 +2330,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           surface,
           startTime,
           sessionFile: sessionPath,
+          parentArtifactDir,
           launchScriptFile,
           activityFile,
           interactive,
@@ -2351,7 +2392,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
               },
               { triggerTurn: true, deliverAs: "steer" },
             );
-          });
+          })
+          .finally(() => spawnQueue.release());
 
         return {
           content: [{ type: "text", text: `Session "${name}" resumed.` }],

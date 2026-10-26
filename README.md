@@ -164,6 +164,7 @@ Every native-tool spawn re-sets the session keys from the live tool context (`ex
 | `PI_REASONING_LEVEL`  | pibash     | thinking level, when one is active                             |
 | `PI_CODING_AGENT_DIR` | override   | agent config dir (default `~/.pi/agent`); forwarded to workers |
 | `PI_SUBAGENT_NAME`    | subagents  | worker display name                                            |
+| `PI_SUBAGENT_MAX_CONCURRENT` | user | cap on simultaneous subagent spawns (default 3; <1 unlimited) |
 | `PI_PIDX_MAX_INLINE`  | user       | pidx inline-output cap before spill (default 2000)             |
 
 Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`, `PI_SUBAGENT_SESSION`, `PI_SUBAGENT_ID`, `PI_SUBAGENT_ALLOWED`, `PI_SUBAGENT_ACTIVITY_FILE`, `PI_SUBAGENT_SURFACE`, `PI_SUBAGENT_AUTO_EXIT`), classified in `ENV_VAR_ALLOWLIST` in [scripts/doc-check.mjs](scripts/doc-check.mjs).
