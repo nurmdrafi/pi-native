@@ -28,6 +28,9 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - TDD always: failing test first → watch fail → minimum code → refactor. No implementation before failing test.
 - Bug fix: failing repro test first.
 - Untestable (config/docs/infra): state why, proceed.
+- Ponytail ladder — before writing code, stop at the first rung that holds: need it at all? (skip, one-line why — YAGNI) → already in the codebase? reuse it → stdlib? → native platform feature? → installed dependency? → one line? → then the minimum that works. Less code, never less care.
+review: skill `ponytail`.
+- Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, anything explicitly requested.
 - Loop: plan → do → verify.
 - Machine/device/OS agnostic — detail: docs/portability.md.
 
