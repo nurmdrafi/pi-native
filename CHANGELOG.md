@@ -7,6 +7,12 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.60.0] - 26-10-2026
+
+### Added
+
+- **R1x (`reReadConsume`) revived as the partial-overlap re-read rule.** Replaces the old inert self-expiring-dedup semantics (never enabled, zero resend-loops in a week of sessions). `warn` (new default) appends a non-blocking note when ≥50% of a read's rendered lines were already in context and the file is stat-fresh; `error` blocks at call time on the requested window and also catches same-batch sibling reads of the same path (the batch-slip shape). Threshold from the 2026-10-26 session audit. Measured: 288/288 gate cases + 28/28 gate-config (6 new); audit basis 149 ≥50%-overlap re-reads/wk (~2.6K re-fetched lines) vs 94 at 70%, 35 R1 catches, 6 same-batch dups across 33 sessions.
+
 ## [1.59.0] - 26-10-2026
 
 ### Added

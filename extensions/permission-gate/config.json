@@ -5,7 +5,7 @@
     "editAnchorGuard": "error",
     "editRegionGuard": "error",
     "reReadGuard": "error",
-    "reReadConsume": "off",
+    "reReadConsume": "warn",
     "largeReadGuard": "warn",
     "locateFirst": "error",
     "nativeReadFirst": "error",

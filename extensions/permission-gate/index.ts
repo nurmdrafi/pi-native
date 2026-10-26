@@ -10,6 +10,7 @@
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
+ * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
  * | H1  | output cap (non-blocking)     | bash output capped at 100 lines / 4KB UTF-8; oversized first line head+tail; tail spilled to $TMPDIR/pgate-spill; errors capped too |
@@ -77,10 +78,10 @@ import {
   hashFile,
   hashText,
   normPath,
+  overlapLines,
   renderedSpansFromBlocks,
   shiftSpansForEdit,
   snapshot,
-  subtractSpan,
 } from "./read-coverage.ts";
 import type { CoverageEntry, LineSpan } from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
@@ -97,6 +98,13 @@ import { searchCheck, searchedPathsFrom } from "./search-guard.ts";
 const BIG_READ_BYTES = 10_000;
 /** a requested window at least this wide counts as whole-file-ish */
 const BIG_READ_WIN = 500;
+/** R1x overlap bar: fraction of a read's rendered lines already certified
+ * that trips the note (warn) or block (error). 2026-10-26 session audit:
+ * >=50% = 149 avoidable re-reads/wk across 33 sessions (vs 94 at 70%),
+ * ~2.6K re-fetched lines — the ledgering slips (batch duplicate windows,
+ * post-elision re-fetch of rendered runs) sit at 0.5-1.0; warn severity
+ * carries a ~13%-of-reads note rate without gating anything. */
+const R1X_OVERLAP = 0.5;
 /** R1c locate-first: a window at least this wide on a path never searched
  * this session is a guess about where the content is. Kept well above
  * ordinary targeted reads (narrow-window cases read 5-50 lines) so a
@@ -487,7 +495,8 @@ export default function (pi: ExtensionAPI) {
     if (
       (ruleEnabled("reReadGuard") ||
         ruleEnabled("largeReadGuard") ||
-        ruleEnabled("locateFirst")) &&
+        ruleEnabled("locateFirst") ||
+        ruleEnabled("reReadConsume")) &&
       (isToolCallEventType("read", event) ||
         isToolCallEventType("piread", event))
     ) {
@@ -582,21 +591,43 @@ export default function (pi: ExtensionAPI) {
             ) ?? prior.spans[0];
           const lo = sp.start;
           const hi = sp.end;
-          // R1x (reReadConsume, opt-in — default off): a Command-Code-style
-          // self-expiring dedup. The block spends exactly the certification
-          // it cited (the covering span, clipped), so an identical resend
-          // passes instead of looping the model through window guesses;
-          // spans outside the window keep their anchors. Guards residual
-          // false blocks (e.g. display-layer elision §9 cannot model).
-          if (ruleEnabled("reReadConsume")) {
-            coverage.set(path, { ...prior, spans: subtractSpan(prior.spans, win) });
-          }
           return blockCall(
             `Token Economy (Re-read): ${lo === hi ? `line ${lo}` : `lines ${lo}–${hi === Infinity ? "EOF" : hi}`} of '${shown}' are already in context ` +
               `(${prior.kind}, file unchanged). Read another window via piread or act on what is there.`,
           );
         }
         coverage.delete(path); // changed on disk (or no baseline) — the read is legitimate
+      }
+      // R1x error tier (2026-10-26 revival): block a read whose REQUESTED
+      // window re-fetches >=50% certified lines. At the shipped warn severity
+      // this never blocks — the note rides the read's tool_result instead
+      // (handler below). pendingReads catches the same-batch batch-slip: a
+      // sibling read of the same path fired before any result certified it.
+      if (ruleBlocks("reReadConsume") && path && win.end !== Infinity) {
+        const cov = coverage.get(path);
+        let covLines = 0;
+        if (cov) {
+          const now = await snapshot(path);
+          if (
+            now &&
+            cov.stat &&
+            (now.mtimeMs !== cov.stat.mtimeMs || now.size !== cov.stat.size)
+          ) {
+            coverage.delete(path); // stale stat — the re-read is legitimate
+          } else {
+            covLines = overlapLines(cov.spans, win);
+          }
+        }
+        let pendLines = 0;
+        for (const pr of pendingReads.values())
+          if (pr.path === path)
+            pendLines = Math.max(pendLines, overlapLines([pr.win], win));
+        const frac =
+          Math.max(covLines, pendLines) / (win.end - win.start + 1);
+        if (frac >= R1X_OVERLAP)
+          return blockCall(
+            `Token Economy (Re-read): ~${Math.round(frac * 100)}% of lines ${win.start}–${win.end} of '${shown}' are already in context — shift the window to unread lines or act on what is there.`,
+          );
       }
       pendingReads.set(event.toolCallId, { path, win });
     }
@@ -913,6 +944,9 @@ export default function (pi: ExtensionAPI) {
       // certify the ACTUAL returned lines — requested offset/limit lie at
       // EOF edges and on 2000-line/50KB truncation
       const snap = await snapshot(read.path);
+      // R1x: capture the pre-read coverage — the overlap note must measure
+      // against what was in context BEFORE this read's own certification.
+      const r1xPrior = coverage.get(read.path);
       const details = (
         event as {
           details?: {
@@ -967,6 +1001,43 @@ export default function (pi: ExtensionAPI) {
               snap,
             );
           }
+        }
+      }
+      // R1x warn tier (2026-10-26): >=50% of this read's RENDERED lines were
+      // already certified (stat-fresh) — append a note to the result; warn
+      // never blocks. R1 (full coverage) blocks at call time; this catches
+      // the partial ledgering slips (batch duplicate windows, post-elision
+      // re-fetch of rendered runs) the 2026-10-26 session audit quantified.
+      if (
+        ruleEnabled("reReadConsume") &&
+        lines > 0 &&
+        r1xPrior?.stat &&
+        snap &&
+        r1xPrior.stat.mtimeMs === snap.mtimeMs &&
+        r1xPrior.stat.size === snap.size
+      ) {
+        const runs =
+          (elided
+            ? renderedSpansFromBlocks(content, read.win.start)
+            : undefined) ??
+          [{ start: read.win.start, end: read.win.start + lines - 1 }];
+        const num = runs.reduce(
+          (a, s) => a + overlapLines(r1xPrior.spans, s),
+          0,
+        );
+        const frac = lines > 0 ? num / lines : 0;
+        if (num > 0 && frac >= R1X_OVERLAP) {
+          const shown =
+            read.path.length > 57 ? `…${read.path.slice(-56)}` : read.path;
+          return {
+            content: [
+              ...(event.content ?? []),
+              {
+                type: "text",
+                text: `Token Economy (Re-read): ${Math.round(frac * 100)}% of the ${lines} lines just read from '${shown}' were already in context (${r1xPrior.kind}, file unchanged) — act on them or aim the next window at unread lines.`,
+              },
+            ],
+          };
         }
       }
       return;

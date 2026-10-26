@@ -81,7 +81,10 @@ export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
   "commitMessageLint",
 ] as RuleKey[]);
 
-/** Preference rules ship as `warn`: taught, counted, not blocked. */
+/** Preference rules ship as `warn`: taught, counted, not blocked. R1x
+ * notes the partial-overlap re-reads R1's full-coverage check lets through
+ * (2026-10-26 audit: 149/wk) — a note corrects ledgering without gating
+ * valid reads. */
 export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
   "toolchainPnpm",
   "toolchainNode",
@@ -91,13 +94,13 @@ export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
   "searchPortability",
   "rerunGuard",
   "largeReadGuard",
+  "reReadConsume",
 ] as RuleKey[]);
 
 /** Behavior modifiers that ship OFF: enabling changes what a block DOES
- * rather than whether it fires, so the safe default is inert. */
-export const OFF_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
-  "reReadConsume",
-] as RuleKey[]);
+ * rather than whether it fires, so the safe default is inert. (Empty since
+ * the 2026-10-26 R1x revival — no rule ships disabled.) */
+export const OFF_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([] as RuleKey[]);
 
 /** Defaults are fail-closed: active rules block unless demoted above. */
 const DEFAULTS: Record<RuleKey, Severity> = Object.fromEntries(
