@@ -18,8 +18,7 @@ A spawn runs with `--no-extensions` plus one `-e` per tool-backing extension, so
 
 | Agent             | Tools                                                           | Role                                         |
 | ----------------- | --------------------------------------------------------------- | -------------------------------------------- |
-| scout             | read, grep, find, ls                                            | read-only recon                              |
-| researcher        | read, write, bash                                               | web research via the `tvly` CLI              |
-| worker            | read, write, edit, bash (+ may spawn scout, researcher)          | general implementer                          |
-| reviewer          | read, bash, grep, find, ls (auto-loads `pre-push-review` skill) | pre-commit diff review; never commits/pushes |
-| gh-issue-verifier | read, bash, grep, find, ls                                      | verifies a diff against a GitHub issue's acceptance criteria |
+| scout             | ls, piread, pibash                                               | read-only recon                              |
+| researcher        | write, piread, pibash (auto-loads `web-search` skill)              | web research via the `tvly` CLI              |
+| worker            | write, piread, piedit, pibash (auto-loads `systematic-debugging`; + may spawn scout, researcher) | general implementer |
+| reviewer          | ls, piread, pibash (auto-loads `pre-push-review` skill)           | pre-commit diff review; never commits/pushes |
