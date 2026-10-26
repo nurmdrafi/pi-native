@@ -33,5 +33,10 @@
 
   "confirm": {
     "timeoutMs": 300000
+  },
+
+  "destructive": {
+    "remove": [],
+    "extra": []
   }
 }

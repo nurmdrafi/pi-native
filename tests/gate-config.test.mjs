@@ -27,6 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GATE_DIR = join(ROOT, "extensions", "permission-gate");
 const CONFIG_JSON = join(GATE_DIR, "config.json");
 const PANEL = join(GATE_DIR, "config.ts");
+const DESTRUCTIVE_TS = join(GATE_DIR, "destructive.ts");
 
 /** Read RULE_IDS keys without importing the TS module (no jiti dependency). */
 function ruleKeysFromSource() {
@@ -332,4 +333,63 @@ test("rule IDs match the documented README rule table", () => {
   // so a rule cannot be configurable yet undocumented.
   const missing = KEYS.filter(({ id }) => !new RegExp(`\\b${id}\\b`).test(readme)).map(({ key, id }) => `${key}/${id}`);
   assert.deepEqual(missing, [], `rules absent from extensions/README.md: ${missing.join(", ")}`);
+});
+
+// ---- 1a — managed destructive command list (2026-10-26) ----
+// config.json `destructive.remove` / `destructive.extra` manage which
+// commands the H2 confirm set covers without regex surgery in destructive.ts.
+// Matcher behavior is asserted in a subprocess: PGATE_CONFIG applies at import
+// time, so an in-process import would be polluted by this file's environment.
+function loadDestructive(section, probes) {
+  const dir = mkdtempSync(join(tmpdir(), "pgate-destr-"));
+  const file = join(dir, "config.json");
+  writeFileSync(file, JSON.stringify({ destructive: section }));
+  const script = `
+    import { segmentDestructive, confirmEntryIds } from ${JSON.stringify(DESTRUCTIVE_TS)};
+    process.stdout.write(JSON.stringify({
+      ids: confirmEntryIds(),
+      probe: ${JSON.stringify(probes)}.map((c) => segmentDestructive(c)),
+    }));
+  `;
+  return runLoader(script, { PGATE_CONFIG: file });
+}
+
+test("destructive.remove drops entries by id (brew-install)", () => {
+  const { ids, probe } = loadDestructive(
+    { remove: ["brew-install"] },
+    ["brew install ripgrep", "rm -f /tmp/x"],
+  );
+  assert.ok(!ids.includes("brew-install"), "brew-install still in entry ids");
+  assert.equal(probe[0], false, "brew install must no longer confirm");
+  assert.equal(probe[1], true, "rm must still confirm");
+});
+
+test("destructive.extra adds a managed entry (docker rm)", () => {
+  const { ids, probe } = loadDestructive(
+    { extra: [{ id: "docker-rm", pattern: "docker\\s+rm\\b" }] },
+    ["docker rm -f pg1", "docker ps"],
+  );
+  assert.ok(ids.includes("docker-rm"), "extra entry missing from ids");
+  assert.equal(probe[0], true, "docker rm must confirm");
+  assert.equal(probe[1], false, "docker ps must pass");
+});
+
+test("unknown remove ids warn and are ignored", () => {
+  const { ids, probe, stderr } = loadDestructive(
+    { remove: ["no-such-entry"] },
+    ["rm -f /tmp/x"],
+  );
+  assert.match(stderr, /no-such-entry/, "no warning for unknown id");
+  assert.ok(ids.includes("rm"), "builtin rm vanished");
+  assert.equal(probe[0], true, "rm must still confirm");
+});
+
+test("malformed extra entries are skipped with a warning, set intact", () => {
+  const { probe, stderr } = loadDestructive(
+    { extra: [{ id: "bad-paren", pattern: "(" }] },
+    ["rm -f /tmp/x", "docker rm x"],
+  );
+  assert.match(stderr, /bad-paren/, "no warning for malformed pattern");
+  assert.equal(probe[0], true, "builtin set must stay intact");
+  assert.equal(probe[1], false, "broken extra must not match everything");
 });

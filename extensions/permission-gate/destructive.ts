@@ -8,6 +8,7 @@
  * the actual boundary. */
 import { homedir } from "os";
 import { realpathSync } from "fs";
+import { config } from "./config.ts";
 
 
 /**
@@ -20,7 +21,29 @@ import { realpathSync } from "fs";
  * alternative is no longer segment-start-anchored (`cd x && make > out` used
  * to miss). Tested on git-global-flag-normalized segments like DESTRUCTIVE.
  */
-const MUTATING_CORE_SRC = String.raw`git\s+(?:pull|checkout|merge|rebase|stash|reset|restore|clean|rm|mv|add|commit|push|tag|branch|cherry-pick|revert)\b|npm\s+(?:i|install|uninstall|add|ci)\b|pnpm\s+(?:i|add|install|remove|ci)\b|yarn\s+(?:add|install|remove)\b|pip3?\s+install\b|(?:\S*\/)?(?:rm|mv|cp|mkdir|touch)\b|sed\s+[^|]*-i\b|prettier\b[^|]*--write\b|eslint\b[^|]*--fix\b|(?:npm|pnpm|yarn)\s+(?:run\s+)?\S*build\b`;
+/** 1a (2026-10-26): the managed command tables. Each entry is one command
+ * family with a stable id + label. Fragments and order are byte-identical
+ * to the pre-table regex blobs, so compiled matcher behavior cannot drift.
+ * MUTATING feeds R10's mutationSeq (relaxation only) and stays builtin; the
+ * confirm set (DESTRUCTIVE + SIDE_EFFECT) is config-managed below. */
+interface CmdEntry {
+  id: string;
+  re: string;
+  label: string;
+}
+const MUTATING_COMMANDS: CmdEntry[] = [
+  { id: "git-write-ops", label: "git working-tree writes", re: String.raw`git\s+(?:pull|checkout|merge|rebase|stash|reset|restore|clean|rm|mv|add|commit|push|tag|branch|cherry-pick|revert)\b` },
+  { id: "npm-install", label: "npm install/add/ci", re: String.raw`npm\s+(?:i|install|uninstall|add|ci)\b` },
+  { id: "pnpm-install", label: "pnpm install/add/ci", re: String.raw`pnpm\s+(?:i|add|install|remove|ci)\b` },
+  { id: "yarn-install", label: "yarn add/install/remove", re: String.raw`yarn\s+(?:add|install|remove)\b` },
+  { id: "pip-install", label: "pip install", re: String.raw`pip3?\s+install\b` },
+  { id: "fs-write-utils", label: "rm/mv/cp/mkdir/touch", re: String.raw`(?:\S*\/)?(?:rm|mv|cp|mkdir|touch)\b` },
+  { id: "sed-inplace", label: "sed -i", re: String.raw`sed\s+[^|]*-i\b` },
+  { id: "prettier-write", label: "prettier --write", re: String.raw`prettier\b[^|]*--write\b` },
+  { id: "eslint-fix", label: "eslint --fix", re: String.raw`eslint\b[^|]*--fix\b` },
+  { id: "js-build", label: "js package build scripts", re: String.raw`(?:npm|pnpm|yarn)\s+(?:run\s+)?\S*build\b` },
+];
+const MUTATING_CORE_SRC = MUTATING_COMMANDS.map((e) => e.re).join("|");
 const CMD_POS_SRC = String.raw`(?:^|&&|\|\||;|\||\bdo\b|\bthen\b|\belse\b|\bdone\b|[{(]\s*|\bxargs\s+|\s-exec(?:dir)?\s+)\s*`;
 const MUTATING_BASH = new RegExp(
   CMD_POS_SRC +
@@ -52,15 +75,74 @@ const MUTATING_BASH = new RegExp(
  * can false-positive; a determined rewrite (base64, perl -e, env rm) escapes.
  * AGENTS.md discipline and the user's eyes are the actual boundary.
  */
-/** S-3 (2026-10-12, user direction): remote/persistent side effects needing the
- * same confirm as installs/destructive ops — pipe-to-interpreter script runs
- * (curl|sh), DB migrations, deploys/releases. Inside CORE so they're
- * position-anchored (CMD_POS_SRC) and scanned anywhere inside sh -c / $()
- * wrapped payloads, like the rest of CORE. `curl|sudo sh` is already covered
- * by core `sudo`. */
-const SIDE_EFFECT_SRC = String.raw`(?:curl|wget)\b[^|;&\n]*\|\s*(?:ba|z|da|fi)?sh\b|(?:npx|npm|pnpm|yarn|bun)\s+(?:run\s+)?\S*(?:migrat|deploy|publish)\S*|(?:npx\s+)?(?:\S*[/\\])?(?:prisma\s+(?:migrate|db\s+push)|knex\s+migrate|sequelize(?:-cli)?\s+db:migrate|alembic\s+(?:upgrade|downgrade)|flyway\s+migrate|db-migrate\s+up|migrate\b[^|;&\n]*\s(?:up|down))|(?:php\s+)?(?:\S*[/\\])?artisan\s+migrate|python(?:3)?\s+manage\.py\s+migrate|(?:\S*[/\\])?manage\.py\s+migrate|rake\s+db:migrate|dotnet\s+ef\s+database\s+update|(?:npx\s+)?(?:\S*[/\\])?(?:vercel|wrangler|serverless|sls|netlify|fly|flyctl|railway|terraform|tofu|cdk|pulumi|sst|kubectl|gcloud|aws|az)\b[^|;&\n]*(?:\s(?:deploy|apply|publish|up|destroy)|--prod)`;
+/** S-3 (2026-10-12, user direction) + 1a: remote/persistent side effects
+ * needing the same confirm as installs/destructive ops — pipe-to-interpreter
+ * script runs (curl|sh), DB migrations, deploys/releases. Inside CORE so
+ * they're position-anchored (CMD_POS_SRC) and scanned anywhere inside sh -c /
+ * $() wrapped payloads, like the rest of CORE. `curl|sudo sh` is already
+ * covered by core `sudo`. */
+const SIDE_EFFECT_COMMANDS: CmdEntry[] = [
+  { id: "pipe-interpreter", label: "curl/wget piped to sh", re: String.raw`(?:curl|wget)\b[^|;&\n]*\|\s*(?:ba|z|da|fi)?sh\b` },
+  { id: "js-migrate-deploy", label: "js package migrate/deploy/publish", re: String.raw`(?:npx|npm|pnpm|yarn|bun)\s+(?:run\s+)?\S*(?:migrat|deploy|publish)\S*` },
+  { id: "db-migrators", label: "orm/db migrators", re: String.raw`(?:npx\s+)?(?:\S*[/\\])?(?:prisma\s+(?:migrate|db\s+push)|knex\s+migrate|sequelize(?:-cli)?\s+db:migrate|alembic\s+(?:upgrade|downgrade)|flyway\s+migrate|db-migrate\s+up|migrate\b[^|;&\n]*\s(?:up|down))` },
+  { id: "artisan-migrate", label: "laravel artisan migrate", re: String.raw`(?:php\s+)?(?:\S*[/\\])?artisan\s+migrate` },
+  { id: "managepy-migrate", label: "django manage.py migrate", re: String.raw`python(?:3)?\s+manage\.py\s+migrate|(?:\S*[/\\])?manage\.py\s+migrate` },
+  { id: "rake-db-migrate", label: "rails rake db:migrate", re: String.raw`rake\s+db:migrate` },
+  { id: "dotnet-ef-update", label: "dotnet ef database update", re: String.raw`dotnet\s+ef\s+database\s+update` },
+  { id: "deploy-clis", label: "deploy/infra clis", re: String.raw`(?:npx\s+)?(?:\S*[/\\])?(?:vercel|wrangler|serverless|sls|netlify|fly|flyctl|railway|terraform|tofu|cdk|pulumi|sst|kubectl|gcloud|aws|az)\b[^|;&\n]*(?:\s(?:deploy|apply|publish|up|destroy)|--prod)` },
+];
 
-const DESTRUCTIVE_CORE_SRC = String.raw`(?:sudo\b|(?:\S*\/)?rm\b|git\s+(?:reset\s+--hard|clean\b|checkout\s+--|restore\b)|npm\s+(?:i|install|uninstall|add)\b|pnpm\s+(?:i|add|install|remove)\b|yarn\s+(?:add|install|remove)\b|pip3?\s+install\b|brew\s+install\b|apt(?:-get)?\s+install\b|mkfs(?:\.\w+)?\b|dd\s+if=|` + SIDE_EFFECT_SRC + `)`;
+/** H2 confirm set: destructive builtins + side-effect builtins, minus
+ * config `destructive.remove` ids, plus validated `destructive.extra`
+ * entries. Fail-closed: unknown ids warn and are ignored; invalid extra
+ * patterns warn and are skipped — they never widen or throw. */
+const DESTRUCTIVE_COMMANDS: CmdEntry[] = [
+  { id: "sudo", label: "sudo", re: String.raw`sudo\b` },
+  { id: "rm", label: "rm", re: String.raw`(?:\S*\/)?rm\b` },
+  { id: "git-reset-hard", label: "git reset --hard", re: String.raw`git\s+reset\s+--hard` },
+  { id: "git-clean", label: "git clean", re: String.raw`git\s+clean\b` },
+  { id: "git-checkout-discard", label: "git checkout -- <path>", re: String.raw`git\s+checkout\s+--` },
+  { id: "git-restore", label: "git restore", re: String.raw`git\s+restore\b` },
+  { id: "npm-install", label: "npm install/add", re: String.raw`npm\s+(?:i|install|uninstall|add)\b` },
+  { id: "pnpm-install", label: "pnpm install/add", re: String.raw`pnpm\s+(?:i|add|install|remove)\b` },
+  { id: "yarn-install", label: "yarn add/install", re: String.raw`yarn\s+(?:add|install|remove)\b` },
+  { id: "pip-install", label: "pip install", re: String.raw`pip3?\s+install\b` },
+  { id: "brew-install", label: "brew install", re: String.raw`brew\s+install\b` },
+  { id: "apt-install", label: "apt install", re: String.raw`apt(?:-get)?\s+install\b` },
+  { id: "mkfs", label: "mkfs", re: String.raw`mkfs(?:\.\w+)?\b` },
+  { id: "dd-disk", label: "dd raw disk write", re: String.raw`dd\s+if=` },
+];
+
+const CONFIRM_BUILTINS = [...DESTRUCTIVE_COMMANDS, ...SIDE_EFFECT_COMMANDS];
+const warnDestructive = (msg: string): void =>
+  console.error(`[permission-gate] ${msg}`);
+
+const knownIds = new Set(CONFIRM_BUILTINS.map((e) => e.id));
+for (const id of config.destructive.remove)
+  if (!knownIds.has(id))
+    warnDestructive(`unknown destructive.remove id "${id}" — ignored (ids: ${[...knownIds].join(", ")})`);
+const EXTRA_ENTRIES: CmdEntry[] = [];
+for (const x of config.destructive.extra) {
+  try {
+    new RegExp(x.pattern);
+  } catch {
+    warnDestructive(`invalid destructive.extra pattern for "${x.id}" — skipped`);
+    continue;
+  }
+  EXTRA_ENTRIES.push({ id: x.id, re: x.pattern, label: x.label ?? x.id });
+}
+export const CONFIRM_SET: CmdEntry[] = CONFIRM_BUILTINS.filter(
+  (e) => !config.destructive.remove.includes(e.id),
+).concat(EXTRA_ENTRIES);
+/** Entry ids of the applied confirm set — the manageability surface
+ * (config.json remove/extra work against these ids). */
+export const confirmEntryIds = (): string[] => CONFIRM_SET.map((e) => e.id);
+
+// The (?:…​) wrap is load-bearing: CMD_POS_SRC must anchor the WHOLE
+// alternation. Ungrouped, every entry after the first matches anywhere —
+// `echo rm x` confirmed without a command-position rm (caught by the 1a
+// corpus, 2026-10-26). MUTATING stays ungrouped because it always was.
+const DESTRUCTIVE_CORE_SRC = `(?:${CONFIRM_SET.map((e) => e.re).join("|")})`;
 
 const DESTRUCTIVE_BASH = new RegExp(
   CMD_POS_SRC +

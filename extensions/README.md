@@ -66,6 +66,22 @@ malformed config, or a key with no matching rule (a typo like `toolchainPnmp`), 
 rule stays on — enforcement never silently weakens. `tests/gate-config.test.mjs` pins all of this, including
 that every config key has a row in the table below.
 
+### Managing the destructive command list (1a)
+
+The H2 confirm set is data, not regex surgery: each command family is an entry with a stable id in
+[`destructive.ts`](permission-gate/destructive.ts) (`CONFIRM_SET`). Manage it from `config.json` without
+touching code — the change applies everywhere the set is judged (bash tool_call, wrapped payloads, R10
+mutation tracking):
+
+```json
+{ "destructive": { "remove": ["brew-install"], "extra": [{ "id": "docker-rm", "pattern": "docker\\s+rm\\b" }] } }
+```
+
+Fail-closed, same as the switches: unknown remove ids and malformed extra patterns are reported on stderr
+and skipped; the built-in set never widens or narrows unexpectedly. Extra patterns are anchored to command
+position exactly like the built-ins. Entry ids are stable API — treat renaming one as a breaking change for
+any config that removes it.
+
 ### Rule catalog
 
 | Rule            | Scope             | Blocks / does                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -78,7 +94,7 @@ that every config key has a row in the table below.
 | R1c             | read              | a ≥100-line window on a path no search command (`rg`/`grep`/`fd`/`find`/`ag`/`ack`) named this session, with no prior coverage — blocked with the search to run; narrower windows, whole-file reads (R1b) and already-searched paths pass                                                                                             |
 | H1 (cap)        | bash              | non-blocking: output capped at 40 lines / 2KB UTF-8 (failing commands too); oversized first line truncated head+tail; full output spilled to `$TMPDIR/pgate-spill` with a pointer                                                                                                                                                                                                                                  |
 | H1b (cap)       | read              | non-blocking: a `read`/`piread` result over 300 lines / 8KB is truncated to its head and the full text spilled to `$TMPDIR/pgate-spill` with a pointer — reads had no post-cap before, so a wide window rode into context whole (audit: piread p90 8.5KB, max 40KB)                                                                                                                                                |
-| H2              | bash              | destructive commands (sudo, rm incl. `/bin/rm`, git reset --hard/clean/checkout --/restore, package installs, `> /etc*`, DROP TABLE / DELETE FROM, `find -delete`, xargs/find -exec/bash -c/`$(…)` wrapped rm) need approval: a yes in chat or the invoking message, the UI confirm dialog; headless without any fails closed; a verbatim re-send re-prompts, never Re-blocks. TRIPWIRE, not a boundary |
+| H2              | bash              | destructive commands (sudo, rm incl. `/bin/rm`, git reset --hard/clean/checkout --/restore, package installs, `> /etc*`, DROP TABLE / DELETE FROM, `find -delete`, xargs/find -exec/bash -c/`$(…)` wrapped rm) need approval: a yes in chat or the invoking message, the UI confirm dialog; headless without any fails closed; a verbatim re-send re-prompts, never Re-blocks. The command families are a managed entry table (`CONFIRM_SET` ids, e.g. `rm`, `brew-install`, `pipe-interpreter`) — manage via `config.json` `destructive.remove`/`extra` (see above). TRIPWIRE, not a boundary |
 | R9              | bash              | `git commit -m <msg>` (env prefixes and git global flags normalized first; heredoc bodies extracted) against the commitlint conventional pattern — header form/length, subject case, body line length                                                                                                                                                                                                               |
 | R10             | bash              | identical re-run (same full command, fd-merges/whitespace normalized) ≤10 min after its last successful run with no intervening edit/write/mutating-bash (git add/commit/push/pull/…, rm/mv/cp/mkdir/touch, npm/pnpm ci, build scripts, file redirects) — watchers and failed-run retries exempt; cleared on `session_compact`                                                                                      |
 | RB              | bash              | verbatim re-send of a just-blocked command escalates with a dedicated reason (never armed for the H2 family)

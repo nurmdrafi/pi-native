@@ -7,6 +7,12 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.58.0] - 26-10-2026
+
+### Added
+
+- **Managed destructive-command list (1a).** The H2 confirm set is now data, not regex surgery: `destructive.ts` holds entry tables (`MUTATING_COMMANDS`, `DESTRUCTIVE_COMMANDS`, `SIDE_EFFECT_COMMANDS` — 32 stable ids like `rm`, `brew-install`, `pipe-interpreter`, `deploy-clis`) compiled into the same anchored matchers, and `config.json` gains a `destructive` section: `remove` (entry ids) / `extra` (`{id, pattern, label}`) manage which commands confirm, from both the rule path and every blocker path, without touching code. Fail-closed: unknown ids and malformed patterns warn on stderr and are skipped. Caught during the refactor: dropping the original `(?:…)` group wrap un-anchored every entry after the first (`echo rm x` would have confirmed) — now pinned by a characterization corpus case plus 4 new `gate-config` subprocess tests. Measured: permission-gate 280/280 PASS (incl. new 19-family corpus case), gate-config 26/26 PASS, typecheck + agents-lint + doc-check clean; destructive.ts 252 → 334 lines, config.ts 242 → 283.
+
 ## [1.57.0] - 26-10-2026
 
 ### Added
