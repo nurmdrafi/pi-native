@@ -8,8 +8,23 @@ with local patches folded in.
 
 ## Requirements
 
-- **tmux ≥ 3.0** — `brew install tmux` (macOS) or `sudo apt install tmux`
-  (Linux). Windows is not supported for subagents.
+- **tmux ≥ 3.0** on `PATH`, working headless — subagents spawn panes via
+  `tmux new-session`, no terminal needed. Verify in one line (prints
+  `tmux OK` on macOS and Linux alike):
+
+      tmux -V && tmux new-session -d -s pi-probe && tmux kill-session -t pi-probe && echo tmux OK
+
+  Install: `brew install tmux` (macOS); `sudo apt install tmux`,
+  `sudo dnf install tmux`, or `sudo pacman -S tmux` (Linux). Windows is not
+  supported for subagents.
+  **PATH-shadowing gotcha:** an AppImage `tmux` earlier on `PATH`
+  (e.g. `~/.local/bin/tmux`) shadows the package-manager binary and fails
+  where FUSE is unavailable (containers, no `/dev/fuse`) —
+  `fusermount: mount failed` → every subagent spawn dies at pane creation.
+  Diagnose with `command -v tmux`; if it resolves to an AppImage, rename it
+  aside (keep it for FUSE-capable machines) or extract it with
+  `--appimage-extract`. Prefer the distro/brew build in restricted
+  environments.
 - The parent pi does **not** need to run inside tmux:
   - parent inside tmux → subagent panes split next to the parent pane;
   - parent outside tmux (plain terminal, or headless `pi -p`) → panes live in
