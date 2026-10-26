@@ -58,6 +58,7 @@ One skill = full loop: inspect → audit/score → diagnose → change → measu
 2. Permanent floor = context tokens + Σ skill-description tokens.
 3. Health Score — start 100, deduct:
    - context > 800 tok: −10
+   - context > 1,300 tok (hard ceiling): −30 + report carries a trim proposal or a recorded user sign-off — floor growth is a decision, never drift
    - skill count > 15: −10
    - any single desc > 250 tok: −10
    - avg desc > 100 tok: −10
@@ -67,7 +68,7 @@ One skill = full loop: inspect → audit/score → diagnose → change → measu
    - skills-dir pollution (node_modules, .zip, ._*): −5/class
    - portability quick-check hits in functional files: −5/class
 4. Anti-pattern sweep — prompt-quality + security checks orthogonal to score: run `references/anti-pattern-audit.md` checklist over skills, prompts, extensions (rg-signature pass first, read flagged regions only, calibrate earned emphasis vs boosters). Findings get own report section; fixes = separate proposals (Workflow step 3).
-5. Report → matching `~/.pi/agent/audit-reports/{harness,skills,sessions}/` subdir, `<date>T<time>Z-<topic>.md` (filename carries date; header records machine provenance — `uname -srm` + `uname -n`, repo runs from multiple machines/OSes) — structure: executive summary, inventory table, top consumers, overlaps, score breakdown, delta vs previous report if present.
+5. Report → matching `~/.pi/agent/audit-reports/{harness,skills,sessions}/` subdir, `<date>T<time>Z-<topic>.md` (filename carries date; header records machine provenance — `uname -srm` + `uname -n`, repo runs from multiple machines/OSes) — structure: executive summary, inventory table, top consumers, overlaps, score breakdown, delta vs previous report if present. If permission-gate/extensions changed since the previous report: run `npm run gate:eval` first and include the pass-rate delta (standing eval cadence — harness changes re-verify like releases).
 6. Report BEFORE → AFTER numbers; recommendations ranked by impact. Implement only on request, then log per *Workflow* step 5.
 7. Close audit — advance `.watermark.json` `auditedThrough` to newest covered session; prune: delete `~/.pi/agent/sessions/**/*.jsonl` unmodified 30 days, remove emptied cwd-slug dirs.
 

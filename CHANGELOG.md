@@ -7,6 +7,18 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.57.0] - 26-10-2026
+
+### Added
+
+- **OS-agnostic tmux startup guide.** `extensions/subagents/README.md` Requirements now carries a one-line headless verify (`tmux -V && tmux new-session -d -s pi-probe && tmux kill-session -t pi-probe && echo tmux OK`), per-OS install commands (brew / apt / dnf / pacman), and the PATH-shadowing gotcha: an AppImage `tmux` earlier on `PATH` fails with `fusermount: mount failed` where FUSE is unavailable (containers, no `/dev/fuse`) and every subagent spawn dies at pane creation — observed live and fixed by renaming the AppImage aside. Measured: doc-check 4/4 families PASS.
+- **Ponytail always-on ladder baked into AGENTS.md `## Workflow & TDD`.** Six rungs checked before any code is written (need-it-at-all → reuse → stdlib → native platform feature → installed dependency → one line → minimum that works), the understand-first rule (ladder runs after understanding, never instead of it), and the never-cut list (trust-boundary validation, data-loss error handling, security, accessibility basics, explicit requests). Intensity modes and over-engineering review stay in the `ponytail` skill. Measured: AGENTS.md 4,243 → 4,989 B (+186 tok permanent floor); agents-lint 0 dups / 0 contradictions.
+
+### Changed
+
+- **harness-engineer audit rubric: growth ceiling + eval cadence.** Context > 1,300 tok is a −30 hard-ceiling deduction whose report must carry a trim proposal or a recorded user sign-off (floor growth is a decision, never drift), and any audit following a permission-gate/extensions change must run `npm run gate:eval` and include the pass-rate delta. Body-only skill edit — no cache impact.
+- **Rejected: P3 cat-read gate rule, on evidence.** The 10 `R2_cat_file` findings behind the proposal were piped (`cat x | head -N`), multi-file, and heredoc-write shapes; a narrow bare-cat regex would have blocked ~0 of them and piped output is already H1-capped. Test cases written TDD-first were reverted; recorded so future audits stop re-proposing it.
+
 ## [1.56.0] - 26-10-2026
 
 ### Added
