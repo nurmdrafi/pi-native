@@ -400,7 +400,7 @@ export function checkSkillsInventory(root) {
 
 // ---------- family 3: extensions-inventory ----------
 // README Extensions section ↔ extensions/* dirs containing at least one .ts file.
-// Top-level files (e.g. extensions/handoff.ts) are not extension units — dir rule only.
+// Top-level files under extensions/ are not extension units — dir rule only.
 export function checkExtensionsInventory(root) {
   const findings = [];
   const extDir = join(root, 'extensions');
@@ -439,7 +439,7 @@ export function checkExtensionsInventory(root) {
     }
   }
   // claims = backticked `name/` tokens (single segment + trailing slash) in the section.
-  // `extensions/` itself names the section subject, not a unit; `handoff.ts` (no slash) is a file.
+  // `extensions/` itself names the section subject, not a unit; a bare file name (no slash) never matches.
   const claimed = new Map();
   // Machine-local, gitignored dirs that appear in prose but are not extension units.
   const NON_EXTENSION_DIRS = new Set(['bin', 'npm', 'git']);

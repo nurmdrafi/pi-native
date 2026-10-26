@@ -109,7 +109,7 @@ Conventional commits are enforced by husky + commitlint. Release CI extracts the
 - **`piread/`, `piedit/`, `pibash/`, `pidx/`** — register the native tools ([native tools](native-tools.md)).
 - **`compact-editor/`** — caps the prompt editor height (default 10 lines, `PI_COMPACT_EDITOR_LINES`) so a long prompt or paste cannot push the transcript off screen; keeps the buffer head and tail with an `[... N more lines ...]` notice between them.
 - **`self-heal/`** — on `session_start` runs `scripts/sync-agent-bin.mjs` so the shell PATH pin, native binaries, and the PCRE2 `rg` stay correct after a pull, a pi update, or on a fresh machine. Idempotent, never compiles, never throws, and silent when healthy.
-- **`handoff.ts`** — `/handoff <goal>` drafts a context-transfer prompt from the session, opens it in the editor, then opens the new session with the draft; nothing is written to disk.
+- **`handoff/`** — `/handoff <goal>` drafts a context-transfer prompt from the session, opens it in the editor, then opens the new session with the draft; nothing is written to disk.
 
 Raw events (tool errors, guard blocks) land in pi's native `sessions/**/*.jsonl` — the audit toolkit derives every signal from there.
 
