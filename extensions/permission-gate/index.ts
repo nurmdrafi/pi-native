@@ -6,7 +6,7 @@
  * CURRENT rules (IDs are stable; family = block-reason prefix):
  * | ID  | Family / mechanism            | Enforces |
  * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss |
+ * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
@@ -199,6 +199,19 @@ export default function (pi: ExtensionAPI) {
   let lg1Armed: string | undefined;
   let lg1ErrStreak = 0;
   let lg1ErrNoted = false;
+  /** AG repeat-miss hint (2026-10-26 audit v2): anchor blocks are the
+   * top LLM error class (94/wk) and cluster in churn turns (27% of all
+   * blocks+errors). 2nd+ AG miss on one file in a turn appends a
+   * loop-break hint to the block reason. Shares LG1's per-turn reset. */
+  let agMisses = new Map<string, number>();
+  const AG_MISS_HINT_AT = 2;
+  function agMissHint(path: string): string {
+    const n = (agMisses.get(path) ?? 0) + 1;
+    agMisses.set(path, n);
+    return n >= AG_MISS_HINT_AT
+      ? ` [miss ${n} on this file this turn — piread the exact target lines, then resend once]`
+      : "";
+  }
   const LG1_NOTE_AT = 4;
   const LG1_ARM_AT = 7;
   function lg1Reset(): void {
@@ -207,6 +220,7 @@ export default function (pi: ExtensionAPI) {
     lg1Armed = undefined;
     lg1ErrStreak = 0;
     lg1ErrNoted = false;
+    agMisses.clear();
   }
   /** one-shot block of an armed path's next mutation — called from the
    * edit/write tool_call paths after malformed-input validation */
@@ -472,7 +486,7 @@ export default function (pi: ExtensionAPI) {
         // S5 M3: the hash disproved the certified spans/stat — drop them, or
         // R1 would block the corrective re-read as a dup-read (deadlock)
         if (checked.stale) coverage.delete(path);
-        return blockCall(checked.reason);
+        return blockCall(checked.reason + agMissHint(path));
       }
       pendingEdits.set(event.toolCallId, {
         path,

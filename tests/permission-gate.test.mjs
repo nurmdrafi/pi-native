@@ -1059,6 +1059,38 @@ const cases = [
     },
   ],
   [
+    "AG: 2nd anchor miss on a file in a turn appends loop-break hint",
+    "blocked",
+    async (pi) => {
+      const dir = mkdtempSync(join(tmpdir(), "ag-miss-"));
+      const f = join(dir, "f.md");
+      writeFileSync(f, "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\n");
+      await read(pi, f);
+      const miss = (id, bad) =>
+        pi.invoke("tool_call", {
+          type: "tool_call", toolName: "edit", toolCallId: id,
+          input: { path: f, edits: [{ oldText: bad, newText: "x" }] },
+        });
+      const m1 = await miss("agm1", "NOPE-ONE");
+      if (!m1) return { blocked: false, reason: "first miss must block" };
+      if (m1.reason.includes("miss 2"))
+        return { blocked: false, reason: "first miss must not carry the hint" };
+      const m2 = await miss("agm2", "NOPE-TWO");
+      if (!m2) return { blocked: false, reason: "second miss must block" };
+      if (!m2.reason.includes("miss 2 on this file this turn"))
+        return { blocked: false, reason: `second miss must carry the hint: ${m2.reason.slice(0, 90)}` };
+      // per-user-turn reset: a new turn starts the count over
+      await pi.invoke("before_agent_start", {
+        type: "before_agent_start", messageType: "user",
+        prompt: "next turn", systemPromptOptions: {},
+      });
+      const m3 = await miss("agm3", "NOPE-THREE");
+      return m3 && !m3.reason.includes("miss 2 on this file this turn")
+        ? { blocked: true, reason: m3.reason.slice(0, 60) }
+        : { blocked: false, reason: "count must reset per user turn" };
+    },
+  ],
+  [
     "cadence: nudge is non-blocking, appended once to a tool_result",
     "pass",
     async (pi) => {

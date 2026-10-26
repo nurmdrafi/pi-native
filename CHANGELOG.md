@@ -7,6 +7,13 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.61.0] - 26-10-2026
+
+### Added
+
+- **Anchor Guard repeat-miss hint.** The 2nd+ anchor block on one file within a user turn appends a loop-break hint (`piread the exact target lines, then resend once`) to the block reason; count resets per user turn and on compaction (shares LG1's reset). Motivated by audit v2: anchor blocks are the top LLM error class (94/wk) and churn turns (>=4 same-path edits) hold 27% of all blocks+errors. Measured: gate 289/289 (1 new case); audit v2 basis 397 user-turns, 132 blocks, mistake-turns avg 12.7K out-tok vs 2.8K clean.
+- **`scripts/session-audit.py`** — the turn-by-turn, byte-level session audit (v2) moved into the repo from /tmp: per-user-turn ledger of in/omitted bytes, elision + spill, usage tokens and cost, gate blocks by family, re-fetched read lines, duplicate commands, churn; full JSON to `.cache/session-audit.json`. Stdlib-only python3; `fd --newer <date>` scoping. Measured: week rerun from the repo reproduces the report (64 sessions, 397 turns, $62.73 basis).
+
 ## [1.60.0] - 26-10-2026
 
 ### Added
