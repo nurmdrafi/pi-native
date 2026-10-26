@@ -18,9 +18,10 @@ Parity is pinned against the built-in by a harness suite (`tests/*-parity.test.m
 and the permission-gate treats each native tool as a wrapper on the equivalent
 event (`read`/`edit`/`bash`).
 
-**Companion docs:** [`portability.md`](portability.md) (OS constraints),
-[`backlog.md`](backlog.md) (open work). Per-crate build logs live in
-`custom-tools/*/README.md`.
+**Companion docs:** [`native-tools.md`](native-tools.md) (measured speedups,
+context-shaping tables, tool version pins), [`portability.md`](portability.md)
+(OS constraints), [`backlog.md`](backlog.md) (open work). Per-crate build logs
+live in `custom-tools/*/README.md`.
 
 ---
 
@@ -215,7 +216,9 @@ non-unix the call compiles to a no-op. Verified by
 The permission-gate **H1 cap** limits what reaches the model to **40 lines /
 2 KB**. Two tools shape their output to that same budget so the gate passes the
 result through instead of re-cutting it. Compaction is what stops context cost
-from scaling with file or command output size.
+from scaling with file or command output size. Measured per-tool savings
+(native vs built-in bytes entering the transcript) live in
+[`native-tools.md`](native-tools.md#context-shaping-what-enters-the-model).
 
 | Tool | Strategy | Notes |
 | --- | --- | --- |
@@ -639,6 +642,11 @@ Entry = { size, mtime_ns, off, len }
 half-updated one. An unknown magic or version silently degrades to a full
 reparse rather than failing.
 
+Default paths: state store `<agent-dir>/.cache/pidx-state.json` (override
+`--state`). The CLI writes extracts to **stdout** unless `--out` gives a file;
+the extension passes `--out <agent-dir>/.cache/pidx-extracts.jsonl`
+(`extensions/pidx/index.ts:75-77`) so the repo is never touched.
+
 ### Parity notes
 
 `tsMs`, `ACTIVE_SESSION_MS`, and `IMAGE_BYTES_ESTIMATE` are pinned to the Node
@@ -693,3 +701,4 @@ context cost — the model reads the shape of the corpus, then queries the file.
 | **Omission marker** | `[... omitted N chars / M lines ...]` — the explicit record of a cut |
 | **Warm run** | `pidx` run where no session file changed; replays cached extracts |
 | **Fail-open** | Any native failure advances to the next rung instead of erroring |
+| **Oracle** | The stock built-in tool the native path must byte-match — parity source of truth (see [`native-tools.md`](native-tools.md)) |
