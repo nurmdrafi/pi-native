@@ -32,6 +32,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 review: skill `ponytail`.
 - Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, anything explicitly requested.
 - Loop: plan → do → verify.
+- Circling check: same file edited 3+ times, or the same failing fix retried twice, in one turn → stop, state what remains and what failed, ask before continuing.
 - Machine/device/OS agnostic — detail: docs/portability.md.
 
 ## Token Economy
