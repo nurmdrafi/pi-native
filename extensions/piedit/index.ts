@@ -135,7 +135,7 @@ const builtinExecute = createEditTool(process.cwd()).execute as (
   ctx?: unknown,
 ) => Promise<EditResult>;
 
-/** piedit's stdout contract (crate docs, `custom-tools/piedit`). The
+/** piedit's stdout contract (crate docs, `rust-tools/piedit`). The
  * rendered shape (`renderDiff: true`) carries the native diff/patch; the
  * legacy shape carries the content pair (mixed-version compat rung). */
 type PieditEnvelope = {

@@ -328,6 +328,7 @@ export function renderedCoverageFromBlocks(
   content: unknown[],
   startLine: number,
   omissions?: CompactionOmission[] | null,
+  winEnd?: number,
 ): { spans: LineSpan[]; gaps: LineSpan[] } | undefined {
   const text = blocksToText(content);
   if (!text) return undefined;
@@ -371,7 +372,35 @@ export function renderedCoverageFromBlocks(
     }
     return { spans, gaps, end: cursor };
   };
-  const walked = walk(undefined);
+  // Backward anchor (2026-10-28): the read window's end is ground truth —
+  // the last rendered line IS the window's last line. A blank line dropped
+  // at an elision boundary (compress.rs head-tail join) leaves the forward
+  // walk's tail run one line short of winEnd; the shortfall shifts the
+  // final run onto winEnd and widens the gap before it. Widening only —
+  // never certifies a line the walk had as covered; an over-run clamps.
+  // Single-marker shapes only (the only cut compact() emits).
+  const anchorEnd = (
+    w: { spans: LineSpan[]; gaps: LineSpan[]; end: number },
+  ): typeof w => {
+    if (winEnd === undefined || w.spans.length === 0) return w;
+    const last = w.spans[w.spans.length - 1]!;
+    if (last.end > winEnd) {
+      last.end = winEnd;
+      w.end = winEnd + 1;
+      return w;
+    }
+    if (last.end < winEnd && w.gaps.length > 0) {
+      const delta = winEnd - last.end;
+      const g = w.gaps[w.gaps.length - 1]!;
+      const cut = g.end;
+      g.end += delta;
+      if (last.start > cut) last.start += delta;
+      last.end = winEnd;
+      w.end = winEnd + 1;
+    }
+    return w;
+  };
+  const walked = anchorEnd(walk(undefined));
   const structured = structuredOmissions(omissions, omits.length);
   if (!structured) return { spans: walked.spans, gaps: walked.gaps };
   const viaStructured = walk(structured);
@@ -388,6 +417,8 @@ export function renderedSpansFromBlocks(
   content: unknown[],
   startLine: number,
   omissions?: CompactionOmission[] | null,
+  winEnd?: number,
 ): LineSpan[] | undefined {
-  return renderedCoverageFromBlocks(content, startLine, omissions)?.spans;
+  return renderedCoverageFromBlocks(content, startLine, omissions, winEnd)
+    ?.spans;
 }

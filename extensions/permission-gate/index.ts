@@ -94,7 +94,16 @@ import type {
   LineSpan,
 } from "./rules/read-coverage.ts";
 import { toolchainCheck } from "./rules/toolchain.ts";
-import { isVerifyCommand, nextPhase, type ActionKind, type Phase } from "./rules/phase.ts";
+import { isVerifyCommand } from "./rules/phase.ts";
+import {
+  FAILURE_LOOP_AT,
+  createTurnState,
+  lg1GateMutation,
+  lg1RecordMutation,
+  lg1RecordResult,
+  phaseRecord,
+  resetTurnParts,
+} from "./rules/turn-state.ts";
 import {
   effectiveCwd,
   enumeratesPaths,
@@ -148,10 +157,6 @@ const CADENCE_CTX_TOKENS = 150_000;
 const RERUN_WINDOW_MS = 10 * 60_000;
 /** Re-block window: shorter than R10 — the verbatim re-send pattern is immediate (2026-10-08 audit: 3s and 2.5s gaps) */
 const REBLOCK_WINDOW_MS = 2 * 60_000;
-/** R11: consecutive tool failures, with no landed mutation since the streak began, before escalation.
- * 5 is above any healthy red-green cycle; the mutation snapshot (not the raw count)
- * is what keeps TDD from tripping it. */
-const FAILURE_LOOP_AT = 5;
 export default function (pi: ExtensionAPI) {
   /**
    * In-context coverage (2026-10-05 audit): per absolute path, the union of
@@ -208,38 +213,19 @@ export default function (pi: ExtensionAPI) {
   const pendingReads = new Map<string, { path: string; win: LineSpan }>();
   /** R10: bash toolCallId -> normalized base command, awaiting its tool_result */
   const pendingBash = new Map<string, string>();
-  /** R10: base command -> last-run record; re-runs are compared against it */
-  const lastBashRun = new Map<
-    string,
-    { ts: number; mut: number; failed: boolean }
-  >();
   // 2026-10-08 extensions audit (Re-block): pendingBash is only set AFTER all
   // checks pass, so blocked calls leave no tool_result-side trace — keep the
   // verbatim cmd keyed by toolCallId to recognize our own synthesized block
   // results. One lastBlockedBash slot: only the immediately preceding blocked
   // bash call can be "re-sent verbatim".
   const pendingBashFull = new Map<string, string>();
-  let lastBlockedBash:
-    { cmd: string; family: string; ts: number; mut: number } | undefined;
-  /** cadence nudge state — user turns seen; reset on session_compact/session_start */
-  let turnsSeen = 0;
-  let cadenceFired = false;
-  /** LG1 (2026-10-26, week of session evidence): the observed grind is
-   * same-target churn (task.md x9, index.ts x8 inside single user-turns),
-   * NOT error streaks (none exceeded 3 all week). Note at the 4th landed
-   * same-path mutation; the 7th arms a one-shot block of that path's next
-   * mutation; 3 consecutive tool errors note once. Reset per user turn. */
-  let lg1Mutations = new Map<string, number>();
-  let lg1Noted = new Set<string>();
-  let lg1Armed: string | undefined;
-  let lg1ErrStreak = 0;
-  let lg1ErrNoted = false;
-  /** R11: mutationSeq when the current error streak began — a landed mutation since
-   * then disarms the escalation (a red-green cycle is not a loop). */
-  let lg1ErrMutSeq = 0;
-  /** PH1: the turn's stage label and its one-note latch (see phase.ts). */
-  let turnPhase: Phase = "idle";
-  let phaseNoted = false;
+
+  /** Turn state for the temporal rules (R10/EB/LG1/R11/PH1/CN) — one value,
+   * threaded into rules/turn-state.ts, which documents each field. LG1's
+   * per-turn counters exist because the observed grind is same-target churn
+   * (task.md x9, index.ts x8 inside single user-turns), not error streaks.
+   * The AG miss ledger keeps its own map below but shares the turn reset. */
+  const turn = createTurnState();
   /** AG repeat-miss hint (2026-10-26 audit v2): anchor blocks are the
    * top LLM error class (94/wk) and cluster in churn turns (27% of all
    * blocks+errors). 2nd+ AG miss on one file in a turn appends a
@@ -253,56 +239,10 @@ export default function (pi: ExtensionAPI) {
       ? ` [miss ${n} on this file this turn — piread the exact target lines, then resend once]`
       : "";
   }
-  const LG1_NOTE_AT = 4;
-  const LG1_ARM_AT = 7;
+  /** Per-turn reset; the AG miss ledger shares the turn boundary. */
   function lg1Reset(): void {
-    lg1Mutations.clear();
-    lg1Noted.clear();
-    lg1Armed = undefined;
-    lg1ErrStreak = 0;
-    lg1ErrNoted = false;
-    lg1ErrMutSeq = 0;
+    resetTurnParts(turn);
     agMisses.clear();
-  }
-  /** one-shot block of an armed path's next mutation — called from the
-   * edit/write tool_call paths after malformed-input validation */
-  function lg1GateMutation(path: string): string | undefined {
-    if (!ruleEnabled("loopGuard") || lg1Armed !== path) return undefined;
-    const n = lg1Mutations.get(path) ?? LG1_ARM_AT;
-    lg1Armed = undefined;
-    return `Loop Guard (LG1): ${path} was edited ${n} times this turn — possible loop. Stop: summarize what you tried and what remains, then ask the user before continuing.`;
-  }
-  /** landed-mutation counter; the note text rides the landing result */
-  function lg1RecordMutation(path: string): string | undefined {
-    if (!ruleEnabled("loopGuard")) return undefined;
-    const n = (lg1Mutations.get(path) ?? 0) + 1;
-    lg1Mutations.set(path, n);
-    if (n === LG1_ARM_AT) {
-      lg1Armed = path;
-      return `Loop Guard (LG1): ${path} edited ${n} times this turn — if you are circling, state what is left to finish or ask the user.`;
-    }
-    if (n === LG1_NOTE_AT && !lg1Noted.has(path)) {
-      lg1Noted.add(path);
-      return `Loop Guard (LG1): ${path} edited ${n} times this turn — if you are circling, state what is left to finish or ask the user.`;
-    }
-    return undefined;
-  }
-  /** consecutive tool errors (bash + edit/write): note once at 3 (LG1), escalate at
-   * FAILURE_LOOP_AT (R11). The counter runs even when loopGuard is off so R11 can
-   * be enabled on its own. */
-  function lg1RecordResult(isError: boolean): string | undefined {
-    if (!isError) {
-      lg1ErrStreak = 0;
-      return undefined;
-    }
-    if (lg1ErrStreak === 0) lg1ErrMutSeq = mutationSeq;
-    lg1ErrStreak++;
-    if (!ruleEnabled("loopGuard")) return undefined;
-    if (lg1ErrStreak === 3 && !lg1ErrNoted) {
-      lg1ErrNoted = true;
-      return "Loop Guard (LG1): 3 consecutive tool errors — if the same fix keeps failing, stop and ask the user instead of retrying.";
-    }
-    return undefined;
   }
   /** PH1 helper: true when a bash result is already at H1's model-visible budget,
    * where the cap (not a phase note) must survive the handler composition. */
@@ -312,29 +252,19 @@ export default function (pi: ExtensionAPI) {
       .join("\n");
     return text.split("\n").length > 40 || Buffer.byteLength(text, "utf8") > 2_048;
   }
-  /** PH1: advance the turn's phase label and, on entering `recovering`, emit the
-   * single note this rule allows per turn. Advisory only — it never blocks. */
-  function phaseRecord(kind: ActionKind, failed: boolean): string | undefined {
-    const prev = turnPhase;
-    turnPhase = nextPhase(turnPhase, { kind, failed });
-    if (!ruleEnabled("phaseNudge")) return undefined;
-    if (turnPhase !== "recovering" || prev === "recovering" || phaseNoted) return undefined;
-    phaseNoted = true;
-    return "Phase (PH1): recovering — the last verify failed right after an edit. Change the code before running it again; an unchanged re-run is what R10 blocks, a failure streak is what R11 blocks.";
-  }
+
   /** R11: block the next shell call when the streak says the agent is circling —
    * repeated failures with nothing landed in between. */
   function failureLoopGate(): { block: true; reason: string } | undefined {
     if (!ruleEnabled("failureLoopGuard")) return undefined;
-    if (lg1ErrStreak < FAILURE_LOOP_AT) return undefined;
-    if (mutationSeq !== lg1ErrMutSeq) return undefined;
+    if (turn.lg1ErrStreak < FAILURE_LOOP_AT) return undefined;
+    if (turn.mutationSeq !== turn.lg1ErrMutSeq) return undefined;
     return enforce(
       "failureLoopGuard",
-      `Loop Guard (R11): ${lg1ErrStreak} consecutive tool failures with no landed change — stop retrying. Say what the failure reports and what you changed, then ask the user before continuing.`,
+      `Loop Guard (R11): ${turn.lg1ErrStreak} consecutive tool failures with no landed change — stop retrying. Say what the failure reports and what you changed, then ask the user before continuing.`,
     );
   }
-  /** R10: bumped on every successful edit/write — a mutation makes verify re-runs legitimate */
-  let mutationSeq = 0;
+
   /** H2: last user-approved destructive command (verbatim) + when */
   let lastApprovedDestructive: { cmd: string; ts: number } | undefined;
   /** H2/chat (2026-10-11): the latest user message approved destructive work —
@@ -519,14 +449,14 @@ export default function (pi: ExtensionAPI) {
   // per-turn chat state (2026-10-11): turns drive the cadence nudge, the
   // latest prompt arms/disarms chat approval for the destructive gate
   on("before_agent_start", (event) => {
-    turnsSeen++;
+    turn.turnsSeen++;
     const prompt = event.messageType === "user" ? event.prompt : "";
     promptApproves = APPROVAL_RE.test(prompt);
     // LG1: a new user turn is the loop boundary — churn/error counters reset
     lg1Reset();
     // PH1: a new user turn re-arms the phase label
-    turnPhase = "idle";
-    phaseNoted = false;
+    turn.turnPhase = "idle";
+    turn.phaseNoted = false;
   });
 
   on("tool_call", async (event, ctx) => {
@@ -537,7 +467,7 @@ export default function (pi: ExtensionAPI) {
           "Permission Gate (Malformed): edit call has no path string — re-send the tool call with input.path.",
         );
       const path = normPath(event.input.path, ctx?.cwd);
-      const lg1Block = lg1GateMutation(path);
+      const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);
       // S4 fix 8: symlink-resolved protected targets confirm through the
       // same H2 ladder as destructive bash — a write into <fake-home>/.ssh
@@ -564,16 +494,25 @@ export default function (pi: ExtensionAPI) {
         // S5 M3: the hash disproved the certified spans/stat — drop them, or
         // R1 would block the corrective re-read as a dup-read (deadlock)
         if (checked.stale) coverage.delete(path);
-        return blockCall(checked.reason + agMissHint(path));
+        // AG blocks; AG2 is relaxable, so its configured severity decides
+        // (2026-10-27: "anchor outside the read window" was 42% of all anchor
+        // blocks in live sessions, and the exact-match check still stands).
+        const decision = enforce(
+          checked.rule ?? "editAnchorGuard",
+          checked.reason + agMissHint(path),
+        );
+        if (decision) return decision;
       }
+      // a relaxed (warn) AG2 block carries no certified spans to register
+      const validated = checked && !("block" in checked) ? checked : undefined;
       pendingEdits.set(event.toolCallId, {
         path,
-        spans: checked?.spans,
-        firstEditedLine: checked?.firstEditedLine,
-        regions: checked?.regions,
-        delta: checked?.delta,
-        preStat: checked?.preStat,
-        fuzzy: checked?.fuzzy,
+        spans: validated?.spans,
+        firstEditedLine: validated?.firstEditedLine,
+        regions: validated?.regions,
+        delta: validated?.delta,
+        preStat: validated?.preStat,
+        fuzzy: validated?.fuzzy,
         kind: "edit",
       });
       return;
@@ -739,7 +678,7 @@ export default function (pi: ExtensionAPI) {
           "Permission Gate (Malformed): write call has no path string — re-send the tool call with input.path.",
         );
       const path = normPath(event.input.path, ctx?.cwd);
-      const lg1Block = lg1GateMutation(path);
+      const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);
       // S4 fix 8: same symlink-resolved protected-path confirm as edit
       const prot = ruleEnabled("destructiveConfirm")
@@ -847,14 +786,14 @@ export default function (pi: ExtensionAPI) {
     // in between naturally re-arms the original rule.
     if (
       ruleEnabled("reblockEscalation") &&
-      lastBlockedBash &&
-      lastBlockedBash.cmd === cmd &&
-      lastBlockedBash.mut === mutationSeq &&
-      Date.now() - lastBlockedBash.ts < REBLOCK_WINDOW_MS
+      turn.lastBlockedBash &&
+      turn.lastBlockedBash.cmd === cmd &&
+      turn.lastBlockedBash.mut === turn.mutationSeq &&
+      Date.now() - turn.lastBlockedBash.ts < REBLOCK_WINDOW_MS
     ) {
       return blockCall(
-        `Token Economy (Re-block): this exact command was blocked ${Math.round((Date.now() - lastBlockedBash.ts) / 1000)}s ago ` +
-          `(${lastBlockedBash.family}) — that reason still applies. Change the command per it; a verbatim re-send only gets blocked again.`,
+        `Token Economy (Re-block): this exact command was blocked ${Math.round((Date.now() - turn.lastBlockedBash.ts) / 1000)}s ago ` +
+          `(${turn.lastBlockedBash.family}) — that reason still applies. Change the command per it; a verbatim re-send only gets blocked again.`,
       );
     }
 
@@ -951,13 +890,13 @@ export default function (pi: ExtensionAPI) {
       /(^|\s)(watch|sleep)\b/.test(base) ||
       /(^|\s)tail\s+(-[a-zA-Z]*[fF])/.test(base) ||
       /--watch\b/.test(base);
-    const prior = lastBashRun.get(base);
+    const prior = turn.lastBashRun.get(base);
     if (
       ruleEnabled("rerunGuard") &&
       prior &&
       !prior.failed &&
       !watcher &&
-      prior.mut === mutationSeq &&
+      prior.mut === turn.mutationSeq &&
       Date.now() - prior.ts < RERUN_WINDOW_MS
     ) {
       // R10 (demoted 2026-10-21): an unchanged re-run usually duplicates output,
@@ -1149,7 +1088,12 @@ export default function (pi: ExtensionAPI) {
           // uncertified, so it remains readable. Runs only when the result
           // reports compaction; every other read keeps the window math.
           const rendered = elided
-            ? renderedCoverageFromBlocks(content, read.win.start, omissions)
+            ? renderedCoverageFromBlocks(
+                content,
+                read.win.start,
+                omissions,
+                read.win.end,
+              )
             : undefined;
           const spans = rendered?.spans;
           if (spans && spans.length > 0) {
@@ -1181,7 +1125,12 @@ export default function (pi: ExtensionAPI) {
       ) {
         const runs =
           (elided
-            ? renderedSpansFromBlocks(content, read.win.start, omissions)
+            ? renderedSpansFromBlocks(
+                content,
+                read.win.start,
+                omissions,
+                read.win.end,
+              )
             : undefined) ??
           [{ start: read.win.start, end: read.win.start + lines - 1 }];
         const num = runs.reduce(
@@ -1217,20 +1166,20 @@ export default function (pi: ExtensionAPI) {
         // verbatim re-send must re-prompt (the user may now approve in
         // chat), not be told the old reason still stands
         const reblocked = fam.includes("(Re-block)");
-        lastBlockedBash = {
+        turn.lastBlockedBash = {
           cmd: bashBlockedCmd,
-          family: reblocked && lastBlockedBash ? lastBlockedBash.family : fam,
+          family: reblocked && turn.lastBlockedBash ? turn.lastBlockedBash.family : fam,
           ts: Date.now(),
-          mut: mutationSeq,
+          mut: turn.mutationSeq,
         };
       }
     }
     const bashBase = pendingBash.get(event.toolCallId);
     if (bashBase !== undefined) {
       pendingBash.delete(event.toolCallId);
-      lastBashRun.set(bashBase, {
+      turn.lastBashRun.set(bashBase, {
         ts: Date.now(),
-        mut: mutationSeq,
+        mut: turn.mutationSeq,
         failed: event.isError === true,
       });
       // H5/B20: a successful mutating bash command bumps mutationSeq like an
@@ -1241,8 +1190,8 @@ export default function (pi: ExtensionAPI) {
         !event.isError &&
         isMutatingCommand(String(event.input?.command ?? ""))
       )
-        mutationSeq++;
-      const lg1ErrNote = lg1RecordResult(event.isError === true);
+        turn.mutationSeq++;
+      const lg1ErrNote = lg1RecordResult(turn, event.isError === true);
       if (lg1ErrNote)
         return {
           content: [
@@ -1251,6 +1200,7 @@ export default function (pi: ExtensionAPI) {
           ],
         };
       const phNote = phaseRecord(
+        turn,
         isVerifyCommand(String(event.input?.command ?? "")) ? "verify" : "other",
         event.isError === true,
       );
@@ -1271,13 +1221,13 @@ export default function (pi: ExtensionAPI) {
     if (event.isError) {
       // failed edit/write: content may have drifted — a re-read is legitimate
       coverage.delete(entry.path);
-      lg1Note = lg1RecordResult(true);
+      lg1Note = lg1RecordResult(turn, true);
     } else {
       // R10: a successful edit/write mutates the tree — verify re-runs become legitimate
-      mutationSeq++;
+      turn.mutationSeq++;
       // LG1: count the landed mutation; may arm the one-shot loop block
-      lg1Note = lg1RecordMutation(entry.path);
-      phaseRecord("edit", false);
+      lg1Note = lg1RecordMutation(turn, entry.path);
+      phaseRecord(turn, "edit", false);
       // item 6 (2026-10-11): prior spans describe the exact pre-edit bytes.
       // Drop the path's coverage when any anchor was fuzzy (its line-shift
       // contribution is unknown) or the file drifted between certification
@@ -1345,14 +1295,14 @@ export default function (pi: ExtensionAPI) {
   // tool_result when turns or context tokens cross the AGENTS.md Token
   // Economy thresholds; never rides a synthesized block result
   on("tool_result", async (event, ctx) => {
-    if (cadenceFired) return;
+    if (turn.cadenceFired) return;
     const usage = ctx?.getContextUsage?.();
     const overCtx =
       !!usage && usage.tokens !== null && usage.tokens >= CADENCE_CTX_TOKENS;
     if (!ruleEnabled("cadenceNudge")) return;
-    if (turnsSeen < CADENCE_TURNS && !overCtx) return;
+    if (turn.turnsSeen < CADENCE_TURNS && !overCtx) return;
     if (blockFamilyOf(event)) return;
-    cadenceFired = true;
+    turn.cadenceFired = true;
     return {
       content: [
         ...(event.content ?? []),
@@ -1370,16 +1320,16 @@ export default function (pi: ExtensionAPI) {
     coverage.clear();
     // 2026-10-11: cadence too — compaction just shrank the prefix, and the
     // summary starts a fresh turn budget
-    turnsSeen = 0;
-    cadenceFired = false;
+    turn.turnsSeen = 0;
+    turn.cadenceFired = false;
     // LG1: compaction starts a fresh turn budget like cadence
     lg1Reset();
     pendingReads.clear();
     pendingEdits.clear();
     pendingBash.clear();
-    lastBashRun.clear();
+    turn.lastBashRun.clear();
     pendingBashFull.clear();
-    lastBlockedBash = undefined;
+    turn.lastBlockedBash = undefined;
   });
 
   // R1 resume hydration (2026-10-07): a resumed/continued session replays its
@@ -1403,13 +1353,13 @@ export default function (pi: ExtensionAPI) {
     pendingReads.clear();
     pendingEdits.clear();
     pendingBash.clear();
-    lastBashRun.clear();
+    turn.lastBashRun.clear();
     pendingBashFull.clear();
     pendingSearchCalls.clear();
     searchHits.clear();
-    lastBlockedBash = undefined;
-    turnsSeen = 0;
-    cadenceFired = false;
+    turn.lastBlockedBash = undefined;
+    turn.turnsSeen = 0;
+    turn.cadenceFired = false;
     const raw = ctx.sessionManager.getBranch();
     if (raw.length === 0) return;
     // only the post-compaction slice is in context (same rule as the

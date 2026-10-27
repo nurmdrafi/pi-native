@@ -166,7 +166,7 @@ function buildEnv(ctx: ExecContext | undefined): Record<string, string> {
   return env;
 }
 
-/** pibash's stdout contract (crate docs, `custom-tools/pibash`). */
+/** pibash's stdout contract (crate docs, `rust-tools/pibash`). */
 type PibashEnvelope = {
   ok: boolean;
   text?: string;

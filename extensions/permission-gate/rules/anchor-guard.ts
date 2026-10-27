@@ -101,7 +101,13 @@ export async function validateEditAnchors(
    * and certify nothing. */
   searchShown?: Set<number>,
 ): Promise<
-  | { block: true; reason: string; stale?: boolean }
+  | {
+      block: true;
+      reason: string;
+      stale?: boolean;
+      /** Which config key owns the decision: AG (hard) or AG2 (relaxable). */
+      rule?: "editAnchorGuard" | "editRegionGuard";
+    }
   | {
       spans?: LineSpan[];
       origSpans?: { i: number; start: number; end: number }[];
@@ -310,6 +316,7 @@ export async function validateEditAnchors(
           );
           return {
             block: true,
+            rule: "editRegionGuard",
             reason:
               `Anchor Guard (Unread): '${shown}' edits[${os.i}] targets lines ` +
               `${os.start}–${os.end}, not in certified context — read lines ` +

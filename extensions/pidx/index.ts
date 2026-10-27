@@ -1,7 +1,7 @@
 /**
  * pidx — native session-log indexer registered as its own tool.
  *
- * Wraps bin/pidx (Rust crate, custom-tools/pidx): parses pi session transcripts
+ * Wraps bin/pidx (Rust crate, rust-tools/pidx): parses pi session transcripts
  * into compact per-session extracts (turns, tool calls with param hashes,
  * tool results, compactions, skill loads). Incremental via (size, mtime_ns)
  * cache in the state file, so warm runs are O(changes).
