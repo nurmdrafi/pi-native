@@ -289,13 +289,32 @@ export async function validateEditAnchors(
     if (!cov) {
       const first = origSpans[0];
       if (!first || !shownHit(first.start, first.end)) {
+        // A search that named this path but landed outside the target lines is
+        // the usual dead end: the block is correct (nobody certified those
+        // lines), yet it reads like a conflict with Locate-first. Name the line
+        // the search did hit so the remedy is obvious instead of looking like a
+        // loop between the two rules.
+        const nearest = [...(searchShown ?? [])].reduce<number | undefined>(
+          (best, l) =>
+            first === undefined || best === undefined
+              ? (best ?? l)
+              : Math.abs(l - first.start) < Math.abs(best - first.start)
+                ? l
+                : best,
+          undefined,
+        );
+        const why =
+          first !== undefined && nearest !== undefined
+            ? ` Your search on this path hit line ${nearest}, outside ${first.start}–${first.end}.`
+            : "";
         return {
           block: true,
           reason:
             `Anchor Guard (Unread): '${shown}' not read this session — ` +
             (first
               ? `read lines ${first.start}–${first.end} with the piread tool (piread {path:'${String(input.path)}', offset:${first.start}, limit:${first.end - first.start + 1}}) first.`
-              : `read it with the piread tool (piread {path:'${String(input.path)}'}) first.`),
+              : `read it with the piread tool (piread {path:'${String(input.path)}'}) first.`) +
+            why,
         };
       }
     }
