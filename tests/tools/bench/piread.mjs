@@ -47,7 +47,7 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 const { createReadTool } = await import(
   join(ROOT, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")
 );
-const piread = (await import("../../extensions/piread/index.ts")).default;
+const piread = (await import("../../../extensions/piread/index.ts")).default;
 
 /** Stubbed ExtensionAPI capturing the registered piread tool. */
 function loadWrappedTool() {

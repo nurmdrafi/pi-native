@@ -11,7 +11,7 @@
  * record the accumulator's by-design scaling, not an O(1) goal.
  *
  * The 10 / 100 MB classes and the full metrics report live in the bench
- * harness: node custom-tools/pibash/bench-large-output.mjs
+ * harness: node rust-tools/pibash/bench-large-output.mjs
  * (writes benchmark/runs/pibash-large-output-<date>.md).
  *
  * Run: node --test tests/pibash-large-output.test.mjs
@@ -24,7 +24,7 @@ import {
   RSS_CAP_BYTES,
   runDaemonFixture,
   measureRssOneshot,
-} from "../../custom-tools/pibash/bench-large-output.mjs";
+} from "../../rust-tools/pibash/bench-large-output.mjs";
 
 const CLASS_1MB = FIXTURES.filter((f) => f.sizeClass === 1);
 

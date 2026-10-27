@@ -23,7 +23,7 @@ subagents/                TypeScript suite: runner.ts + harness.ts + test-env.ts
                           + *.test.ts (+ integration/)
 tools/                    manual drivers, not in CI
   bench/                  pibash · piedit · piread · model-visible-baseline
-  audit/                  block-recovery · replay · diff-fuzz · hotpath-profile
+  audit/                  bin-diff · block-recovery · replay · diff-fuzz · hotpath-profile
 fixtures/                 shared inputs: bench/, doc-check/, session-metrics/
 ```
 
@@ -35,6 +35,9 @@ fixtures/                 shared inputs: bench/, doc-check/, session-metrics/
 | `npm run test:subagents` | `tests/subagents/runner.ts` |
 | `npm run gate:eval` | `tests/gate/eval/run.mjs` — 92 fixtures, block-recovery audit, replay probe |
 | `npm run bench:model-visible` | `tests/tools/bench/model-visible-baseline.mjs` (`:compare`, `:update`) |
+| `npm run bench:piread` | `tests/tools/bench/piread.mjs` — oracle vs daemon vs one-shot, wall-clock only |
+| `npm run bench:pibash` | `tests/tools/bench/pibash.mjs` — the same arms for the bash path |
+| `npm run audit:bin-diff` | `tests/tools/audit/bin-diff.mjs` — byte differential between two builds of one native tool (`--old`/`--new`, corpus x arg grid, optional `--serve`) |
 
 ## Placing a new test
 
@@ -58,5 +61,11 @@ the spec reference belongs in the file header, where it has context.
 - Scratch state goes to `mkdtempSync(join(tmpdir(), 'prefix-'))` and the test cleans it up;
   nothing writes into the repo except an explicitly committed fixture.
 - Fixtures live under `fixtures/`; a suite-specific set gets its own subdirectory.
+- Parity suites only prove the code paths the current tree exercises — a ported checker also
+  needs fixture tests driving each FAIL branch (the docheck port shipped with a missing
+  skills-inventory FAIL path that repo-tree parity could never see, because the real table is
+  complete).
+- Test expectations come from the oracle's source, never from memory — every wrong expectation
+  found while porting doc-check was an invented one.
 - `npm test` stays green, and the gate case count does not change without an explicit
   reason (see `gate/README.md`).

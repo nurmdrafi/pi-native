@@ -244,3 +244,57 @@ test("overlapLines counts the covered part of a window (R1x fraction)", () => {
   );
   assert.equal(overlapLines([], { start: 1, end: 10 }), 0);
 });
+
+// 2026-10-28: backward anchor from the read window's end. A blank line
+// dropped at an elision boundary (compress.rs head-tail join) leaves the
+// forward walk one line short — the window end is ground truth, so the tail
+// run lands on it and the gap absorbs the shortfall (widened, never shrunk).
+test("renderedCoverageFromBlocks anchors the tail run at winEnd and honors exact structured omissions", () => {
+  const mk = (n, off) => Array.from({ length: n }, (_, i) => `L${off + i}`);
+  const content = [
+    {
+      type: "text",
+      text: [
+        ...mk(20, 23),
+        "",
+        "[... omitted 748 chars / 4 lines ...]",
+        "",
+        ...mk(8, 48),
+      ].join("\n"),
+    },
+  ];
+  const structured = [
+    { startLine: 44, endLine: 47, chars: 748, lines: 4 },
+  ];
+  const got = renderedCoverageFromBlocks(content, 23, structured, 55);
+  assert.deepEqual(got.spans, [
+    { start: 23, end: 42 },
+    { start: 48, end: 55 },
+  ]);
+  assert.deepEqual(got.gaps, [{ start: 44, end: 47 }]);
+});
+
+test("without structured omissions the winEnd shortfall widens the gap conservatively", () => {
+  const mk = (n, off) => Array.from({ length: n }, (_, i) => `L${off + i}`);
+  const content = [
+    {
+      type: "text",
+      text: [
+        ...mk(20, 23),
+        "",
+        "[... omitted 748 chars / 4 lines ...]",
+        "",
+        ...mk(8, 48),
+      ].join("\n"),
+    },
+  ];
+  // walk: head 23-42, marker says 4 lines -> gap 43-46, tail -> 47-54;
+  // winEnd 55 exposes the 1-line shortfall: gap widens to 43-47, tail
+  // shifts to 48-55. Conservative — line 43 is never certified.
+  const got = renderedCoverageFromBlocks(content, 23, null, 55);
+  assert.deepEqual(got.gaps, [{ start: 43, end: 47 }]);
+  assert.deepEqual(got.spans, [
+    { start: 23, end: 42 },
+    { start: 48, end: 55 },
+  ]);
+});

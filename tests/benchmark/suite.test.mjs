@@ -88,9 +88,11 @@ test('manifests: getTask unknown id rejected; traversal rejected', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('scaffolding: .gitignore covers benchmark/runs/', () => {
+// Run records are cited from docs/native-tools.md and docs/rust-tools-architecture.md,
+// so the directory must stay trackable: gitignoring it breaks every committed link.
+test('scaffolding: benchmark/runs stays trackable (docs cite the records)', () => {
   const gi = readFileSync(join(HERE, '..', '..', '.gitignore'), 'utf8');
-  assert.ok(/(^|\n)benchmark\/runs\/(\n|$)/.test(gi));
+  assert.ok(!/(^|\n)benchmark\/runs\/(\n|$)/.test(gi), 'benchmark/runs/ must not be gitignored');
 });
 
 // ---------------------------------------------------------------- workdir prep (Step 3)

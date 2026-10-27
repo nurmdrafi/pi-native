@@ -47,7 +47,7 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 const { createEditTool } = await import(
   join(ROOT, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")
 );
-const piedit = (await import("../../extensions/piedit/index.ts")).default;
+const piedit = (await import("../../../extensions/piedit/index.ts")).default;
 
 /** Stubbed ExtensionAPI capturing the registered piedit tool. */
 function loadWrappedTool() {

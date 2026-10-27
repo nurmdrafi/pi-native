@@ -2,7 +2,7 @@
 /**
  * piedit diff differential fuzz — Rust native render vs TS oracle.
  *
- * Isolates the diff/patch port (custom-tools/piedit/src/diff.rs) from the
+ * Isolates the diff/patch port (rust-tools/piedit/src/diff.rs) from the
  * edit pipeline: for randomized content pairs, drive `bin/piedit --path`
  * once WITHOUT renderDiff (legacy envelope → {baseContent,newContent}) and
  * once WITH renderDiff (native {diff,patch,firstChangedLine}), then compare

@@ -20,8 +20,8 @@ export const cases = [
     'pibash: re-run guard blocks an identical re-run',
     'pass',
     async (pi) => {
-      await pibash(pi, 'fd -e ts . custom-tools');
-      return pibash(pi, 'fd -e ts . custom-tools');
+      await pibash(pi, 'fd -e ts . rust-tools');
+      return pibash(pi, 'fd -e ts . rust-tools');
     },
   ],
   [
@@ -32,7 +32,7 @@ export const cases = [
   [
     'pibash: benign command passes the gate',
     'pass',
-    async (pi) => pibash(pi, 'fd -e ts . custom-tools/pibash'),
+    async (pi) => pibash(pi, 'fd -e ts . rust-tools/pibash'),
   ],
   [
     'pibash: H1 output cap applies to pibash results',
@@ -68,7 +68,7 @@ export const cases = [
       const prev = process.env.PI_NATIVE_BASH;
       delete process.env.PI_NATIVE_BASH;
       try {
-        const r = await bash(pi, 'fd -e ts . custom-tools');
+        const r = await bash(pi, 'fd -e ts . rust-tools');
         return r.blocked && r.reason.startsWith('Token Economy (Pibash-first)')
           ? r
           : { blocked: false, reason: `wrong family: ${String(r.reason).slice(0, 70)}` };
@@ -81,6 +81,6 @@ export const cases = [
   [
     'P2: built-in bash passes when pibash is opted out (PI_NATIVE_BASH=0)',
     'pass',
-    async (pi) => bash(pi, 'fd -e ts . custom-tools'),
+    async (pi) => bash(pi, 'fd -e ts . rust-tools'),
   ],
 ];

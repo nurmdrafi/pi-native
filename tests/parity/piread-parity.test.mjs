@@ -46,7 +46,7 @@ const BIN = join(ROOT, "bin", "piread");
 // This suite's whole contract is byte-identity with the built-in `read`, so it
 // must run the pipeline WITHOUT the head-tail compaction that is on by default
 // for real sessions (PI_READ_COMPRESS=0). Compaction has its own coverage in
-// custom-tools/piread/src/compress.rs and tests/model-visible-baseline.mjs.
+// rust-tools/piread/src/compress.rs and tests/model-visible-baseline.mjs.
 process.env.PI_READ_COMPRESS = "0";
 
 // ---- stubbed ExtensionAPI capturing registered tools ----

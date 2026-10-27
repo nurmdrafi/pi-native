@@ -348,10 +348,10 @@ export const cases = [
     async (pi) => {
       // A mutating pibash run must count as an edit for the re-run economy rules:
       // run a benign command twice, with a mutating one in between.
-      await pibash(pi, "fd -e ts . custom-tools/pibash");
+      await pibash(pi, "fd -e ts . rust-tools/pibash");
       const mid = await pibash(pi, "touch /tmp/pibash-mutation-probe");
       if (mid.blocked) return { blocked: true, reason: mid.reason };
-      const again = await pibash(pi, "fd -e ts . custom-tools/pibash");
+      const again = await pibash(pi, "fd -e ts . rust-tools/pibash");
       return again;
     },
   ],

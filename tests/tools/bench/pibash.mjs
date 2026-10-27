@@ -46,7 +46,7 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 const { createBashTool } = await import(
   join(ROOT, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),
 );
-const pibash = (await import("../../extensions/pibash/index.ts")).default;
+const pibash = (await import("../../../extensions/pibash/index.ts")).default;
 
 if (!existsSync(BIN)) {
   console.error("FATAL  bin/pibash missing — run scripts/bootstrap.sh (or the cargo build) first");
