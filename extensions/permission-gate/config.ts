@@ -57,6 +57,8 @@ export const RULE_IDS = {
   searchPortability: "PB1",
   cadenceNudge: "CN",
   loopGuard: "LG1",
+  failureLoopGuard: "R11",
+  phaseNudge: "PH1",
   outputScrub: "OS",
 } as const;
 
@@ -95,6 +97,7 @@ export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
   "rerunGuard",
   "largeReadGuard",
   "reReadConsume",
+  "phaseNudge",
 ] as RuleKey[]);
 
 /** Behavior modifiers that ship OFF: enabling changes what a block DOES

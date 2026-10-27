@@ -22,7 +22,7 @@ Edits take effect on the next session start (or via `/reload-runtime` if adopted
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `permission-gate/` | Blocks rule-violating tool calls before execution, with corrective rule text (modules: `index` wiring, `anchor-guard`, `read-coverage`, `bash-cap`, `destructive`, `commitlint`, `toolchain`, `search-guard`, `output-scrub`, `config`) | `tool_call`, `tool_result`, `session_start`, `session_compact` |
 | `subagents/`       | Interactive tmux subagents (vendored upstream at `c3e8b53`, patches folded in; spawning tools gated by default)                                                                                      | tools, commands, renderers                                                           |
-| `pibash/`         | Native shell tool (built-in `bash` is the fallback; byte-exact envelope parity pinned by `tests/pibash-parity.test.mjs`); bash-kind in permission-gate, so the H1 cap, R10, destructive analysis, and mutation tracking all apply | tools                                                                                |
+| `pibash/`         | Native shell tool (built-in `bash` is the fallback; byte-exact envelope parity pinned by `tests/parity/pibash-parity.test.mjs`); bash-kind in permission-gate, so the H1 cap, R10, destructive analysis, and mutation tracking all apply | tools                                                                                |
 | `piread/`         | Native read pipeline registered as its own tool (S6); built-in `read` is blocked while registered (P1), images stay on `read`                                                                                                       | tools                                                                                |
 | `piedit/`         | Native edit pipeline registered as its own tool (S8); shares the guard's fuzzy-normalize match rules                                                                                                                               | tools                                                                                |
 | `pidx/`           | Native session-log indexer registered as its own tool; compact per-session extracts, incremental over unchanged files                                                                                                               | tools                                                                                |
@@ -63,13 +63,13 @@ PGATE_RERUN_GUARD=0 pi        # disable just the re-run guard for this run
 
 Precedence is env > `config.json` > default, and the default is **every rule on**. A missing, unreadable, or
 malformed config, or a key with no matching rule (a typo like `toolchainPnmp`), is reported on stderr and the
-rule stays on — enforcement never silently weakens. `tests/gate-config.test.mjs` pins all of this, including
+rule stays on — enforcement never silently weakens. `tests/gate/config.test.mjs` pins all of this, including
 that every config key has a row in the table below.
 
 ### Managing the destructive command list (1a)
 
 The H2 confirm set is data, not regex surgery: each command family is an entry with a stable id in
-[`destructive.ts`](permission-gate/destructive.ts) (`CONFIRM_SET`). Manage it from `config.json` without
+[`destructive.ts`](permission-gate/rules/destructive.ts) (`CONFIRM_SET`). Manage it from `config.json` without
 touching code — the change applies everywhere the set is judged (bash tool_call, wrapped payloads, R10
 mutation tracking):
 
@@ -97,6 +97,8 @@ any config that removes it.
 | H2              | bash              | destructive commands (sudo, rm incl. `/bin/rm`, git reset --hard/clean/checkout --/restore, package installs, `> /etc*`, DROP TABLE / DELETE FROM, `find -delete`, xargs/find -exec/bash -c/`$(…)` wrapped rm) need approval: a yes in chat or the invoking message, the UI confirm dialog; headless without any fails closed; a verbatim re-send re-prompts, never Re-blocks. The command families are a managed entry table (`CONFIRM_SET` ids, e.g. `rm`, `brew-install`, `pipe-interpreter`) — manage via `config.json` `destructive.remove`/`extra` (see above). TRIPWIRE, not a boundary |
 | R9              | bash              | `git commit -m <msg>` (env prefixes and git global flags normalized first; heredoc bodies extracted) against the commitlint conventional pattern — header form/length, subject case, body line length                                                                                                                                                                                                               |
 | R10             | bash              | identical re-run (same full command, fd-merges/whitespace normalized) ≤10 min after its last successful run with no intervening edit/write/mutating-bash (git add/commit/push/pull/…, rm/mv/cp/mkdir/touch, npm/pnpm ci, build scripts, file redirects) — watchers and failed-run retries exempt; cleared on `session_compact`                                                                                      |
+| R11             | bash              | ≥5 consecutive tool failures with no landed mutation since the streak began (the `mutationSeq` snapshot, not the raw count) — the next shell call is blocked; a red-green cycle edits between failing runs, so it never arms. The counter is shared with LG1's 3-error note                |
+| PH1             | all               | advisory only, never blocks: labels the turn's stage (exploring → editing → verifying → recovering) and attaches one "recovering" note per turn when a verify-family command fails right after an edit. Skipped when the result is already at H1's 40-line / 2 KB budget, so the cap still wins |
 | RB              | bash              | verbatim re-send of a just-blocked command escalates with a dedicated reason (never armed for the H2 family)
 | TC1             | bash              | `npm`/`npx`/`yarn` in a repo that pins pnpm (`packageManager`, `pnpm-lock.yaml`) — use `pnpm run`/`exec`/`dlx`; lockfile and engine drift caused 7 failed runs                                                                                           |
 | TC2             | bash              | a node-family binary (`node`/`npm`/`npx`/`pnpm`/`yarn`/`bun`/`tsx`/`ts-node`) whose interpreter misses an exact `x.y.z` Node pin (`.nvmrc`/`engines`) — prefix `nvm use <pin> &&`; ranges and major-only pins stay advisory, so the harness root pin (`24`) never self-blocks |                                                                                                                                                                                                                                                                                                        |
@@ -121,8 +123,8 @@ State (per extension instance): `coverage` (path → merged span union + last ki
 ## Verifying changes
 
 - Strict typecheck against the installed package's types (`npx tsc --noEmit --strict` with a `paths` mapping to the global `@earendil-works/pi-coding-agent/dist/index.d.ts` — the global path is machine-specific).
-- `permission-gate` fixture test: `node tests/permission-gate.test.mjs` — 166 black-box cases through a stubbed ExtensionAPI (exit 0 = pass; preflight symlinks the global package into the gitignored root `node_modules`).
-- `node tests/block-recovery-audit.mjs` — re-measures what the model does after blocks (families, message sizes, one-shot recovery) over logged sessions; exits 1 below 85% recovery on a ≥10-block sample. Run after every permission-gate change.
+- `permission-gate` fixture test: `node tests/gate/runner.test.mjs` — 166 black-box cases through a stubbed ExtensionAPI (exit 0 = pass; preflight symlinks the global package into the gitignored root `node_modules`).
+- `node tests/tools/audit/block-recovery.mjs` — re-measures what the model does after blocks (families, message sizes, one-shot recovery) over logged sessions; exits 1 below 85% recovery on a ≥10-block sample. Run after every permission-gate change.
 - `npm run doc:check` must exit 0 (validates every command/path this README declares).
 - Restart pi to load changes; watch the first few tool calls — a misfiring rule shows up immediately as a block.
 

@@ -22,6 +22,8 @@
  * | SS1 | Search (Scope)                | recursive grep with no path/glob scope — scope it or use rg |
  * | PB1 | Portability (grep -P)         | grep -P on darwin — rg / grep -E |
  * | R10 | Token Economy (Re-run)         | identical command re-run within 10 min without an edit/write/mutating-bash since is blocked |
+ * | R11 | Loop Guard (Failure loop)     | >=5 consecutive tool failures with no landed mutation since the streak began: the next shell call is blocked (a red-green cycle edits between runs, so it never arms) |
+ * | PH1 | Phase label (Advisory)        | labels the turn's stage and notes once per turn when a verify-family command fails right after an edit; never blocks, and never displaces H1's cap |
  * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
  * | CN  | cadence nudge (non-blocking)  | tool_result note at ~200 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
  * | LG1 | loop guard                      | same-target churn: note at 4th landed same-path edit/write in a user turn, one-shot block of that path's next mutation at the 7th; 3 consecutive tool errors note once; resets per user turn + compaction |
@@ -58,9 +60,9 @@ import {
 import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
 
-import { toLF, validateEditAnchors } from "./anchor-guard.ts";
-import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed } from "./bash-cap.ts";
-import { scrubBashText } from "./output-scrub.ts";
+import { toLF, validateEditAnchors } from "./rules/anchor-guard.ts";
+import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed } from "./rules/bash-cap.ts";
+import { scrubBashText } from "./rules/output-scrub.ts";
 import {
   APPROVED_WINDOW_MS,
   APPROVAL_RE,
@@ -69,8 +71,8 @@ import {
   normalizeSegment,
   segmentDestructive,
   splitSegments,
-} from "./destructive.ts";
-import { validateCommitMessages } from "./commitlint.ts";
+} from "./rules/destructive.ts";
+import { validateCommitMessages } from "./rules/commitlint.ts";
 import {
   certify,
   countTextLines,
@@ -85,13 +87,14 @@ import {
   recordGaps,
   shiftSpansForEdit,
   snapshot,
-} from "./read-coverage.ts";
+} from "./rules/read-coverage.ts";
 import type {
   CompactionOmission,
   CoverageEntry,
   LineSpan,
-} from "./read-coverage.ts";
-import { toolchainCheck } from "./toolchain.ts";
+} from "./rules/read-coverage.ts";
+import { toolchainCheck } from "./rules/toolchain.ts";
+import { isVerifyCommand, nextPhase, type ActionKind, type Phase } from "./rules/phase.ts";
 import {
   effectiveCwd,
   enumeratesPaths,
@@ -102,7 +105,7 @@ import {
   searchCheck,
   searchHitsFrom,
   searchedPathsFrom,
-} from "./search-guard.ts";
+} from "./rules/search-guard.ts";
 
 // ---- R1b + cadence thresholds (see index header table: R1b, CN) ----
 /** big-read gate: a whole-file-ish request for a file larger than this is
@@ -145,6 +148,10 @@ const CADENCE_CTX_TOKENS = 150_000;
 const RERUN_WINDOW_MS = 10 * 60_000;
 /** Re-block window: shorter than R10 — the verbatim re-send pattern is immediate (2026-10-08 audit: 3s and 2.5s gaps) */
 const REBLOCK_WINDOW_MS = 2 * 60_000;
+/** R11: consecutive tool failures, with no landed mutation since the streak began, before escalation.
+ * 5 is above any healthy red-green cycle; the mutation snapshot (not the raw count)
+ * is what keeps TDD from tripping it. */
+const FAILURE_LOOP_AT = 5;
 export default function (pi: ExtensionAPI) {
   /**
    * In-context coverage (2026-10-05 audit): per absolute path, the union of
@@ -227,6 +234,12 @@ export default function (pi: ExtensionAPI) {
   let lg1Armed: string | undefined;
   let lg1ErrStreak = 0;
   let lg1ErrNoted = false;
+  /** R11: mutationSeq when the current error streak began — a landed mutation since
+   * then disarms the escalation (a red-green cycle is not a loop). */
+  let lg1ErrMutSeq = 0;
+  /** PH1: the turn's stage label and its one-note latch (see phase.ts). */
+  let turnPhase: Phase = "idle";
+  let phaseNoted = false;
   /** AG repeat-miss hint (2026-10-26 audit v2): anchor blocks are the
    * top LLM error class (94/wk) and cluster in churn turns (27% of all
    * blocks+errors). 2nd+ AG miss on one file in a turn appends a
@@ -248,6 +261,7 @@ export default function (pi: ExtensionAPI) {
     lg1Armed = undefined;
     lg1ErrStreak = 0;
     lg1ErrNoted = false;
+    lg1ErrMutSeq = 0;
     agMisses.clear();
   }
   /** one-shot block of an armed path's next mutation — called from the
@@ -273,19 +287,51 @@ export default function (pi: ExtensionAPI) {
     }
     return undefined;
   }
-  /** consecutive tool errors (bash + edit/write): note once at 3, never blocks */
+  /** consecutive tool errors (bash + edit/write): note once at 3 (LG1), escalate at
+   * FAILURE_LOOP_AT (R11). The counter runs even when loopGuard is off so R11 can
+   * be enabled on its own. */
   function lg1RecordResult(isError: boolean): string | undefined {
-    if (!ruleEnabled("loopGuard")) return undefined;
     if (!isError) {
       lg1ErrStreak = 0;
       return undefined;
     }
+    if (lg1ErrStreak === 0) lg1ErrMutSeq = mutationSeq;
     lg1ErrStreak++;
+    if (!ruleEnabled("loopGuard")) return undefined;
     if (lg1ErrStreak === 3 && !lg1ErrNoted) {
       lg1ErrNoted = true;
       return "Loop Guard (LG1): 3 consecutive tool errors — if the same fix keeps failing, stop and ask the user instead of retrying.";
     }
     return undefined;
+  }
+  /** PH1 helper: true when a bash result is already at H1's model-visible budget,
+   * where the cap (not a phase note) must survive the handler composition. */
+  function oversizedBashResult(event: { content?: unknown }): boolean {
+    const text = (event.content as { text?: unknown }[] | undefined ?? [])
+      .map((c) => (typeof c?.text === "string" ? c.text : ""))
+      .join("\n");
+    return text.split("\n").length > 40 || Buffer.byteLength(text, "utf8") > 2_048;
+  }
+  /** PH1: advance the turn's phase label and, on entering `recovering`, emit the
+   * single note this rule allows per turn. Advisory only — it never blocks. */
+  function phaseRecord(kind: ActionKind, failed: boolean): string | undefined {
+    const prev = turnPhase;
+    turnPhase = nextPhase(turnPhase, { kind, failed });
+    if (!ruleEnabled("phaseNudge")) return undefined;
+    if (turnPhase !== "recovering" || prev === "recovering" || phaseNoted) return undefined;
+    phaseNoted = true;
+    return "Phase (PH1): recovering — the last verify failed right after an edit. Change the code before running it again; an unchanged re-run is what R10 blocks, a failure streak is what R11 blocks.";
+  }
+  /** R11: block the next shell call when the streak says the agent is circling —
+   * repeated failures with nothing landed in between. */
+  function failureLoopGate(): { block: true; reason: string } | undefined {
+    if (!ruleEnabled("failureLoopGuard")) return undefined;
+    if (lg1ErrStreak < FAILURE_LOOP_AT) return undefined;
+    if (mutationSeq !== lg1ErrMutSeq) return undefined;
+    return enforce(
+      "failureLoopGuard",
+      `Loop Guard (R11): ${lg1ErrStreak} consecutive tool failures with no landed change — stop retrying. Say what the failure reports and what you changed, then ask the user before continuing.`,
+    );
   }
   /** R10: bumped on every successful edit/write — a mutation makes verify re-runs legitimate */
   let mutationSeq = 0;
@@ -478,6 +524,9 @@ export default function (pi: ExtensionAPI) {
     promptApproves = APPROVAL_RE.test(prompt);
     // LG1: a new user turn is the loop boundary — churn/error counters reset
     lg1Reset();
+    // PH1: a new user turn re-arms the phase label
+    turnPhase = "idle";
+    phaseNoted = false;
   });
 
   on("tool_call", async (event, ctx) => {
@@ -768,6 +817,9 @@ export default function (pi: ExtensionAPI) {
       return blockCall(
         "Permission Gate (Malformed): bash call has no command string — re-send the tool call with input.command.",
       );
+    // R11: circling — repeated failures with nothing landed since the streak began
+    const r11 = failureLoopGate();
+    if (r11) return r11;
     // P2 (2026-10-18): pibash-first. Built-in `bash` is blocked so the native
     // pipeline (same schema, full bash-kind rule set — H1/R10/destructive/
     // toolchain) runs; pibash itself falls back to the built-in executor when
@@ -1198,6 +1250,17 @@ export default function (pi: ExtensionAPI) {
             { type: "text", text: lg1ErrNote },
           ],
         };
+      const phNote = phaseRecord(
+        isVerifyCommand(String(event.input?.command ?? "")) ? "verify" : "other",
+        event.isError === true,
+      );
+      // H1 owns oversized results: returning content here would replace the cap
+      // (later handlers win the composition), so the note is skipped when the
+      // output is already at H1's 40-line / 2 KB budget.
+      if (phNote && !oversizedBashResult(event))
+        return {
+          content: [...(event.content ?? []), { type: "text", text: phNote }],
+        };
       return;
     }
     const entry = pendingEdits.get(event.toolCallId);
@@ -1214,6 +1277,7 @@ export default function (pi: ExtensionAPI) {
       mutationSeq++;
       // LG1: count the landed mutation; may arm the one-shot loop block
       lg1Note = lg1RecordMutation(entry.path);
+      phaseRecord("edit", false);
       // item 6 (2026-10-11): prior spans describe the exact pre-edit bytes.
       // Drop the path's coverage when any anchor was fuzzy (its line-shift
       // contribution is unknown) or the file drifted between certification

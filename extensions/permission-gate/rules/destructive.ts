@@ -8,7 +8,7 @@
  * the actual boundary. */
 import { homedir } from "os";
 import { realpathSync } from "fs";
-import { config } from "./config.ts";
+import { config } from "../config.ts";
 
 
 /**
