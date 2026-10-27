@@ -26,7 +26,8 @@ import { renderedCoverageFromBlocks } from "../../../extensions/permission-gate/
 
 const argv = process.argv.slice(2);
 const AS_JSON = argv.includes("--json");
-const sessArg = argv[argv.indexOf("--session") + 1];
+const sessIdx = argv.indexOf("--session");
+const sessArg = sessIdx === -1 ? undefined : argv[sessIdx + 1];
 
 function newestSession() {
   const root = join(homedir(), ".pi/agent/sessions");
@@ -101,7 +102,16 @@ const FAMILIES = [
   ["destructive", /destructive|confirm/i],
   ["other", /.*/],
 ];
+/**
+ * Gate text always starts with its rule's label; a tool error or a hook failure
+ * only *looks* like one when its output happens to contain a gate-ish string
+ * (`file.rs:398:` from an rg hit, a commitlint rejection). Classifying by the
+ * leading label keeps the block ledger honest: before this split, 5 of 22
+ * "blocks" in one session were ordinary command failures.
+ */
+const GATE_LABEL = /^(Anchor Guard|Token Economy|Loop Guard|Locate-first|Toolchain|SearchGuard|Search Guard|Destructive|Commitlint|Output scrub|Bash cap|Phase)/i;
 const familyOf = (text) => FAMILIES.find(([, re]) => re.test(text))[0];
+const kindOf = (text) => (GATE_LABEL.test(text.trim()) ? "gate" : "error");
 
 const keyOf = (name, arg) => `${name}:${arg.slice(0, 60)}`;
 
@@ -111,8 +121,13 @@ function audit() {
   for (const c of calls.values()) byTool[c.name] = (byTool[c.name] ?? 0) + 1;
 
   const blocks = [];
+  const errors = [];
   for (const r of results.filter((x) => x.isError)) {
     const c = calls.get(r.id);
+    if (kindOf(r.text) === "error") {
+      errors.push({ tool: r.tool, target: c?.arg ?? "?", head: r.text.split("\n")[0]?.slice(0, 110) });
+      continue;
+    }
     const family = familyOf(r.text.split("\n")[0] ?? "");
     blocks.push({ tool: r.tool, target: c?.arg ?? "?", family, head: r.text.split("\n")[0]?.slice(0, 110) });
   }
@@ -182,6 +197,9 @@ function audit() {
       byFamily: blocks.reduce((a, b) => ((a[b.family] = (a[b.family] ?? 0) + 1), a), {}),
       unrecovered: blocksWithRecovery.filter((b) => !b.recovered).length,
       ledger: blocksWithRecovery },
+    // Non-gate failures (a command exiting 1, a hook rejecting a commit) are
+    // reported separately so the block ledger stays a gate measurement.
+    errors: { total: errors.length, ledger: errors },
     compaction: { checked: results.filter((r) => r.tool === "piread" && r.details?.compaction?.omissions?.length).length,
       findings: compactionFindings },
   };
@@ -194,8 +212,7 @@ else {
   console.log(`calls: ${report.calls.total} byTool=${JSON.stringify(report.calls.byTool)} batch=${JSON.stringify(report.calls.batchHistogram)} parallel=${report.calls.parallelShare}%`);
   console.log(`blocks: ${report.blocks.total} byFamily=${JSON.stringify(report.blocks.byFamily)} unrecovered=${report.blocks.unrecovered}`);
   for (const b of report.blocks.ledger) {
-    console.log(`  [${b.family}]${b.recovered ? "" : "[UNRECOVERED]"} ${b.tool} ${(b.target ?? "").slice(0, 60)} :: ${b.head?.slice(0, 90)}`);
-  }
+    console.log(`  [${b.family}]${b.recovered ? "" : "[UNRECOVERED]"} ${b.tool} ${(b.target ?? "").slice(0, 60)} :: ${b.head?.slice(0, 90)}`);  }
   console.log(`compaction: ${report.compaction.checked} results checked, ${report.compaction.findings.length} findings`);
   for (const f of report.compaction.findings) console.log(`  [${f.issue.slice(0, 90)}] ${f.target}`);
 }
