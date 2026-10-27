@@ -37,7 +37,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   effectiveCwd,
+  enumeratesPaths,
   hitAnchorsWindow,
+  hitLinesLabel,
+  hitWindowHint,
   isSearchSegment,
   searchCheck,
   searchHitsFrom,
@@ -213,6 +216,72 @@ test("hitAnchorsWindow: overlap allows, empty set allows all, miss blocks", () =
   assert.ok(!hitAnchorsWindow(hits, rp("src/utils/realtime.js"), { start: 400, end: 540 }));
   assert.ok(hitAnchorsWindow(hits, rp("src/hooks/hook.js"), { start: 400, end: 540 }));
   assert.ok(!hitAnchorsWindow(hits, rp("src/utils/keep.ts"), { start: 1, end: 140 }));
+});
+
+// ---- wc enumeration + single-file attribution (2026-10-27 dropx-admin) ----
+
+test("wc -l count-first lines seed path-only", () => {
+  const out = searchHitsFrom(
+    "    134 src/utils/realtime.js\n    328 src/hooks/hook.js\n    727 total\n",
+    undefined, rp, exists,
+  );
+  assert.deepEqual(out.get(rp("src/utils/realtime.js")), new Set());
+  assert.ok(out.has(rp("src/hooks/hook.js")));
+  assert.equal(out.size, 2); // "total" row resolves nowhere, seeds nothing
+});
+
+test("wc over stdin (bare count) seeds nothing", () => {
+  const out = searchHitsFrom("      42\n", undefined, rp, exists);
+  assert.equal(out.size, 0);
+});
+
+test("count-first rows are fail-closed on metadata lines", () => {
+  const out = searchHitsFrom(
+    "-rw-r--r--@ 1 nur  staff  23106 Oct 27 14:40 src/hooks/hook.js\n",
+    undefined, rp, exists,
+  );
+  assert.equal(out.size, 0);
+});
+
+test("enumeratesPaths matches wc anywhere in the segment, never ls", () => {
+  assert.ok(enumeratesPaths("wc -l src/utils/*.js"));
+  assert.ok(enumeratesPaths("ls src && wc -c out.txt"));
+  assert.ok(!enumeratesPaths("ls src/content/Management/"));
+  assert.ok(!enumeratesPaths("echo wc"));
+});
+
+test("single-file attribution: bare NN: lines become hits of the named file", () => {
+  const out = searchHitsFrom(
+    "241:          dataSource={rows}\n245:          pagination={{\nno match\n261:        onSuccess\n",
+    undefined, rp, exists,
+    rp("src/utils/realtime.js"),
+  );
+  assert.deepEqual(out.get(rp("src/utils/realtime.js")), new Set([241, 245, 261]));
+});
+
+test("single-file attribution ignores column-only and path-prefixed forms", () => {
+  const out = searchHitsFrom(
+    "12:5:x\nsrc/utils/keep.ts:34:y\n", undefined, rp, exists,
+    rp("src/utils/realtime.js"),
+  );
+  assert.deepEqual(out.get(rp("src/utils/keep.ts")), new Set([34]));
+  assert.ok(!out.has(rp("src/utils/realtime.js")));
+});
+
+// ---- locate remedy text: which lines to read, never a guessed window ----
+
+test("hitWindowHint pads the reported hits and stays minimal", () => {
+  assert.deepEqual(hitWindowHint(new Set([241, 245, 261])), {
+    offset: 238,
+    limit: 27,
+  });
+  assert.deepEqual(hitWindowHint(new Set([900]), 2, 10), { offset: 898, limit: 5 });
+  assert.equal(hitWindowHint(new Set()), undefined);
+});
+
+test("hitLinesLabel sorts and caps a long hit set", () => {
+  assert.equal(hitLinesLabel(new Set([40, 12])), "12, 40");
+  assert.equal(hitLinesLabel(new Set([9, 5, 3, 1, 7, 11])), "1, 3, 5, +3 more");
 });
 
 test.after(() => rmSync(root, { recursive: true, force: true }));

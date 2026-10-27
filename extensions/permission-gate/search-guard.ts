@@ -174,6 +174,19 @@ export function isSearchSegment(seg: string): boolean {
   return seg.split(/\s+/).filter(Boolean).some((t) => SEARCH_TOOL_RE.test(t));
 }
 
+/** R1c/C4 (2026-10-27): does this segment run a path enumeration — a command
+ * whose output pairs a count with a path (`wc -l`), so its rows name files the
+ * agent then legitimately reads?
+ * `wc` must sit in command position: `echo wc` mentions the tool without
+ * running it. `ls` is excluded on purpose — its `-l` rows carry permission,
+ * size and date metadata, which read as noise, not as a named path. */
+export function enumeratesPaths(seg: string): boolean {
+  return seg
+    .split(/\s*(?:&&|\|\||[|;])\s*/)
+    .filter(Boolean)
+    .some((sub) => sub.split(/\s+/)[0] === "wc");
+}
+
 /** R1c locate-first: which paths did this command target? A wide window read
  * of a path that was never searched is a guess about where the content is.
  * Tokens that exist on disk count as targets; flags and patterns do not. */
@@ -255,12 +268,15 @@ export function effectiveCwd(
  * FAIL-CLOSED, two gates: callers scan only results of commands that passed
  * isSearchSegment (an `echo <path>` result is never parsed), and every
  * candidate must exist on disk after cwd resolution — prose like `foo:12:`
- * resolves nowhere, so it seeds nothing. */
+ * resolves nowhere, so it seeds nothing.
+ * `singleFile` (2026-10-27): the search named exactly one file, so its output
+ * carries no path prefix — bare `NN:` lines are that file's hits. */
 export function searchHitsFrom(
   text: string,
   cwd: string | undefined,
   resolvePath: (p: string, cwd?: string) => string,
   exists: (p: string) => boolean,
+  singleFile?: string,
 ): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>();
   for (const line of text.slice(0, HIT_SCAN_CHARS).split(/\r?\n/)) {
@@ -271,6 +287,30 @@ export function searchHitsFrom(
       const lines = out.get(abs) ?? new Set<number>();
       lines.add(Number(hit[2]));
       out.set(abs, lines);
+      continue;
+    }
+    // single-file attribution: rg on one file, `awk`/`sed -n` on one file —
+    // output is `241:  dataSource`, no path to anchor on. A tail that itself
+    // starts with a digit is a `line:col:` shape (`12:5:x`), not content:
+    // fail closed rather than credit a line the search never reported.
+    if (singleFile !== undefined) {
+      const bare = /^(\d+):(.*)$/.exec(line);
+      if (bare && !/^\d/.test(bare[2])) {
+        const lines = out.get(singleFile) ?? new Set<number>();
+        lines.add(Number(bare[1]));
+        out.set(singleFile, lines);
+        continue;
+      }
+    }
+    // enumeration row (`wc -l`): a count, then the path it counted. The count
+    // is not a hit line and the path was never grepped, so seed path-only (any
+    // window). `727 total` resolves nowhere and seeds nothing; a metadata row
+    // with more than one trailing token (`ls -l`) never matches.
+    const counted = /^\s*\d+\s+(\S+)\s*$/.exec(line);
+    if (counted && !counted[1].includes(":") && /[./]/.test(counted[1])) {
+      const abs = resolvePath(counted[1], cwd);
+      if (!exists(abs)) continue;
+      if (!out.has(abs)) out.set(abs, new Set<number>());
       continue;
     }
     // path-only: one token shaped like a path (has / or .), no colon (a
@@ -306,6 +346,31 @@ export function hitAnchorsWindow(
   for (const l of lines)
     if (l >= win.start && l <= win.end) return true;
   return false;
+}
+
+/** Locate remedy text: the lines a search reported for one file, bounded to
+ * three entries so the reason stays inside the 220c block cap ("241, 245,
+ * 261, +2 more"). */
+export function hitLinesLabel(lines: Set<number>): string {
+  const sorted = [...lines].sort((a, b) => a - b);
+  const shown = sorted.slice(0, 3).join(", ");
+  return sorted.length > 3 ? `${shown}, +${sorted.length - 3} more` : shown;
+}
+
+/** Locate remedy: the smallest read window that covers the reported hits,
+ * padded by `pad` lines and capped at `max` — the block hands the model a
+ * paste-ready call, so the remedy costs one targeted read instead of a re-run
+ * of the search plus a guessed window. Undefined for a path-only seed. */
+export function hitWindowHint(
+  lines: Set<number>,
+  pad = 3,
+  max = 60,
+): { offset: number; limit: number } | undefined {
+  if (lines.size === 0) return undefined;
+  const sorted = [...lines].sort((a, b) => a - b);
+  const offset = Math.max(1, sorted[0] - pad);
+  const limit = Math.min(sorted[sorted.length - 1] + pad - offset + 1, max);
+  return { offset, limit };
 }
 
 /** fnmatch-style single-level glob → RegExp. `?` → one non-slash char,

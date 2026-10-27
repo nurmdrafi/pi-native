@@ -9,7 +9,7 @@
  * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
- * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a `path:line:` hit its output printed — is blocked unless the window covers a reported hit line; `rg` first, then read the hit's range |
+ * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; the block lists those hit lines and the piread call that covers them |
  * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
@@ -53,6 +53,7 @@ import {
   renameSync,
   writeFileSync,
   existsSync,
+  statSync,
 } from "fs";
 import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
@@ -93,7 +94,10 @@ import type {
 import { toolchainCheck } from "./toolchain.ts";
 import {
   effectiveCwd,
+  enumeratesPaths,
   hitAnchorsWindow,
+  hitLinesLabel,
+  hitWindowHint,
   isSearchSegment,
   searchCheck,
   searchHitsFrom,
@@ -169,8 +173,13 @@ export default function (pi: ExtensionAPI) {
       searchedPaths.add(p);
   };
   /** R1c/C4: bash toolCallId -> the cwd its search hits resolve against;
-   * set only for rg-family commands (isSearchSegment). */
-  const pendingSearchCalls = new Map<string, { cwd: string | undefined }>();
+   * set only for search/enumeration commands. `singleFile` marks a search that
+   * named exactly one regular file, whose output therefore carries no path
+   * prefix. */
+  const pendingSearchCalls = new Map<
+    string,
+    { cwd: string | undefined; singleFile?: string }
+  >();
   /** R1c/C4: files a search's OUTPUT named, -> the hit lines it reported
    * (empty set = path-only result, e.g. `rg -l` — any window). */
   const searchHits = new Map<string, Set<number>>();
@@ -585,10 +594,12 @@ export default function (pi: ExtensionAPI) {
         !hitAnchorsWindow(searchHits, path, win) &&
         !coverage.has(path)
       ) {
+        const hits = searchHits.get(path);
+        const hint = hits ? hitWindowHint(hits) : undefined;
         return blockCall(
-          searchHits.has(path)
-            ? `Locate-first: ${win.end - win.start + 1}-line window on '${shown}' covers no line a search reported for it — read a hit's range (\`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then piread that range).`
-            : `Locate-first: ${win.end - win.start + 1}-line window on '${shown}', which no search has named this session. \`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then read the hit's range.`,
+          hint && hits
+            ? `Locate-first: no hit in this ${win.end - win.start + 1}-line window (hits ${hitLinesLabel(hits)}) — piread {path:'${shown}', offset:${hint.offset}, limit:${hint.limit}}. Hits recorded; do not re-search.`
+            : `Locate-first: '${shown}' was never named by a search this session — locate first (\`rg -n <term> ${shown.replace(/^.*\//, "")}\`), then piread the hit's line ±3.`,
         );
       }
       // R1b (2026-10-10 audit; demoted 2026-10-21): a whole read of a large
@@ -916,10 +927,23 @@ export default function (pi: ExtensionAPI) {
       // merely PRINTS — remember the effective cwd (session cwd advanced by
       // `cd <dir> &&` prefixes inside the command) so the tool_result
       // handler can resolve the relative `path:line:` forms rg prints.
-      if (normSegs.some(isSearchSegment))
+      const search = normSegs.some(isSearchSegment);
+      if (search || normSegs.some(enumeratesPaths)) {
+        // enumeration rows (`wc -l`) name files too; a search whose output has
+        // no path prefix (rg/awk/sed on ONE file) anchors by bare `NN:` lines.
+        // The sole operand must be a regular file — `rg foo src/` names a
+        // directory, and crediting bare lines to it would credit everything.
+        const targets = search
+          ? searchedPathsFrom(normSegs, ctx?.cwd, normPath, existsSync)
+          : [];
+        const soleFile =
+          targets.length === 1 &&
+          statSync(targets[0], { throwIfNoEntry: false })?.isFile() === true;
         pendingSearchCalls.set(event.toolCallId, {
           cwd: effectiveCwd(normSegs, ctx?.cwd, normPath),
+          singleFile: soleFile ? targets[0] : undefined,
         });
+      }
     }
     return;
   });
@@ -946,6 +970,7 @@ export default function (pi: ExtensionAPI) {
       call.cwd,
       normPath,
       existsSync,
+      call.singleFile,
     )) {
       const cur = searchHits.get(p);
       if (!cur) searchHits.set(p, lines);
