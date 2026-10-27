@@ -60,16 +60,16 @@ fi
 # 3. piread (native read tool, default-on — PI_NATIVE_READ=0 opts out;
 #    falls back to the built-in read without the binary). Always rebuilt —
 #    cargo is incremental, so a no-op rebuild stays cheap; pidx staleness is
-#    handled by the pidoc --fix step below. Builds from the custom-tools
+#    handled by the pidoc --fix step below. Builds from the rust-tools
 #    workspace (-p).
-PIREAD_CRATE=custom-tools/piread
-PIREAD_TARGET=custom-tools/target/release/piread
+PIREAD_CRATE=rust-tools/piread
+PIREAD_TARGET=rust-tools/target/release/piread
 if [ -d "$PIREAD_CRATE/src" ] && [ -f "$PIREAD_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
   if [ -n "$CARGO" ]; then
       ui_run "piread: build + install (cargo --release)" \
-        sh -c 'cd custom-tools && exec "$1" build --release -p piread' sh "$CARGO" \
+        sh -c 'cd rust-tools && exec "$1" build --release -p piread' sh "$CARGO" \
         && install_native "$PIREAD_TARGET" bin/piread \
         || echo "!! piread: falls back to the built-in read" >&2
   else
@@ -79,15 +79,15 @@ fi
 
 # 4. piedit (native edit tool, default-on — PI_NATIVE_EDIT=0 opts out;
 #    falls back to the built-in edit without the binary). Always rebuilt
-#    like piread; builds from the custom-tools workspace (-p).
-PIEDIT_CRATE=custom-tools/piedit
-PIEDIT_TARGET=custom-tools/target/release/piedit
+#    like piread; builds from the rust-tools workspace (-p).
+PIEDIT_CRATE=rust-tools/piedit
+PIEDIT_TARGET=rust-tools/target/release/piedit
 if [ -d "$PIEDIT_CRATE/src" ] && [ -f "$PIEDIT_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
   if [ -n "$CARGO" ]; then
       ui_run "piedit: build + install (cargo --release)" \
-        sh -c 'cd custom-tools && exec "$1" build --release -p piedit' sh "$CARGO" \
+        sh -c 'cd rust-tools && exec "$1" build --release -p piedit' sh "$CARGO" \
         && install_native "$PIEDIT_TARGET" bin/piedit \
         || echo "!! piedit: falls back to the built-in edit" >&2
   else
@@ -97,15 +97,15 @@ fi
 
 # 5. pibash (native shell tool, default-on — PI_NATIVE_BASH=0 opts out;
 #    falls back to the built-in bash without the binary). Always rebuilt
-#    like piread; builds from the custom-tools workspace (-p).
-PIBASH_CRATE=custom-tools/pibash
-PIBASH_TARGET=custom-tools/target/release/pibash
+#    like piread; builds from the rust-tools workspace (-p).
+PIBASH_CRATE=rust-tools/pibash
+PIBASH_TARGET=rust-tools/target/release/pibash
 if [ -d "$PIBASH_CRATE/src" ] && [ -f "$PIBASH_CRATE/Cargo.toml" ]; then
   CARGO=$(command -v cargo || true)
   [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
   if [ -n "$CARGO" ]; then
       ui_run "pibash: build + install (cargo --release)" \
-        sh -c 'cd custom-tools && exec "$1" build --release -p pibash' sh "$CARGO" \
+        sh -c 'cd rust-tools && exec "$1" build --release -p pibash' sh "$CARGO" \
         && install_native "$PIBASH_TARGET" bin/pibash \
         || echo "!! pibash: falls back to the built-in bash" >&2
   else

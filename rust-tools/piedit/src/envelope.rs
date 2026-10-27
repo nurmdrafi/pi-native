@@ -122,7 +122,7 @@ impl ErrorKind {
     }
 }
 
-/// serde_json's escape classification (see custom-tools/piread/src/envelope.rs).
+/// serde_json's escape classification (see rust-tools/piread/src/envelope.rs).
 static ESCAPE: [u8; 256] = {
     let mut t = [0u8; 256];
     let mut i = 0;

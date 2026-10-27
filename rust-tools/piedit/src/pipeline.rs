@@ -159,6 +159,18 @@ pub fn normalize_for_fuzzy_match(text: &str) -> String {
     out
 }
 
+/// True when `normalize_for_fuzzy_match` would return its input unchanged, so
+/// the fuzzy view can be borrowed instead of materialized. NFKC is an identity
+/// on ASCII, every substitution target is non-ASCII, and `trimEnd` only bites a
+/// line whose last byte is ASCII whitespace — both conditions checked here, so
+/// source text skips the whole-content NFKC pass.
+fn fuzzy_view_is_identity(text: &str) -> bool {
+    text.is_ascii()
+        && text
+            .split('\n')
+            .all(|line| !matches!(line.as_bytes().last(), Some(b' ' | b'\t' | 0x0b | 0x0c | b'\r')))
+}
+
 // ---- matching ----
 
 struct MatchResult {
@@ -187,9 +199,17 @@ impl<'a> FuzzyView<'a> {
         Self { base, view: None }
     }
 
-    /// The fuzzy view of `base`, computed at most once.
-    fn content(&mut self) -> &str {
-        self.view.get_or_insert_with(|| normalize_for_fuzzy_match(self.base))
+    /// The fuzzy view of `base`: borrowed when the normalization is the
+    /// identity (ASCII, no trailing whitespace per line), materialized at most
+    /// once otherwise.
+    fn content(&mut self) -> Cow<'_, str> {
+        if self.view.is_none() && !fuzzy_view_is_identity(self.base) {
+            self.view = Some(normalize_for_fuzzy_match(self.base));
+        }
+        match &self.view {
+            Some(view) => Cow::Borrowed(view),
+            None => Cow::Borrowed(self.base),
+        }
     }
 
     /// Mirror `fuzzyFindText(base, oldText)`: exact find on the active
@@ -524,10 +544,11 @@ pub fn apply_edits(normalized_content: &str, edits: &[crate::envelope::Edit], pa
 
     let base_content = normalized_content;
     let new_content = if used_fuzzy_match {
-        let base_view = fuzzy
-            .into_view()
-            .expect("fuzzy mode implies the shared view was materialized");
-        apply_replacements_preserving_unchanged_lines(normalized_content, &base_view, &matched_edits)?
+        // Absent view means the normalization is the identity: the content *is*
+        // the fuzzy view, so there is nothing to substitute from.
+        let fuzzy_view = fuzzy.into_view();
+        let base_view = fuzzy_view.as_deref().unwrap_or(normalized_content);
+        apply_replacements_preserving_unchanged_lines(normalized_content, base_view, &matched_edits)?
     } else {
         apply_replacements(normalized_content, &matched_edits, 0)?
     };
@@ -698,6 +719,39 @@ mod tests {
 
     fn apply(content: &str, edits: &[Edit]) -> Result<Applied, ToolError> {
         apply_edits(&normalize_to_lf(content), edits, "/tmp/f")
+    }
+
+    /// The borrowed-view guard is safe only if it never claims identity for
+    /// input the real normalization would change. Safety is one-directional:
+    /// `identity(x)` implies `normalizeForFuzzyMatch(x) == x`; being
+    /// conservative on non-ASCII input is fine, being wrong is a parity bug.
+    #[test]
+    fn fuzzy_identity_guard_never_claims_a_change_free_case() {
+        let cases = [
+            "",
+            "ascii clean\nsecond line\n",
+            "trailing space \n",
+            "tab\t\n",
+            "line\n\nblank between\n",
+            "no trailing newline",
+            "curl \u{2018}quote\u{2019}\n",
+            "nbsp\u{00a0}here\n",
+            "accent \u{00e9}\n",
+            "emoji \u{1f680}\n",
+            "dash \u{2013}\n",
+            "space\n \n",
+            "cr\r\nlf\r\n",
+        ];
+        for c in cases {
+            if fuzzy_view_is_identity(c) {
+                assert_eq!(normalize_for_fuzzy_match(c), c, "claimed identity for {c:?}");
+            }
+        }
+        // Effectiveness: plain source text must take the borrowed path, or the
+        // shortcut buys nothing where it matters.
+        assert!(fuzzy_view_is_identity("fn main() {\n    run();\n}\n"));
+        assert!(fuzzy_view_is_identity(&"line\n".repeat(1000)));
+        assert!(!fuzzy_view_is_identity("fn main() { \n}\n"));
     }
 
     #[test]

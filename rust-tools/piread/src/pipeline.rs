@@ -130,19 +130,36 @@ pub fn read_text(
     while segs.next(&mut buf)? {
         seg_index = seg_index.saturating_add(1);
         if seg_index > start_line && sel_end.is_none_or(|e| seg_index <= e) {
+            // Fast path: a saturated head buffer accepts no further lines, so
+            // decoding and pushing are no-ops. The accounting below is what
+            // must survive: `sep + line.len()` is `sep + buf.len()` because the
+            // scanner already stripped the newline, and `lines_seen` is read
+            // only inside `push`.
+            if line_cap.is_none() && truncator.saturated() {
+                let sep = u64::from(sel_segments > 0);
+                sel_decoded_bytes = sel_decoded_bytes.saturating_add(sep + buf.len() as u64);
+                sel_segments = sel_segments.saturating_add(1);
+                last_sel_empty = buf.is_empty();
+                continue;
+            }
             let raw = String::from_utf8_lossy(&buf);
             // Optional per-line cap (PI_READ_LINE_CAP). Off by default: with
             // `line_cap == None` this is a borrow, so the common path is
             // byte-identical to the built-in. Only lines OVER the cap are
             // touched; whitespace and normal lines are never altered (edit's
             // exact matching depends on fidelity).
-            let capped: std::borrow::Cow<str> = match line_cap.filter(|c| raw.chars().count() as u64 > *c) {
-                Some(c) => {
-                    let n = c as usize;
-                    let head: String = raw.chars().take(n).collect();
-                    let dropped = raw.chars().count() - n;
-                    std::borrow::Cow::Owned(format!("{head}...[+{dropped} chars]"))
-                }
+            let capped: std::borrow::Cow<str> = match line_cap {
+                // A cut point existing IS the over-the-cap test: one pass to the
+                // (n+1)th char, then one pass over the remainder for the dropped
+                // count. The fits case borrows, so it never allocates.
+                Some(c) => match raw.char_indices().nth(c as usize) {
+                    Some((cut, _)) => std::borrow::Cow::Owned(format!(
+                        "{}...[+{} chars]",
+                        &raw[..cut],
+                        raw[cut..].chars().count()
+                    )),
+                    None => raw,
+                },
                 None => raw,
             };
             let line = capped.as_ref();
@@ -359,6 +376,13 @@ impl HeadTruncator {
     fn first_line_len(&self) -> u64 {
         self.first_line_len
     }
+
+    /// True once the head buffer accepts no further lines: line cap, byte cap,
+    /// or a first line already over the byte cap. Later `push` calls only bump
+    /// `lines_seen`, which nothing reads after the scan.
+    fn saturated(&self) -> bool {
+        !self.buffering
+    }
 }
 
 /// Newline-segment iterator over a reader with JS `split("\n")` semantics:
@@ -395,22 +419,34 @@ impl<R: BufRead> Segmenter<R> {
             return Ok(false);
         }
         buf.clear();
-        let n = self.inner.read_until(b'\n', buf).map_err(read_error)?;
-        if n == 0 {
-            self.finished = true;
-            if self.last_ended_newline {
-                return Ok(true); // the trailing empty segment
+        // Segment scan without a per-line read call: the fill buffer is
+        // searched for the next newline with memchr, so a 2,500-line file costs
+        // one scan per 64 KiB chunk instead of 2,500 `read_until` calls. The
+        // bytes handed to the caller are identical to the per-line form.
+        loop {
+            let available = self.inner.fill_buf().map_err(read_error)?;
+            if available.is_empty() {
+                self.finished = true;
+                if buf.is_empty() && self.last_ended_newline {
+                    return Ok(true); // the trailing empty segment
+                }
+                return Ok(!buf.is_empty());
             }
-            return Ok(false);
+            let (take, ended) = match memchr::memchr(b'\n', available) {
+                Some(i) => (i + 1, true),
+                None => (available.len(), false),
+            };
+            buf.extend_from_slice(&available[..take]);
+            self.inner.consume(take);
+            self.raw_seen = self.raw_seen.saturating_add(take as u64);
+            self.sniff(&buf[buf.len() - take..]);
+            if ended {
+                buf.pop();
+                self.last_ended_newline = true;
+                return Ok(true);
+            }
+            self.last_ended_newline = false;
         }
-        self.raw_seen = self.raw_seen.saturating_add(n as u64);
-        self.sniff(buf);
-        let ended = buf.last() == Some(&b'\n');
-        if ended {
-            buf.pop();
-        }
-        self.last_ended_newline = ended;
-        Ok(true)
     }
 
     /// NUL sniff over the leading 8 KiB of raw file bytes, chunk by chunk.
@@ -704,7 +740,7 @@ mod tests {
     // ---- full pipeline over real files (fixtures from the Step 2 dump) ----
 
     mod file {
-        use super::super::{read_text, read_text_compacted, PipelineOutput};
+        use super::super::{read_text, read_text_compacted, PipelineOutput, Segmenter};
         use crate::envelope::{ErrorKind, TruncationKind};
         use crate::ToolError;
         use std::fs;
@@ -933,6 +969,89 @@ mod tests {
                 !out.content.contains("piread: compacted"),
                 "diagnostic must not enter model-visible content"
             );
+        }
+
+        fn scan(bytes: &[u8]) -> (Vec<String>, u64, bool) {
+            let mut segs = Segmenter::new(std::io::Cursor::new(bytes.to_vec()));
+            let mut buf: Vec<u8> = Vec::new();
+            let mut out = Vec::new();
+            while segs.next(&mut buf).expect("segment read") {
+                out.push(String::from_utf8(buf.clone()).expect("segment is UTF-8"));
+            }
+            (out, segs.raw_seen, segs.binary)
+        }
+
+        fn segments(bytes: &[u8]) -> Vec<String> {
+            scan(bytes).0
+        }
+
+        /// JS `split("\n")`: `n` newlines yield `n + 1` segments, a trailing
+        /// newline contributes a final empty one, an empty file yields `[""]`.
+        /// Pinned because every counting rule downstream reads these bytes.
+        #[test]
+        fn segmenter_matches_js_split_semantics() {
+            let cases: [(&[u8], &[&str]); 7] = [
+                (b"", &[""]),
+                (b"a", &["a"]),
+                (b"a\n", &["a", ""]),
+                (b"\n", &["", ""]),
+                (b"a\nb", &["a", "b"]),
+                (b"a\r\nb\r\n", &["a\r", "b\r", ""]),
+                (b"\n\n", &["", "", ""]),
+            ];
+            for (bytes, want) in cases {
+                assert_eq!(segments(bytes), want, "input {bytes:?}");
+            }
+        }
+
+        #[test]
+        fn segmenter_spans_reader_chunks_and_counts_raw_bytes() {
+            // A single 200 KiB line: the segment comes back whole however the
+            // 64 KiB BufReader chunks it, and raw_seen equals the file length.
+            let body = vec![b'q'; 200 * 1024];
+            let (out, raw_seen, binary) = scan(&body);
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].len(), body.len());
+            assert_eq!(raw_seen, body.len() as u64);
+            assert!(!binary);
+
+            // Many short lines crossing chunk boundaries.
+            let mut body = Vec::new();
+            for i in 0..5000 {
+                body.extend_from_slice(format!("line{i}\n").as_bytes());
+            }
+            let (out, raw_seen, _) = scan(&body);
+            assert_eq!(out.len(), 5001);
+            assert_eq!(out[0], "line0");
+            assert_eq!(out[4999], "line4999");
+            assert_eq!(out[5000], "");
+            assert_eq!(raw_seen, body.len() as u64);
+
+            // NUL inside the first 8 KiB marks the file binary; past it, not.
+            let mut early = vec![b'a'; 1024];
+            early[100] = 0;
+            assert!(scan(&early).2);
+            let mut late = vec![b'a'; 16 * 1024];
+            late[9000] = 0;
+            assert!(!scan(&late).2);
+        }
+
+        /// Once the head buffer is full (line cap or byte cap), later selected
+        /// lines cannot be rendered — but the selection's *totals* still feed
+        /// `truncation.total_bytes` / `total_lines`. This pins them, so a fast
+        /// path that skips decode/push for those lines stays honest.
+        #[test]
+        fn saturated_selection_keeps_line_and_byte_totals_exact() {
+            let body: String = (0..5000).map(|i| format!("line{i}\n")).collect();
+            let f = tmp_file("saturated", body.as_bytes());
+            let out = read(&f, None, None).unwrap();
+            let t = out.truncation.expect("overflowing selection is truncated");
+            assert_eq!(t.total_lines, 5000);
+            assert_eq!(t.output_lines, 2000);
+            assert_eq!(t.truncated_by, Some(TruncationKind::Lines));
+            // Joined selection length: every segment after the first adds one
+            // separator, so the phantom trailing segment contributes the last.
+            assert_eq!(t.total_bytes, body.len() as u64);
         }
 
         #[test]

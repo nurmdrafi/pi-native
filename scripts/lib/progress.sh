@@ -1,7 +1,7 @@
 # progress.sh — compact progress UI for setup scripts. POSIX sh, no deps.
 # TTY on stdout: step line stays on one line, redrawn in place (spinner + elapsed).
 # Piped/CI: plain one-line-per-step output, no control characters.
-# Sourced (after-pull.sh, progress-demo.sh). API:
+# Sourced (after-pull.sh). API:
 #   ui_total <n>             — declare step count; starts the total-time clock
 #   ui_run <label> <cmd...>  — run cmd, then print `[k/n] label — ok|FAILED (time)`
 #                              FAILED appends the last log lines. Returns cmd's rc.

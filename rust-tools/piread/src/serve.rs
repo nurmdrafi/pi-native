@@ -51,13 +51,22 @@ pub fn serve() -> ExitCode {
     // largest response seen): serialize in place, append the newline, emit
     // with a single write — no per-response String, no re-growth.
     let mut buf = Vec::with_capacity(16 * 1024);
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break }; // unreadable stdin: treat as EOF
-        if line.trim().is_empty() {
+    // The request line is reused the same way: `lines()` would allocate a
+    // fresh String per request.
+    let mut stdin = stdin.lock();
+    let mut line = String::with_capacity(4 * 1024);
+    loop {
+        line.clear();
+        match stdin.read_line(&mut line) {
+            Ok(0) | Err(_) => break, // EOF or unreadable stdin: same as EOF
+            Ok(_) => {}
+        }
+        let req = line.trim_end();
+        if req.is_empty() {
             continue;
         }
         buf.clear();
-        respond_into(&line, &mut buf);
+        respond_into(req, &mut buf);
         buf.push(b'\n');
         if out.write_all(&buf).and_then(|_| out.flush()).is_err() {
             break; // stdout closed: parent went away, same as EOF
@@ -68,15 +77,21 @@ pub fn serve() -> ExitCode {
 
 /// Parse one request line into a response written to `buf`.
 fn respond_into(line: &str, buf: &mut Vec<u8>) {
-    // Two-stage parse so malformed requests can still echo their id back.
-    let value: Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(err) => return protocol_error(None, &format!("not JSON: {err}"), buf),
-    };
-    let id = value.get("id").cloned();
-    match serde_json::from_value::<Request>(value) {
-        Ok(req) => handle_into(&req, buf),
-        Err(err) => protocol_error(id.as_ref(), &format!("bad request: {err}"), buf),
+    if let Ok(req) = serde_json::from_str::<Request>(line) {
+        return handle_into(&req, buf);
+    }
+    // Failure path only: parse loosely, so a malformed request can still echo
+    // its id back and the message class stays "not JSON" vs "bad request".
+    // The common path parses the request exactly once.
+    match serde_json::from_str::<Value>(line) {
+        Ok(value) => {
+            let id = value.get("id").cloned();
+            match serde_json::from_value::<Request>(value) {
+                Ok(req) => handle_into(&req, buf),
+                Err(err) => protocol_error(id.as_ref(), &format!("bad request: {err}"), buf),
+            }
+        }
+        Err(err) => protocol_error(None, &format!("not JSON: {err}"), buf),
     }
 }
 

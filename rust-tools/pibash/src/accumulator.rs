@@ -273,8 +273,13 @@ impl OutputAccumulator {
         self.total_decoded_bytes += bytes;
         let tail_base = self.tail.len();
         self.tail.push_str(text);
+        // One pass: this loop already visits every newline, so counting here is
+        // free. A separate `matches('\n').count()` re-scanned the chunk, on top
+        // of the `rfind` below.
+        let mut newlines = 0usize;
         for (idx, _) in text.match_indices('\n') {
             self.tail_line_starts.push_back(tail_base + idx + 1);
+            newlines += 1;
         }
         if js_byte_length(&self.tail) > self.max_rolling_bytes * 2
             || self.tail_line_starts.len() > self.max_lines + 2
@@ -282,7 +287,6 @@ impl OutputAccumulator {
             self.trim_tail();
         }
 
-        let newlines = text.matches('\n').count();
         if newlines == 0 {
             self.current_line_bytes += bytes;
             self.has_open_line = true;
@@ -453,6 +457,38 @@ fn monotonic_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TEMPORARY probe: where does pibash spend its per-class time?
+    #[test]
+    fn stage_probe() {
+        use std::time::Instant;
+        let body: String = (0..50_000).map(|i| format!("line{i}\n")).collect();
+        let t = Instant::now();
+        let lines = crate::truncate::split_lines(&body);
+        let d_split = t.elapsed();
+        let t = Instant::now();
+        let compressed = crate::compress::head_tail(&body, 40, 2048, true);
+        let d_ht = t.elapsed();
+        let t = Instant::now();
+        let mut acc = OutputAccumulator::new("probe");
+        for chunk in body.as_bytes().chunks(8192) {
+            acc.append(chunk);
+        }
+        acc.finish();
+        let d_append = t.elapsed();
+        let t = Instant::now();
+        let snap = acc.snapshot(false);
+        let d_snap = t.elapsed();
+        let t = Instant::now();
+        let (_text, _trunc) = crate::render::format_output(&mut acc, snap, "");
+        let d_render = t.elapsed();
+        println!(
+            "PROBE bytes={} lines={} split={d_split:?} head_tail={d_ht:?} append={d_append:?} snapshot={d_snap:?} render={d_render:?}",
+            body.len(),
+            lines.len()
+        );
+        println!("PROBE compressed_len={}", compressed.content.len());
+    }
 
     #[test]
     fn small_output_never_spills() {

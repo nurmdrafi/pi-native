@@ -9,10 +9,11 @@
 //! that design.
 //!
 //! Contract:
-//! - **OFF by default.** `piread` is parity-locked to the built-in `read`
-//!   (`tests/piread-parity.test.mjs`), and `piedit`'s exact matching depends on
-//!   byte-identical line content. Compaction must be opt-in, or it silently
-//!   changes what the edit tool can match.
+//! - **ON by default, with an off switch.** Compaction reshapes only the
+//!   model-visible text, so parity with the built-in `read` is one variable
+//!   away: `PI_READ_COMPRESS=0|false|off` restores byte-identical output, which
+//!   the parity suite (`tests/piread-parity.test.mjs`) and `piedit`'s exact
+//!   matching depend on.
 //! - **Deterministic.** No clock, no run id, no iteration order: the same input
 //!   always yields byte-identical output. Safe to cache and to diff.
 //! - **Lossless elsewhere.** Only the model-visible `content` is compacted; the
@@ -132,8 +133,11 @@ pub struct Compacted {
     /// window-relative — the caller maps them onto absolute file lines)
     /// replaced by an omission marker, with the same chars/lines counts the
     /// marker states. The permission gate's marker-regex fallback MUST agree
-    /// with this list (both paths are cross-checked by tests), so derive it
-    /// from the rendered lines plus the marker count, never from `kept`.
+    /// with this list (both paths are cross-checked by tests). Derive the
+    /// base from `max(kept, rendered)` — the last line any bytes of which
+    /// rendered: `kept` alone misses a byte-partial head line, `rendered`
+    /// alone misses a trailing kept-empty line that `join` drops
+    /// (`reconstructs_the_window_exactly` sweeps every shape class).
     pub omissions: Vec<Omission>,
 }
 
@@ -177,7 +181,18 @@ pub fn compact(text: &str, max_lines: usize, max_bytes: usize) -> Compacted {
         Some((body, notice)) => (body.to_string(), Some(notice.to_string())),
         None => (text.to_string(), None),
     };
-    let lines: Vec<&str> = split_lines(&body);
+    // No-gap accounting (2026-10-28): the raw read path's line numbering
+    // counts a body-final "\n" as a real (empty) line — compaction must
+    // account it too (rendered by the tail, or inside the gap), or one
+    // line is neither rendered nor gapped. split_lines pops it as a
+    // terminator phantom; keep it here so head+gap+tail tiles the window
+    // exactly. `fits` keeps pop semantics on purpose: a verbatim window is
+    // fully rendered, so no gap is possible there.
+    let lines: Vec<&str> = if body.is_empty() {
+        Vec::new()
+    } else {
+        body.split('\n').collect()
+    };
     let total_lines = lines.len();
     // `omitted_chars` is computed as `original_chars - (head + tail)`, and
     // head/tail are sliced from the body — so `original_chars` must be the
@@ -232,15 +247,18 @@ pub fn compact(text: &str, max_lines: usize, max_bytes: usize) -> Compacted {
     let omitted_chars = original_chars
         .saturating_sub(head.text.chars().count() + tail.text.chars().count());
     let marker = omission_marker(omitted_chars, omitted_lines);
-    // Structured gap: the first unrendered body line, then the marker's line
-    // count — exactly the span the gate's marker-regex walk computes. A
-    // partial first line renders its prefix (kept stays 0), so measure the
-    // head by its rendered lines, not by `kept`.
-    let head_rendered = head.text.lines().count();
+    // Structured gap: one base for both boundaries — the last line any
+    // bytes of which rendered. `kept` alone undercounts a byte-partial head
+    // line (its prefix renders with kept 0); `str::lines()` alone
+    // undercounts a trailing kept-empty line (`join` drops it, 2026-10-27
+    // session drift: the gap opened one line early and closed one early,
+    // marking a truly elided line as covered). max(kept, rendered) is that
+    // last-rendered line in both shapes.
+    let head_base = head.kept.max(head.text.lines().count());
     let omissions = if omitted_lines > 0 {
         vec![Omission {
-            start_line: head_rendered + 1,
-            end_line: head_rendered + omitted_lines,
+            start_line: head_base + 1,
+            end_line: head_base + omitted_lines,
             chars: omitted_chars,
             lines: omitted_lines,
         }]
@@ -329,8 +347,6 @@ fn take_head(lines: &[&str], max_lines: usize, max_bytes: usize) -> Slice {
 /// dropped entirely if it would overlap the head.
 fn take_tail(lines: &[&str], max_lines: usize, max_bytes: usize) -> Slice {
     let total = lines.len();
-    let head_kept_placeholder = 0usize; // overlap is resolved by the caller's budget split
-    let _ = head_kept_placeholder;
     let mut kept = 0usize;
     let mut bytes = 0usize;
     let mut out: Vec<&str> = Vec::new();
@@ -432,6 +448,33 @@ mod tests {
         assert!(!rendered.contains(&first_gap.as_str()));
         assert!(!rendered.contains(&last_gap.as_str()));
         assert!(rendered.contains(&after.as_str()));
+    }
+
+    #[test]
+    fn omission_span_uses_kept_base_when_head_ends_on_empty_line() {
+        // 2026-10-27 session drift: the head's last kept line was empty, so
+        // `out.join("\n")` ends on a separator and `str::lines()` drops the
+        // empty line — rendered-base attribution opened the gap one line
+        // early (and closed it one early, marking a truly elided line as
+        // covered). Attribution must share one base with `omitted_lines`:
+        // the `kept` counters.
+        let lines: Vec<String> = (1..=20)
+            .map(|i| {
+                if i == 9 {
+                    String::new()
+                } else {
+                    format!("line {i}")
+                }
+            })
+            .collect();
+        let body = lines.join("\n");
+        let out = compact(&body, 17, 1 << 20);
+        // content budget 14: head keeps lines 1-9 (line 9 empty), tail keeps
+        // the last 5 (16-20); the gap is exactly lines 10-15.
+        let o = out.omissions.first().expect("one omission");
+        assert_eq!(o.start_line, 10);
+        assert_eq!(o.end_line, 15);
+        assert_eq!(o.lines, 6);
     }
 
     #[test]
@@ -543,7 +586,7 @@ mod tests {
 
     #[test]
     fn a_document_that_merely_quotes_the_marker_is_still_compacted() {
-        // docs/custom-tools-architecture.md documents the marker string, so a
+        // docs/rust-tools-architecture.md documents the marker string, so a
         // bare `contains(OMISSION_TAG)` test exempted it from compaction and it
         // shipped ~29 KB into context. Only a marker on its own line is a cut.
         let mut lines = numbered(3000);
@@ -585,5 +628,183 @@ mod tests {
         let out = compact(text.as_str(), COMPRESS_MAX_LINES, COMPRESS_MAX_BYTES);
         assert_eq!(out.strategy, "none");
         assert_eq!(out.content, text);
+    }
+
+    // 2026-10-28 exhaustive sweep: every compaction shape must reassemble
+    // the window with no drift. Each rendered run is a true prefix/suffix of
+    // the original lines; every unrendered line is either inside the
+    // structured gap or an empty line invisible at a run boundary; the
+    // marker matches the span; the budgets hold. This is the lock-in for
+    // the whole attribution-drift class (the session bug: gap boundaries off
+    // by one when the head cut landed on an empty line).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn shape_line(rng: &mut Rng, class: u64, i: usize) -> String {
+        match class {
+            0 => format!("line {i}"),
+            1 => {
+                if rng.below(3) == 0 {
+                    String::new()
+                } else {
+                    format!("row {i}")
+                }
+            }
+            2 => format!("{} {i}", "x".repeat(60 + (rng.below(8) as usize) * 90)),
+            3 => format!("café — ligne {i} — €{} →", rng.below(100)),
+            4 => format!("repeat {}", i / 7),
+            _ => match rng.below(5) {
+                0 => String::new(),
+                1 => format!("long {i} {}", "y".repeat(300)),
+                _ => format!("mix {i} é €"),
+            },
+        }
+    }
+
+    #[test]
+    fn trailing_empty_window_line_is_fully_accounted() {
+        // No-gap contract (2026-10-28): a window whose last line is empty
+        // has that line counted by the raw read path's numbering, so
+        // compaction must account it too — either rendered (tail keeps it,
+        // content ends with the blank) or inside the gap. The old behavior
+        // popped it as a terminator phantom: one line neither rendered nor
+        // gapped (found by the cross-layer differential audit).
+        let lines: Vec<String> = (1..=120)
+            .map(|i| if i % 4 == 0 { String::new() } else { format!("row {i}") })
+            .collect();
+        let body = lines.join("\n"); // ends with '\n' (line 120 is empty)
+        let out = compact(&body, 40, 2000);
+        assert_eq!(out.strategy, "head-tail");
+        let o = &out.omissions[0];
+        // head 24 + gap 83 + tail 13 = 120: every line accounted.
+        assert_eq!((o.start_line, o.end_line, o.lines), (25, 107, 83));
+        // tail keeps 108..=120 — the trailing blank renders as the final
+        // (empty) line, so the delivered content ends with the newline.
+        assert!(out.content.ends_with('\n'));
+        assert_eq!(out.content.lines().next_back(), Some("row 119"));
+    }
+
+    fn all_lines(s: &str) -> Vec<&str> {
+        if s.is_empty() {
+            Vec::new()
+        } else {
+            s.split('\n').collect()
+        }
+    }
+
+    #[test]
+    fn reconstructs_the_window_exactly() {
+        let budgets: [(usize, usize); 5] = [
+            (10, 1 << 20),
+            (17, 400),
+            (25, 800),
+            (40, 300),
+            (COMPRESS_MAX_LINES, 2_000),
+        ];
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let mut cases = 0usize;
+        for &class in &[0u64, 1, 2, 3, 4, 5] {
+            for n in [1usize, 2, 3, 7, 9, 20, 21, 41, 120, 300] {
+                let body: Vec<String> =
+                    (0..n).map(|i| shape_line(&mut rng, class, i)).collect();
+                let body = body.join("\n");
+                for &(max_lines, max_bytes) in &budgets {
+                    cases += 1;
+                    let out = compact(&body, max_lines, max_bytes);
+                    let tag = format!("class {class} n {n} budget {max_lines}/{max_bytes}");
+                    assert!(
+                        js_byte_length(&out.content) <= max_bytes,
+                        "byte budget blown ({tag})"
+                    );
+                    if out.omissions.is_empty() {
+                        assert!(!has_omission_marker(&out.content), "marker without span ({tag})");
+                        continue;
+                    }
+                    assert_eq!(out.omissions.len(), 1, "one cut ({tag})");
+                    let o = &out.omissions[0];
+                    let window: Vec<&str> = all_lines(&body);
+                    assert_eq!(
+                        o.end_line - o.start_line + 1,
+                        o.lines,
+                        "span width ({tag})"
+                    );
+                    if out.partial {
+                        // Pinned convention (verbatim walk-parity test): a
+                        // single over-budget line renders prefixes and the
+                        // gap is the virtual continuation line past the
+                        // window — self-consistent, counts only.
+                        continue;
+                    }
+                    assert!(
+                        o.start_line >= 1 && o.end_line <= window.len(),
+                        "span inside window ({tag})"
+                    );
+                    let marker = omission_marker(o.chars, o.lines);
+                    let rendered: Vec<&str> = all_lines(&out.content);
+                    assert!(rendered.contains(&marker.as_str()), "marker rendered ({tag})");
+                    let mi = rendered
+                        .iter()
+                        .position(|l| *l == marker)
+                        .expect("marker index");
+                    // content = head.text + "\n\n" + marker + "\n\n" + tail.text
+                    let mut head_seg: Vec<&str> = rendered[..mi].to_vec();
+                    if head_seg.last() == Some(&"") {
+                        head_seg.pop(); // the one structural separator
+                    }
+                    let mut tail_seg: Vec<&str> = rendered[mi + 1..].to_vec();
+                    if tail_seg.first() == Some(&"") {
+                        tail_seg.remove(0);
+                    }
+                    assert_eq!(
+                        head_seg.join("\n"),
+                        window[..head_seg.len()].join("\n"),
+                        "head run is a true prefix ({tag})"
+                    );
+                    let t = tail_seg.len();
+                    // No-pop accounting: the tail keeps trailing empty lines
+                    // verbatim, so it is an exact suffix — no shrinking.
+                    assert_eq!(
+                        tail_seg.join("\n"),
+                        window[window.len() - t..].join("\n"),
+                        "tail run is a true suffix ({tag}): got {:?} want {:?}",
+                        tail_seg,
+                        &window[window.len() - t..]
+                    );
+                    // every unrendered line is inside the gap, or an empty
+                    // line invisible at a run boundary
+                    for (idx, l) in window.iter().enumerate() {
+                        let n1 = idx + 1; // 1-based
+                        let rendered_line = n1 <= head_seg.len()
+                            || n1 > window.len() - t;
+                        let in_gap =
+                            n1 >= o.start_line && n1 <= o.end_line;
+                        if !rendered_line && !in_gap {
+                            assert!(
+                                l.is_empty(),
+                                "line {n1} neither rendered nor gapped ({tag}): \
+                                 win {:?} head {:?} tail {:?} omit {:?}",
+                                window,
+                                head_seg,
+                                tail_seg,
+                                o
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(cases >= 250, "sweep covered {cases} compactions");
     }
 }

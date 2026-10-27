@@ -14,14 +14,14 @@
 //!
 //! Extract schema (consumed by session-audit's fast path; mirrors
 //! parser.mjs semantics exactly — see PARITY notes inline):
-//!   {v:1, sessionId, project, path, turns:[{rid,ts,model,usage}],
-//!    calls:[{id,name,ts,rid,ph,path,cmd}], results:[{id,ts,err,bytes}],
+//!   {v:2, sessionId, project, path, turns:[{rid,ts,model,usage}],
+//!    calls:[{id,name,ts,rid,ph,path,cmd}], results:[{id,ts,err,bytes,blk?}],
 //!    compactions, skills:{name:uses}}
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::error::Error;
 use std::fs;
@@ -213,6 +213,60 @@ fn content_bytes(v: &Value) -> u64 {
     }
 }
 
+/// Gate block family. The permission gate's synthesized block reasons always
+/// BEGIN with a stable family prefix; a session that merely reads the gate's
+/// own source must not look blocked, so the match is anchored at the start of
+/// the text rather than searching mid-stream.
+fn gate_family(content: &Value) -> Option<&'static str> {
+    const FAMILIES: [(&str, &str); 9] = [
+        ("Permission Gate", "gate"),
+        ("Anchor Guard", "anchor"),
+        ("Token Economy", "tokens"),
+        ("Loop Guard", "loop"),
+        ("Phase (PH1)", "phase"),
+        ("Commit Message", "commit"),
+        ("Toolchain", "toolchain"),
+        ("Search", "search"),
+        ("Destructive", "destructive"),
+    ];
+    let text = match content {
+        Value::String(s) => s.as_str(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .find_map(|b| b.get("text").and_then(Value::as_str))?,
+        _ => return None,
+    };
+    let head = text.trim_start();
+    FAMILIES
+        .iter()
+        .find(|(prefix, _)| head.starts_with(prefix))
+        .map(|(_, tag)| *tag)
+}
+
+#[cfg(test)]
+mod gate_family_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_block_reasons() {
+        let c = json!([{"type":"text","text":"Anchor Guard (Unread): 'x' not read this session"}]);
+        assert_eq!(gate_family(&c), Some("anchor"));
+        let c = json!([{"type":"text","text":"Token Economy (Re-run): blocked"}]);
+        assert_eq!(gate_family(&c), Some("tokens"));
+        let c = json!([{"type":"text","text":"    Loop Guard (R11): stop retrying"}]);
+        assert_eq!(gate_family(&c), Some("loop"));
+    }
+
+    #[test]
+    fn ignores_mid_stream_mentions_and_plain_output() {
+        let c = json!([{"type":"text","text":"index.ts:88: // Anchor Guard blocks this"}]);
+        assert_eq!(gate_family(&c), None);
+        let c = json!([{"type":"text","text":"ok\n"}]);
+        assert_eq!(gate_family(&c), None);
+        assert_eq!(gate_family(&Value::Null), None);
+    }
+}
+
 fn js_stringify(v: &Value) -> String {
     // serde_json compact output matches JS JSON.stringify for shared shapes
     // (preserve_order keeps object key insertion order; ryu shortest == JS
@@ -266,6 +320,105 @@ fn param_hash(name: &str, input: &Value) -> String {
     out
 }
 
+/// Per-model spend over every assistant message with usage, before rid dedupe.
+#[derive(Default)]
+struct UsageAgg {
+    turns: u64,
+    input: i64,
+    output: i64,
+    reasoning: i64,
+    cache_read: i64,
+    cache_write: i64,
+    cost: f64,
+}
+
+/// `--report usage`: per-model token profile, cost tail and prefix trend, over the
+/// same extracts the JSONL stream carries. Replaces the Python walker that used to
+/// parse ~110 MB of session JSONL to derive the same table.
+fn report_usage(
+    found: &[(PathBuf, String, u128)],
+    parsed: &HashMap<String, (FileId, Value)>,
+    store: &Store,
+) -> Result<(), Box<dyn Error>> {
+    let mut per_model: BTreeMap<String, UsageAgg> = BTreeMap::new();
+    let mut sessions: Vec<(String, u64, f64)> = Vec::new();
+    let mut prefix: Vec<(String, i64)> = Vec::new();
+
+    for (path, _, _) in found {
+        let key = path.to_string_lossy().to_string();
+        let extract: Option<Value> = match parsed.get(&key) {
+            Some((_, v)) => Some(v.clone()),
+            None => store
+                .files
+                .get(&key)
+                .and_then(|e| serde_json::from_slice::<Value>(store.extract(e)).ok()),
+        };
+        let Some(v) = extract else { continue };
+        let Some(agg) = v.get("usage").and_then(Value::as_object) else { continue };
+        if agg.is_empty() {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let ts: String = name.chars().take(16).collect::<String>().replace('T', " ");
+        let mut turns = 0u64;
+        let mut cost = 0.0f64;
+        for (model, u) in agg {
+            let a = per_model.entry(model.clone()).or_default();
+            let n = |k: &str| u.get(k).and_then(Value::as_i64).unwrap_or(0);
+            a.turns += u.get("turns").and_then(Value::as_u64).unwrap_or(0);
+            a.input += n("input");
+            a.output += n("output");
+            a.reasoning += n("reasoning");
+            a.cache_read += n("cacheRead");
+            a.cache_write += n("cacheWrite");
+            let c = u.get("costTotal").and_then(Value::as_f64).unwrap_or(0.0);
+            a.cost += c;
+            turns += u.get("turns").and_then(Value::as_u64).unwrap_or(0);
+            cost += c;
+        }
+        if turns > 0 {
+            sessions.push((ts.clone(), turns, (cost * 100.0).round() / 100.0));
+            let first = v.get("firstTurnTokens").and_then(Value::as_i64).unwrap_or(0);
+            prefix.push((ts, first));
+        }
+    }
+
+    println!("{:<26}{:>6}{:>7}{:>7}{:>7}{:>7}{:>8}", "model", "turns", "in/t", "out/t", "rsn/t", "cache%", "cost$");
+    let mut ranked: Vec<(&String, &UsageAgg)> = per_model.iter().collect();
+    ranked.sort_by(|a, b| b.1.cost.total_cmp(&a.1.cost));
+    for (model, a) in ranked {
+        let t = a.turns.max(1) as i64;
+        let cache_pct = a.cache_read as f64 / (a.input + a.cache_read).max(1) as f64 * 100.0;
+        println!(
+            "{:<26}{:>6}{:>7}{:>7}{:>7}{:>6.0}%{:>8.2}",
+            model.chars().take(26).collect::<String>(),
+            a.turns,
+            a.input / t,
+            a.output / t,
+            a.reasoning / t,
+            cache_pct,
+            a.cost
+        );
+    }
+
+    sessions.sort_by(|a, b| b.2.total_cmp(&a.2));
+    println!("\nTop expensive sessions (the cost tail):");
+    for (ts, turns, cost) in sessions.iter().take(5) {
+        println!("  {ts}  {turns:>4} turns  ${cost}");
+    }
+
+    prefix.sort_by(|a, b| a.0.cmp(&b.0));
+    println!("\nFirst-turn prompt size (prefix trend, last 8):");
+    let start = prefix.len().saturating_sub(8);
+    for (ts, first) in &prefix[start..] {
+        println!("  {ts}  {first:>6} tok");
+    }
+    println!(
+        "\nFlags: reasoning/output > 0.5 -> consider non-reasoning model; sessions > 200 turns -> prefer compaction/new session."
+    );
+    Ok(())
+}
+
 /// Parse one transcript into an extract Value. Tolerant: any line may fail.
 fn extract_file(path: &Path, project_fallback: &str) -> Value {
     let f = match fs::File::open(path) {
@@ -286,6 +439,12 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
     let mut compactions = 0u64;
     let mut skills: HashMap<String, u64> = HashMap::new();
     let mut uts: Vec<i64> = Vec::new(); // user-entry timestamps (ms) — classifyGap parity
+    // Spend aggregates over EVERY assistant message with usage, computed before
+    // the rid dedupe below. `turns` keeps one entry per responseId (apiTurns
+    // parity), so a session that retried or streamed twice reports fewer turns
+    // there than it actually paid for; audits need the full number.
+    let mut usage_agg: BTreeMap<String, UsageAgg> = BTreeMap::new();
+    let mut first_turn_tokens: Option<i64> = None;
 
     let mut line = String::new();
     loop {
@@ -331,6 +490,24 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
                         .get("model")
                         .and_then(Value::as_str)
                         .map(String::from);
+                    let agg = usage_agg
+                        .entry(model.clone().unwrap_or_else(|| "?".to_string()))
+                        .or_default();
+                    let num = |k: &str| usage.and_then(|u| u.get(k)).and_then(Value::as_i64).unwrap_or(0);
+                    agg.turns += 1;
+                    agg.input += num("input");
+                    agg.output += num("output");
+                    agg.reasoning += num("reasoning");
+                    agg.cache_read += num("cacheRead");
+                    agg.cache_write += num("cacheWrite");
+                    agg.cost += usage
+                        .and_then(|u| u.get("cost"))
+                        .and_then(|c| c.get("total"))
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0);
+                    if first_turn_tokens.is_none() {
+                        first_turn_tokens = Some(num("totalTokens"));
+                    }
                     let turn = json!({
                         "rid": rid,
                         "ts": ts,
@@ -409,13 +586,19 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
                 if !result_ids.insert(id.clone()) {
                     continue;
                 }
-                let bytes = content_bytes(msg.get("content").unwrap_or(&Value::Null));
-                results.push(json!({
+                let content = msg.get("content").unwrap_or(&Value::Null);
+                let bytes = content_bytes(content);
+                let mut rec = json!({
                     "id": id,
                     "ts": iso_of(msg.get("timestamp").unwrap_or(&Value::Null)),
                     "err": msg.get("isError") == Some(&Value::Bool(true)),
                     "bytes": bytes,
-                }));
+                });
+                // a gate block is recognizable by its leading family prefix
+                if let Some(fam) = gate_family(content) {
+                    rec["blk"] = Value::String(fam.to_string());
+                }
+                results.push(rec);
             }
             _ => {}
         }
@@ -434,8 +617,20 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
         skills_map.insert(k, json!(v));
     }
 
+    let mut usage_map = serde_json::Map::new();
+    for (k, a) in &usage_agg {
+        usage_map.insert(
+            k.clone(),
+            json!({
+                "turns": a.turns, "input": a.input, "output": a.output,
+                "reasoning": a.reasoning, "cacheRead": a.cache_read,
+                "cacheWrite": a.cache_write, "costTotal": a.cost,
+            }),
+        );
+    }
+
     json!({
-        "v": 1,
+        "v": 2,
         // discover.mjs parity: session id is filename-derived (uuid after
         // first '_'), never the header id — l1_findings keys on it.
         "sessionId": fallback_session_id(path),
@@ -447,17 +642,19 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
         "compactions": compactions,
         "uts": uts,
         "skills": skills_map,
+        "usage": usage_map,
+        "firstTurnTokens": first_turn_tokens,
     })
 }
 
 fn empty_extract(path: &Path, project_fallback: &str) -> Value {
     json!({
-        "v": 1,
+        "v": 2,
         "sessionId": fallback_session_id(path),
         "project": project_fallback,
         "path": path.to_string_lossy(),
         "turns": [], "calls": [], "results": [],
-        "compactions": 0, "skills": {},
+        "compactions": 0, "skills": {}, "usage": {}, "firstTurnTokens": Value::Null,
     })
 }
 
@@ -508,7 +705,7 @@ struct Entry {
 // Header = {key: Entry}; data = concatenated compact extract JSON. A single
 // file keeps the header and its offsets atomic under one rename.
 const STORE_MAGIC: [u8; 8] = *b"PIDXST02";
-const STORE_VERSION: u32 = 2;
+const STORE_VERSION: u32 = 4;
 const STORE_PREFIX: usize = 16;
 
 struct Store {
@@ -555,7 +752,11 @@ fn load_store(path: &Path) -> Store {
 }
 
 fn save_store(path: &Path, files: &HashMap<String, Entry>, data: &[u8]) -> Result<(), Box<dyn Error>> {
-    let header = serde_json::to_vec(files)?;
+    // Sorted keys: a HashMap's iteration order made two identical runs write
+    // different store bytes, which rules out comparing stores or keying any
+    // future cache on their content.
+    let ordered: BTreeMap<&String, &Entry> = files.iter().collect();
+    let header = serde_json::to_vec(&ordered)?;
     let mut buf = Vec::with_capacity(STORE_PREFIX + header.len() + data.len());
     buf.extend_from_slice(&STORE_MAGIC);
     buf.extend_from_slice(&STORE_VERSION.to_le_bytes());
@@ -614,6 +815,17 @@ fn discover(sessions_dir: &Path, now_ms: u128) -> (Vec<(PathBuf, String, u128)>,
 
 // ---------------------------------------------------------------- main
 
+/// Append one record to the extract stream, when a stream is open. A warm
+/// no-op run emits exactly what the store already holds, so the caller may keep
+/// the existing file untouched instead of rewriting it.
+fn emit_line(w: &mut Option<Box<dyn Write>>, bytes: &[u8]) -> io::Result<()> {
+    if let Some(w) = w.as_mut() {
+        w.write_all(bytes)?;
+        w.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let mut sessions_dir = dirs_sessions_default();
@@ -621,6 +833,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut out_path: Option<PathBuf> = None;
     let mut max: usize = usize::MAX;
     let mut force = false;
+    let mut report: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--sessions-dir" => sessions_dir = PathBuf::from(args.next().ok_err("--sessions-dir needs a value")?),
@@ -628,8 +841,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--out" => out_path = Some(PathBuf::from(args.next().ok_err("--out needs a value")?)),
             "--max" => max = args.next().ok_err("--max needs a value")?.parse()?,
             "--force" => force = true,
+            "--report" => report = Some(args.next().ok_err("--report needs a value")?),
             "--help" | "-h" => {
-                println!("usage: pidx [--sessions-dir DIR] [--state PATH] [--out PATH] [--max N] [--force]");
+                println!("usage: pidx [--sessions-dir DIR] [--state PATH] [--out PATH] [--max N] [--force] [--report usage]");
                 return Ok(());
             }
             other => return Err(format!("unknown arg: {other}").into()),
@@ -694,13 +908,41 @@ fn main() -> Result<(), Box<dyn Error>> {
     let parsed_map: HashMap<String, (FileId, Value)> =
         parsed.into_iter().map(|(k, i, v)| (k, (i, v))).collect();
 
+    // Analysis reports read the same extracts and print a summary instead of the
+    // JSONL stream, so the skill scripts that used to re-walk every session file
+    // become one call into this binary.
+    if let Some(which) = report {
+        match which.as_str() {
+            "usage" => report_usage(&found, &parsed_map, &store)?,
+            other => return Err(format!("unknown report: {other}").into()),
+        }
+        return Ok(());
+    }
+
     // When every found session is fresh and the store holds no extra keys, the
     // stored data is already exactly what we emit — skip rebuilding and rewriting.
     let needs_write = !parsed_map.is_empty() || reused != found.len() || store.files.len() != found.len();
 
-    let mut out_writer: Box<dyn Write> = match &out_path {
-        Some(p) => Box::new(io::BufWriter::new(fs::File::create(p)?)),
-        None => Box::new(io::BufWriter::new(io::stdout().lock())),
+    // A warm run with nothing to parse emits byte-for-byte what the store
+    // already contains, so an up-to-date extract file needs no rewrite. That
+    // rewrite (15 MB on this corpus) is the whole cost of a warm run; stdout and
+    // a missing/short file still stream normally.
+    let expected_out_len = if needs_write {
+        None
+    } else {
+        Some(store.data_len() as u64 + found.len() as u64) // one '\n' per record
+    };
+    let out_is_current = match (&out_path, expected_out_len) {
+        (Some(p), Some(n)) => fs::metadata(p).map(|m| m.len() == n).unwrap_or(false),
+        _ => false,
+    };
+    let mut out_writer: Option<Box<dyn Write>> = if out_is_current {
+        None
+    } else {
+        Some(match &out_path {
+            Some(p) => Box::new(io::BufWriter::new(fs::File::create(p)?)),
+            None => Box::new(io::BufWriter::new(io::stdout().lock())),
+        })
     };
     // data section for the rewritten store; left empty on a no-op warm run
     let mut new_data: Vec<u8> = if needs_write {
@@ -717,14 +959,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             let off = new_data.len() as u64;
             serde_json::to_writer(&mut new_data, extract)?;
             let len = new_data.len() as u64 - off;
-            out_writer.write_all(&new_data[off as usize..])?;
-            out_writer.write_all(b"\n")?;
+            emit_line(&mut out_writer, &new_data[off as usize..])?;
             new_files.insert(key, Entry { size: fid.size, mtime_ns: fid.mtime_ns, off, len });
             emitted += 1;
         } else if let Some(e) = store.files.get(&key).copied() {
             let bytes = store.extract(&e);
-            out_writer.write_all(bytes)?;
-            out_writer.write_all(b"\n")?;
+            emit_line(&mut out_writer, bytes)?;
             if needs_write {
                 let off = new_data.len() as u64;
                 new_data.extend_from_slice(bytes);
@@ -734,7 +974,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             emitted += 1;
         }
     }
-    out_writer.flush()?;
+    if let Some(w) = out_writer.as_mut() {
+        w.flush()?;
+    }
 
     // persist store atomically (single file → header offsets stay consistent)
     if needs_write {

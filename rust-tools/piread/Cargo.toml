@@ -7,3 +7,4 @@ description = "Native read pipeline for the pi agent — parity-tested against t
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+memchr = "2"

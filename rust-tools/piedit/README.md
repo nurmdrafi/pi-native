@@ -39,7 +39,7 @@ later session can retrace the path without re-deriving it.
 
 ### Phase 1 — Studying the precedent (pidx, piread)
 
-4. Read `custom-tools/piread/src/{main,cli,envelope,pipeline,serve}.rs`, `Cargo.toml`.
+4. Read `rust-tools/piread/src/{main,cli,envelope,pipeline,serve}.rs`, `Cargo.toml`.
 5. Read `extensions/piread/index.ts` (individual registration, fail-open ladder, daemon
    client, `__resetDaemonForTest`) and `extensions/pidx/index.ts`.
 6. Read the built-in contracts to mirror exactly: `edit.js` (schema,
@@ -113,10 +113,10 @@ later session can retrace the path without re-deriving it.
 
 ### Phase 6 — Build wiring + docs
 
-29. `scripts/bootstrap.sh` step 5 builds `custom-tools/piedit` → `bin/piedit` (cargo-missing
+29. `scripts/bootstrap.sh` step 5 builds `rust-tools/piedit` → `bin/piedit` (cargo-missing
     prints the fallback note); health check renumbered.
 30. `scripts/after-pull.sh` step 4 staleness-gated rebuild. `sh -n` both.
-31. README: Custom-tool-binaries table, Rust requirement line, `custom-tools/` tree line,
+31. README: Custom-tool-binaries table, Rust requirement line, `rust-tools/` tree line,
     Extensions section, `PI_NATIVE_EDIT`.
 32. `doc:check` initially failed twice (README must mention the extension dir and the
     env var) → fixed to 4/4.

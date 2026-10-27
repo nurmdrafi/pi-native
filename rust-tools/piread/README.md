@@ -29,7 +29,7 @@ reused. Steps below follow the spec plan and the commits in order.
 
 ### Step 1 — Crate skeleton, CLI contract (`f2e142d`)
 
-2. `custom-tools/piread/Cargo.toml`: Rust 2024, deps `serde` + `serde_json` only (no `unsafe`),
+2. `rust-tools/piread/Cargo.toml`: Rust 2024, deps `serde` + `serde_json` only (no `unsafe`),
    clippy `-D warnings`.
 3. `src/cli.rs`: `--path` required; `--offset`/`--limit` integers ≥ 1; unknown flag →
    exit 2 + stderr; `--version`/`--help`; `--serve` reserved.
@@ -73,7 +73,7 @@ reused. Steps below follow the spec plan and the commits in order.
 
 ### Step 5 — Build wiring + docs
 
-14. `scripts/bootstrap.sh` / `after-pull.sh` build `custom-tools/piread` → `bin/piread`.
+14. `scripts/bootstrap.sh` / `after-pull.sh` build `rust-tools/piread` → `bin/piread`.
     README + `doc:check` updated.
 
 ### Step 6 — Micro-bench harness (`f018bca`)

@@ -19,7 +19,7 @@ Status: shipped, default-on, opt out with `PI_NATIVE_PIDX=0`.
 
 ## Build walkthrough — steps tried
 
-### Origin: `tools/pidx` → `custom-tools/pidx`
+### Origin: `tools/pidx` → `rust-tools/pidx`
 
 1. pidx first landed as `tools/pidx/` (a standalone crate). The layout was then
    consolidated under `native/` alongside the other Rust helper crates — commit
@@ -29,9 +29,9 @@ Status: shipped, default-on, opt out with `PI_NATIVE_PIDX=0`.
    repo-wide), adds `native/pidx/Feedback.md` (since moved to
    `docs/reviews/harness-review.md` — it is a repo-wide design review, not pidx docs),
    and updates `scripts/bootstrap.sh` + `docs/token-economy.md` to the new path.
-2. `native/` was later renamed to **`custom-tools/`** and became a Cargo workspace
-   (`custom-tools/Cargo.toml`, members `pidx`/`piread`/`piedit`) with one shared
-   `custom-tools/Cargo.lock` (tracked) and one `custom-tools/target/`.
+2. `native/` was later renamed to **`rust-tools/`** and became a Cargo workspace
+   (`rust-tools/Cargo.toml`, members `pidx`/`piread`/`piedit`) with one shared
+   `rust-tools/Cargo.lock` (tracked) and one `rust-tools/target/`.
 
 ### Skeleton and parity target
 
@@ -63,7 +63,7 @@ Status: shipped, default-on, opt out with `PI_NATIVE_PIDX=0`.
 
 7. No in-crate unit tests were written (the parity oracle is the session-audit
    Node parser and the end-to-end pidx output). `cargo test` is 0 tests, green.
-8. `scripts/bootstrap.sh` builds `custom-tools/pidx` → `bin/pidx` (cargo-missing prints the
+8. `scripts/bootstrap.sh` builds `rust-tools/pidx` → `bin/pidx` (cargo-missing prints the
    Node-fallback note); `scripts/after-pull.sh` / `pidoc --fix` rebuild it when
    missing/stale. README documents it as the session-audit fast path.
 9. `extensions/pidx/index.ts` registers the first-class `pidx` tool; failures throw so

@@ -1,16 +1,16 @@
 # Native Rust tool crates. A workspace gives one build/test entry point, a
-# single shared custom-tools/Cargo.lock, and one custom-tools/target/ (not three).
+# single shared rust-tools/Cargo.lock, and one rust-tools/target/ (not three).
 #
-# Build everything:      cargo build --release            (from custom-tools/)
+# Build everything:      cargo build --release            (from rust-tools/)
 # Build one tool:        cargo build --release -p piedit
-# Test everything:       cargo test                       (from custom-tools/)
+# Test everything:       cargo test                       (from rust-tools/)
 # Lint everything:       cargo clippy --all-targets -- -D warnings
 #
 # scripts/bootstrap.sh and scripts/after-pull.sh build with -p <name> so a
 # change to one crate does not rebuild the other two.
 [workspace]
 resolver = "2"
-members = ["pidx", "piread", "piedit", "pibash"]
+members = ["pidx", "piread", "piedit", "pibash", "docheck"]
 
 # Shared release profile (profiles must live at the workspace root; per-crate
 # copies are ignored). Unified on the piread/piedit settings; pidx now also

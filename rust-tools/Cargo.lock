@@ -53,6 +53,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "docheck"
+version = "0.1.0"
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -179,6 +183,7 @@ dependencies = [
 name = "piread"
 version = "0.2.0"
 dependencies = [
+ "memchr",
  "serde",
  "serde_json",
 ]
