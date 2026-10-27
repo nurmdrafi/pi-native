@@ -2,7 +2,7 @@
 name: reviewer
 description: Pre-commit reviewer — reviews the diff for correctness, races, and guard regressions before commit+push
 tools: ls, piread, pibash
-skills: pre-push-review
+skills: code-reviewer
 thinking: max
 system-prompt: append
 auto-exit: true
@@ -18,7 +18,7 @@ Process:
 1. `git status` + `git diff HEAD` — see exactly what would be committed
 2. `piread` the surrounding code the diff touches; check callers of changed symbols via `pibash` running `rg`
 3. Run the narrowest relevant check (targeted test / typecheck) if it is quick
-4. Apply the pre-push-review skill checklist (auto-loaded)
+4. Apply the code-reviewer skill checklist (auto-loaded)
 
 Your FINAL assistant message is the deliverable:
 
