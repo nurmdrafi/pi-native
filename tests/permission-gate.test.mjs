@@ -744,6 +744,81 @@ const cases = [
     },
   ],
   [
+    "locate-first: block names the hit lines and the read call that covers them",
+    "blocked",
+    async (pi) => {
+      // the remedy must be paste-ready: hit lines listed, offset/limit derived
+      // from them, and no second search suggested (the hits are recorded)
+      await runSearch(pi, `rg -n term ${hitRoot}`, `${hitApi}:241:x\n${hitApi}:261:x\n`);
+      const r = await read(pi, hitApi, { offset: 400, limit: 140 }, { outputLines: 140 });
+      if (!r || !r.reason) return { blocked: false };
+      const ok =
+        r.reason.includes("(hits 241, 261)") &&
+        r.reason.includes("offset:238") &&
+        r.reason.includes("limit:27") &&
+        r.reason.includes("do not re-search");
+      return ok ? r : { blocked: false, reason: r.reason };
+    },
+  ],
+  [
+    "locate-first: single-file search output (bare NN:) seeds that file's hits",
+    "pass",
+    async (pi) => {
+      await runSearch(pi, `rg -n term ${hitApi}`, `241:x\n`);
+      return read(pi, hitApi, { offset: 200, limit: 100 }, { outputLines: 100 });
+    },
+  ],
+  [
+    "locate-first: wc -l enumeration rows seed the counted path",
+    "pass",
+    async (pi) => {
+      await runSearch(pi, `wc -l ${hitApi}`, `   328 ${hitApi}\n`);
+      return read(pi, hitApi, { offset: 300, limit: 120 }, { outputLines: 120 });
+    },
+  ],
+  [
+    "anchor guard: a line a search printed certifies the edit (no re-read)",
+    "pass",
+    async (pi) => {
+      // dropx-admin 2026-10-27: bulk mechanical edits re-read a head line the
+      // agent's own rg had just printed — a search's printed lines are content
+      // in context and must certify like a read.
+      const dir = mkdtempSync(join(tmpdir(), "ag-search-obs-"));
+      const f = join(dir, "mod.jsx");
+      writeFileSync(
+        f,
+        "import a from 'a'\nimport { httpClient } from '../../utils/httpClient'\nexport default x\n",
+      );
+      await runSearch(
+        pi,
+        `rg -n httpClient ${f}`,
+        `${f}:2:import { httpClient } from '../../utils/httpClient'\n`,
+      );
+      return edit(pi, f, [
+        {
+          oldText: "import { httpClient } from '../../utils/httpClient'",
+          newText: "import { httpClient } from '../../utils/httpClient'\nimport { y } from 'y'",
+        },
+      ]);
+    },
+  ],
+  [
+    "anchor guard: a path-only search result certifies nothing (file named, not shown)",
+    "blocked",
+    async (pi) => {
+      const dir = mkdtempSync(join(tmpdir(), "ag-search-l-"));
+      const f = join(dir, "mod.jsx");
+      writeFileSync(f, "import { httpClient } from '../../utils/httpClient'\n");
+      await runSearch(pi, `rg -l httpClient ${f}`, `${f}\n`);
+      return edit(pi, f, [
+        {
+          oldText: "import { httpClient } from '../../utils/httpClient'",
+          newText: "import { httpClient } from '../../utils/httpClient'\nimport { y } from 'y'",
+        },
+      ]);
+    },
+  ],
+  [
     "locate-first: rg -l output (path-only) seeds any window",
     "pass",
     async (pi) => {

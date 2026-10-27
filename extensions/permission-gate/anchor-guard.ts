@@ -94,6 +94,12 @@ export async function validateEditAnchors(
    * Claude-Code parity — the path having been read this session suffices;
    * the per-anchor region-intersect is skipped. Never-read still blocks. */
   regionGuard = true,
+  /** Lines this session's own search PRINTED for this path (2026-10-27
+   * dropx-admin). Printed rows are content in context, like a read span: a
+   * bulk edit anchored on a line rg just showed must not pay a piread for
+   * text already on screen. Path-only seeds (`rg -l`, `wc -l`) carry no lines
+   * and certify nothing. */
+  searchShown?: Set<number>,
 ): Promise<
   | { block: true; reason: string; stale?: boolean }
   | {
@@ -267,28 +273,39 @@ export async function validateEditAnchors(
   // unshifted lines (spec §5.2 alignment argument).
   {
     const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
+    // fuzzy anchors carry no original span (normalized space) — no line can be
+    // matched against a printed row, so they stay on the read requirement
+    const shownHit = (start: number, end: number) => {
+      for (const l of searchShown ?? [])
+        if (l >= start && l <= end) return true;
+      return false;
+    };
     if (!cov) {
       const first = origSpans[0];
-      return {
-        block: true,
-        reason:
-          `Anchor Guard (Unread): '${shown}' not read this session — ` +
-          (first
-            ? `read lines ${first.start}–${first.end} with the piread tool (piread {path:'${String(input.path)}', offset:${first.start}, limit:${first.end - first.start + 1}}) first.`
-            : `read it with the piread tool (piread {path:'${String(input.path)}'}) first.`),
-      };
+      if (!first || !shownHit(first.start, first.end)) {
+        return {
+          block: true,
+          reason:
+            `Anchor Guard (Unread): '${shown}' not read this session — ` +
+            (first
+              ? `read lines ${first.start}–${first.end} with the piread tool (piread {path:'${String(input.path)}', offset:${first.start}, limit:${first.end - first.start + 1}}) first.`
+              : `read it with the piread tool (piread {path:'${String(input.path)}'}) first.`),
+        };
+      }
     }
     if (regionGuard)
       for (const os of origSpans) {
-        const covered = cov.spans.some(
-          (cs) => cs.start <= os.end && os.start <= cs.end,
-        );
+        const covered =
+          (cov?.spans.some(
+            (cs) => cs.start <= os.end && os.start <= cs.end,
+          ) ??
+            false) || shownHit(os.start, os.end);
         if (!covered) {
           // C2: when the target sits in a recorded compaction gap, say so —
           // the remedy read is sanctioned (R1 blocks only fully covered
           // windows), so the gap marker must not read as a "never re-read"
           // instruction (SYSTEM.md Re-reads).
-          const inGap = cov.gaps?.some(
+          const inGap = cov?.gaps?.some(
             (g) => g.start <= os.end && os.start <= g.end,
           );
           return {

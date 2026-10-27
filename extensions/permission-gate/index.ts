@@ -6,7 +6,7 @@
  * CURRENT rules (IDs are stable; family = block-reason prefix):
  * | ID  | Family / mechanism            | Enforces |
  * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
+ * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27 dropx-admin), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; the block lists those hit lines and the piread call that covers them |
@@ -508,6 +508,7 @@ export default function (pi: ExtensionAPI) {
             ctx?.cwd,
             coverage.get(path),
             ruleEnabled("editRegionGuard"),
+            searchHits.get(path),
           )
         : undefined;
       if (checked && "block" in checked) {
@@ -1253,6 +1254,11 @@ export default function (pi: ExtensionAPI) {
             gaps: undefined,
           });
         }
+        // search-printed line numbers are pre-edit coordinates: after a shift
+        // they would certify whatever now sits at those numbers (2026-10-27).
+        // Drop them — the edit certifies its own post-edit spans, and R1c keeps
+        // passing through coverage.
+        searchHits.delete(entry.path);
         for (const s of entry.spans)
           certify(coverage, entry.path, s, entry.kind, snap);
       }
