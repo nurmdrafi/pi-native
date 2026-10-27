@@ -9,7 +9,7 @@
  * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
- * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
+ * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a `path:line:` hit its output printed — is blocked unless the window covers a reported hit line; `rg` first, then read the hit's range |
  * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
@@ -91,7 +91,14 @@ import type {
   LineSpan,
 } from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
-import { searchCheck, searchedPathsFrom } from "./search-guard.ts";
+import {
+  effectiveCwd,
+  hitAnchorsWindow,
+  isSearchSegment,
+  searchCheck,
+  searchHitsFrom,
+  searchedPathsFrom,
+} from "./search-guard.ts";
 
 // ---- R1b + cadence thresholds (see index header table: R1b, CN) ----
 /** big-read gate: a whole-file-ish request for a file larger than this is
@@ -161,6 +168,12 @@ export default function (pi: ExtensionAPI) {
     for (const p of searchedPathsFrom(segs, cwd, normPath, existsSync))
       searchedPaths.add(p);
   };
+  /** R1c/C4: bash toolCallId -> the cwd its search hits resolve against;
+   * set only for rg-family commands (isSearchSegment). */
+  const pendingSearchCalls = new Map<string, { cwd: string | undefined }>();
+  /** R1c/C4: files a search's OUTPUT named, -> the hit lines it reported
+   * (empty set = path-only result, e.g. `rg -l` — any window). */
+  const searchHits = new Map<string, Set<number>>();
   /** edit/write toolCallId -> { path, spans?, kind }, awaiting its tool_result */
   const pendingEdits = new Map<
     string,
@@ -557,19 +570,25 @@ export default function (pi: ExtensionAPI) {
             : Infinity,
       };
       // R1c locate-first: a WIDE window on a path no search has named this
-      // session is a guess about where the content sits. Deliberately narrow:
-      // whole-file reads belong to R1b, and windows under LOCATE_MIN_WIN are
-      // ordinary targeted reads that must stay frictionless.
+      // session is a guess about where the content sits. C4 (2026-10-26
+      // session): "named" covers both argv operands and `path:line:` hits a
+      // search PRINTED — and an output-named path is readable only across a
+      // reported hit line, which is the rule text itself: read the hit's range.
+      // Deliberately narrow: whole-file reads belong to R1b, and windows under
+      // LOCATE_MIN_WIN are ordinary targeted reads that must stay frictionless.
       if (
         ruleEnabled("locateFirst") &&
         win.end !== Infinity &&
         win.end - win.start + 1 >= LOCATE_MIN_WIN &&
         path &&
         !searchedPaths.has(path) &&
+        !hitAnchorsWindow(searchHits, path, win) &&
         !coverage.has(path)
       ) {
         return blockCall(
-          `Locate-first: ${win.end - win.start + 1}-line window on '${shown}', which no search has named this session. \`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then read the hit's range.`,
+          searchHits.has(path)
+            ? `Locate-first: ${win.end - win.start + 1}-line window on '${shown}' covers no line a search reported for it — read a hit's range (\`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then piread that range).`
+            : `Locate-first: ${win.end - win.start + 1}-line window on '${shown}', which no search has named this session. \`rg -n <term> ${shown.replace(/^.*\//, "")}\`, then read the hit's range.`,
         );
       }
       // R1b (2026-10-10 audit; demoted 2026-10-21): a whole read of a large
@@ -891,8 +910,47 @@ export default function (pi: ExtensionAPI) {
     pendingBash.set(event.toolCallId, base);
     // R1c: remember which paths this command targeted, so a later wide read of
     // one counts as a located lookup rather than a guess.
-    if (ruleEnabled("locateFirst")) recordSearchedPaths(normSegs, ctx?.cwd);
+    if (ruleEnabled("locateFirst")) {
+      recordSearchedPaths(normSegs, ctx?.cwd);
+      // C4 (2026-10-26 session): argv operands never credit files a search
+      // merely PRINTS — remember the effective cwd (session cwd advanced by
+      // `cd <dir> &&` prefixes inside the command) so the tool_result
+      // handler can resolve the relative `path:line:` forms rg prints.
+      if (normSegs.some(isSearchSegment))
+        pendingSearchCalls.set(event.toolCallId, {
+          cwd: effectiveCwd(normSegs, ctx?.cwd, normPath),
+        });
+    }
     return;
+  });
+
+  // R1c/C4 hit seeding (2026-10-27 research/gate-locate-first-seed.md): on the
+  // result of an rg-family command, credit the files its output names,
+  // anchored to the hit lines it reported — the block message's own promise
+  // ("a search has named") finally covers what searches print. Registered
+  // BEFORE the H1 cap so parsing sees raw result text (scrub/cap mutate the
+  // content in place); non-blocking by design. Fail-closed: only results whose
+  // toolCall passed isSearchSegment are parsed (an `echo <path>` result never
+  // seeds) and every candidate path must exist (searchHitsFrom).
+  on("tool_result", async (event) => {
+    const call = pendingSearchCalls.get(event.toolCallId);
+    if (!call) return;
+    pendingSearchCalls.delete(event.toolCallId);
+    if (!ruleEnabled("locateFirst")) return;
+    const text = (event.content ?? [])
+      .map((b) => (b as { text?: unknown }).text)
+      .filter((t): t is string => typeof t === "string")
+      .join("\n");
+    for (const [p, lines] of searchHitsFrom(
+      text,
+      call.cwd,
+      normPath,
+      existsSync,
+    )) {
+      const cur = searchHits.get(p);
+      if (!cur) searchHits.set(p, lines);
+      else for (const l of lines) cur.add(l);
+    }
   });
 
   // H1 cap handler (2026-10-08) — registered BEFORE the bookkeeping handler
@@ -1252,6 +1310,8 @@ export default function (pi: ExtensionAPI) {
     pendingBash.clear();
     lastBashRun.clear();
     pendingBashFull.clear();
+    pendingSearchCalls.clear();
+    searchHits.clear();
     lastBlockedBash = undefined;
     turnsSeen = 0;
     cadenceFired = false;

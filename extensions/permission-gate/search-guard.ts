@@ -164,6 +164,16 @@ export function searchCheck(
   return !on.midPipe || (paths.length > 0 && paths.every(isNodeModulesPath)) ? undefined : SS2_MSG;
 }
 
+/** R1c search-tool family, one home for every consumer (argv seeding,
+ * C4 result parsing) so the two cannot drift apart. */
+const SEARCH_TOOL_RE = /^(?:rg|grep|egrep|fgrep|fd|find|ag|ack)$/;
+
+/** R1c/C4: does this command segment run a search tool? Any-token match —
+ * exactly what searchedPathsFrom has always keyed on. */
+export function isSearchSegment(seg: string): boolean {
+  return seg.split(/\s+/).filter(Boolean).some((t) => SEARCH_TOOL_RE.test(t));
+}
+
 /** R1c locate-first: which paths did this command target? A wide window read
  * of a path that was never searched is a guess about where the content is.
  * Tokens that exist on disk count as targets; flags and patterns do not. */
@@ -176,7 +186,7 @@ export function searchedPathsFrom(
   const out: string[] = [];
   for (const seg of segments) {
     const toks = seg.split(/\s+/).filter(Boolean);
-    if (!toks.some((t) => /^(?:rg|grep|egrep|fgrep|fd|find|ag|ack)$/.test(t)))
+    if (!isSearchSegment(seg))
       continue;
     for (const tok of toks) {
       if (tok.startsWith("-") || tok.includes("=")) continue;
@@ -210,6 +220,92 @@ export function searchedPathsFrom(
     }
   }
   return out;
+}
+
+/** R1c/C4: cap on result text scanned for hit lines — output beyond the first
+ * screenful is stale for locating, and the bound keeps parsing O(1). */
+export const HIT_SCAN_CHARS = 4096;
+
+/** R1c/C4: the cwd a command's search hits resolve against — the session cwd
+ * advanced by each `cd <dir>` segment in command order (the 2026-10-26
+ * incident's searches all carried `cd <dir> &&` prefixes). Bare `cd` (HOME),
+ * flag forms and quoted targets are skipped: an unadvanced cwd under-resolves
+ * and then fails the existence check instead of mis-seeding. */
+export function effectiveCwd(
+  segments: string[],
+  cwd: string | undefined,
+  resolvePath: (p: string, cwd?: string) => string,
+): string | undefined {
+  let cur = cwd;
+  for (const seg of segments) {
+    const toks = seg.split(/\s+/).filter(Boolean);
+    if (toks[0] !== "cd" || toks.length !== 2) continue;
+    const dir = toks[1];
+    if (dir.startsWith("-") || /[|><;$`"']/.test(dir)) continue;
+    cur = resolvePath(dir, cur);
+  }
+  return cur;
+}
+
+/** R1c/C4 hit-anchored seeding: parse rg/grep/fd-style output into
+ * path → hit lines. `path:line[:col]:` prefixes seed with that line; bare
+ * path-only lines (`rg -l`, fd) seed an empty set — any window; colon-bearing
+ * forms that miss the hit pattern (`rg -c` counts, prose references) seed
+ * nothing.
+ * FAIL-CLOSED, two gates: callers scan only results of commands that passed
+ * isSearchSegment (an `echo <path>` result is never parsed), and every
+ * candidate must exist on disk after cwd resolution — prose like `foo:12:`
+ * resolves nowhere, so it seeds nothing. */
+export function searchHitsFrom(
+  text: string,
+  cwd: string | undefined,
+  resolvePath: (p: string, cwd?: string) => string,
+  exists: (p: string) => boolean,
+): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
+  for (const line of text.slice(0, HIT_SCAN_CHARS).split(/\r?\n/)) {
+    const hit = /^([^\s:]+\.?[A-Za-z0-9_-]*):(\d+)(?::\d+)?:/.exec(line);
+    if (hit) {
+      const abs = resolvePath(hit[1], cwd);
+      if (!exists(abs)) continue;
+      const lines = out.get(abs) ?? new Set<number>();
+      lines.add(Number(hit[2]));
+      out.set(abs, lines);
+      continue;
+    }
+    // path-only: one token shaped like a path (has / or .), no colon (a
+    // colon-bearing token that missed the hit form — `rg -c` counts, prose
+    // references — is not a path)
+    if (
+      line &&
+      !/\s/.test(line) &&
+      !line.includes(":") &&
+      !line.startsWith("-") &&
+      /[./]/.test(line)
+    ) {
+      const abs = resolvePath(line, cwd);
+      if (!exists(abs)) continue;
+      if (!out.has(abs)) out.set(abs, new Set<number>());
+    }
+  }
+  return out;
+}
+
+/** R1c/C4: does a recorded search hit anchor this window? A path-only seed
+ * (`rg -l`) anchors any window; otherwise some reported hit line must fall
+ * inside the read — the allow-condition is the rule text: "read the hit's
+ * range". */
+export function hitAnchorsWindow(
+  hits: Map<string, Set<number>>,
+  path: string,
+  win: { start: number; end: number },
+): boolean {
+  const lines = hits.get(path);
+  if (lines === undefined) return false;
+  if (lines.size === 0) return true;
+  for (const l of lines)
+    if (l >= win.start && l <= win.end) return true;
+  return false;
 }
 
 /** fnmatch-style single-level glob → RegExp. `?` → one non-slash char,

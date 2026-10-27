@@ -291,6 +291,28 @@ async function runBash(pi, command, { error = false, ctx } = {}) {
   });
   return { blocked: false };
 }
+/** R1c/C4 (2026-10-27): bash call + result replay carrying raw command
+ * OUTPUT — hit-anchored seeding parses the result text of rg-family
+ * commands, so these probes control exactly what the search "printed". */
+async function runSearch(pi, command, output, { error = false } = {}) {
+  const toolCallId = `tc${++seqId}`;
+  const block = await pi.invoke("tool_call", {
+    type: "tool_call",
+    toolName: "bash",
+    toolCallId,
+    input: { command },
+  });
+  if (block) return { blocked: true, reason: block.reason };
+  await pi.invoke("tool_result", {
+    type: "tool_result",
+    toolName: "bash",
+    toolCallId,
+    input: { command },
+    content: textBlocks(output),
+    isError: error,
+  });
+  return { blocked: false };
+}
 /** Pibash (2026-10-18): the native bash tool. Same events, toolName `pibash`
  * — the gate must treat it as bash-kind (H1 cap, R10, destructive, malformed). */
 async function pibash(pi, command, ctx) {
@@ -445,6 +467,13 @@ writeFileSync(
   spanFile,
   Array.from({ length: 120 }, (_, i) => `s${i + 1}`).join("\n") + "\n",
 );
+// R1c/C4 (2026-10-26 session replay): the incident's file, named only in rg
+// OUTPUT (`__tests__/…/orderApi.test.ts:158:`), never in argv — the wide read
+// that followed was blocked. Same shape, sandboxed.
+const hitRoot = join(tmp, "hit-merchant");
+mkdirSync(join(hitRoot, "__tests__/redux/features/order"), { recursive: true });
+const hitApi = join(hitRoot, "__tests__/redux/features/order/orderApi.test.ts");
+writeFileSync(hitApi, Array.from({ length: 600 }, (_, i) => `h${i + 1}`).join("\n") + "\n");
 const hugeFile = join(tmp, "extension-huge.ts"); // 2026-10-10: R1b big-read gate (audit: 44KB/51KB whole-file reads rode two sessions' prefixes)
 const midFile = join(tmp, "extension-mid.tsx"); // 2026-10-18: elision blind-spot fixture (~13KB / 330 lines)
 writeFileSync(
@@ -681,6 +710,50 @@ const cases = [
     "locate-first: whole-file read is R1b's, not R1c's",
     "pass",
     async (pi) => read(pi, fileA),
+  ],
+  [
+    "locate-first: wide read covering a hit line rg printed passes (incident replay)",
+    "pass",
+    async (pi) => {
+      // the incident's shape: rg scoped to a directory under `cd`, output in
+      // relative path:line: form, read in absolute form
+      await runSearch(
+        pi,
+        `cd ${hitRoot} && rg -n --no-heading '\bany\b' __tests__ -g '!node_modules'`,
+        "__tests__/redux/features/order/orderApi.test.ts:158:  const x: any = f();\n",
+      );
+      return read(pi, hitApi, { offset: 85, limit: 140 }, { outputLines: 140 });
+    },
+  ],
+  [
+    "locate-first: wide read of a search-named file away from every hit blocks",
+    "blocked",
+    async (pi) => {
+      // directory operand (argv credits the dir, not the file); the file is
+      // named ONLY in output — C4's tightness: a hit line anchors just its range
+      await runSearch(pi, `rg -n term ${hitRoot}`, `${hitApi}:158:x\n`);
+      return read(pi, hitApi, { offset: 400, limit: 140 }, { outputLines: 140 });
+    },
+  ],
+  [
+    "locate-first: a path merely echoed by a non-search command stays blocked",
+    "blocked",
+    async (pi) => {
+      await runSearch(pi, `echo ${hitApi}`, `${hitApi}\n`);
+      return read(pi, hitApi, { offset: 1, limit: 120 }, { outputLines: 120 });
+    },
+  ],
+  [
+    "locate-first: rg -l output (path-only) seeds any window",
+    "pass",
+    async (pi) => {
+      await runSearch(
+        pi,
+        `cd ${hitRoot} && rg -l any __tests__`,
+        "__tests__/redux/features/order/orderApi.test.ts\n",
+      );
+      return read(pi, hitApi, { offset: 300, limit: 120 }, { outputLines: 120 });
+    },
   ],
   [
     "elided whole-file read does not certify the omitted middle",
