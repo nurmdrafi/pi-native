@@ -89,7 +89,7 @@ Every repo script is exposed through `package.json` — run `npm run <name>` fro
 | `test:subagents`    | `node --test`             | Subagent unit suite (mock-based, no tmux or model needed)                  |
 | `lint:agents`       | `node scripts/agents-lint.mjs` | AGENTS.md lint — flags duplicated rules and contradictory directives (one JSON line) |
 | `doc:check`         | `node scripts/doc-check.mjs` | Verifies harness commands, paths, tool and env-var inventories declared in markdown actually resolve |
-| `gate:eval`         | `node scripts/gate-eval.mjs` | Aggregates the fixture suite with the block-recovery and bash-replay audits; prints one final JSON metrics line |
+| `gate:eval`         | `node tests/gate/eval/run.mjs` | Aggregates the fixture suite with the block-recovery and bash-replay audits; prints one final JSON metrics line |
 | `check`             | all of the above          | typecheck → agents lint → doc check → tests; the full pre-commit gate        |
 
 Conventional commits are enforced by husky + commitlint. Release CI extracts the version from `CHANGELOG.md` on push to `main`.

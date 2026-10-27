@@ -157,8 +157,8 @@ three** when `pending` empties. Two real bugs came from getting this wrong:
 - Unref'ing only `stdin`/`stdout` (not `proc`) after a settle left the process
   handle referenced → the host never exits at all.
 
-Both are covered by `tests/daemon-exit.test.mjs` and
-`tests/piread-daemon-settle.test.mjs`.
+Both are covered by `tests/integration/daemon-exit.test.mjs` and
+`tests/integration/piread-daemon-settle.test.mjs`.
 
 Other lifecycle rules:
 
@@ -207,7 +207,7 @@ drops in-flight requests and forces a reconnect.
 `setpgid` is POSIX.1 — present in glibc, musl, and Apple libSystem — and is
 declared as a raw `extern "C"` symbol, so no `libc` dependency is added. On
 non-unix the call compiles to a no-op. Verified by
-`tests/daemon-process-group.test.mjs`.
+`tests/integration/daemon-process-group.test.mjs`.
 
 ---
 
@@ -389,7 +389,7 @@ grows — compression-classified streams render ≈2 KB, unclassified ones
 measured) — and per-class RSS caps record the accumulator's by-design
 scaling until spill (100 MB class measured 1003 MB peak). Reports land in
 `benchmark/runs/`; the 1 MB class also runs in the Node suite
-(`tests/pibash-large-output.test.mjs`). Wall time is recorded, never
+(`tests/integration/pibash-large-output.test.mjs`). Wall time is recorded, never
 asserted.
 
 ### Compression
