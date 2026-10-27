@@ -7,6 +7,41 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.62.0] - 27-10-2026
+
+### Added
+
+- **R11 (`failureLoopGuard`) — failure-loop escalation.** Five consecutive tool failures with no
+  landed mutation since the streak began block the next shell call, with the remedy in the reason.
+  It shares LG1's error counter, so the 3-error note and the 5-error block cannot disagree; a
+  red-green cycle edits between failing runs and never arms it. Default `error`, demotable.
+- **PH1 (`phaseNudge`) — turn phase label.** Labels the turn exploring / editing / verifying /
+  recovering and emits one advisory note per turn on entry into recovering. Never blocks, and it
+  stands down when a result already sits at the 40-line / 2 KB output cap so the cap is not
+  displaced. Default `warn`.
+- **Validated implementation plan** in `docs/plans/`, with the rejected architecture recorded as
+  superseded rather than deleted: no Rust gate seam, no mmap state, no telemetry sidecar.
+
+### Changed
+
+- **Gate rule modules moved to `extensions/permission-gate/rules/`.** The extension root keeps only
+  the composition root (`index.ts`) and config.
+- **Gate test suite split by rule key.** One case module per config rule, plus scene modules for
+  multi-rule flows; runner, harness, fixtures, and eval driver live under `tests/gate/`. The
+  edit-anchor rule is split by area into named section files. Case count unchanged at 307.
+- **Test tree organized by need.** `tests/` now separates unit, integration, parity, benchmark, and
+  manual tools (`tools/bench`, `tools/audit`); drivers dropped spec codes from their filenames
+  (`s8-hotpath` became `hotpath-profile`). Doc references repointed.
+
+### Fixed
+
+- Gate eval driver ran its audit and replay stages from the wrong directory depth after the test
+  move and silently reported zero commands; `commands` is back to 6427.
+- Empty duplicate case files left by an earlier split (`basics`, `anchor-basics`) removed; their
+  cases had already been counted once.
+- PH1's first note implementation replaced H1's truncation for oversized results (handlers compose
+  last-wins); the note now stands down at the output budget.
+
 ## [1.61.0] - 26-10-2026
 
 ### Added
