@@ -1,21 +1,26 @@
 # pibash large-output — implementation plan
 
+> **Historical record.** Paths below are the ones the plan proposed at the time; several
+> module splits never happened (`bounded.rs`, `capture.rs`, `linesplit.rs`, `spill.rs`) and
+> the tests now live under `tests/parity/` and `tests/integration/`. Read it as the decision
+> trail, not as a map of current files.
+
 Converts the approved 8-step checklist (`research/pibash-large-output.md` §6) into a file-by-file plan: target files, function-level targets with signatures, test names, ship criteria, and revert mechanisms. Every step lands as one independently shippable, independently revertible commit.
 
 ## Source material and conventions
 
 Verified repo facts (from the task brief; this plan did not read the repo):
 
-- pibash source: `custom-tools/pibash/src/main.rs` — Rust, std-only. No Tokio, Clap, regex, or libc; a raw `extern "C"` for `setpgid` is accepted precedent.
+- pibash source: `rust-tools/pibash/src/main.rs` — Rust, std-only. No Tokio, Clap, regex, or libc; a raw `extern "C"` for `setpgid` is accepted precedent.
 - Dispatch ladder: `--serve` NDJSON daemon → one-shot CLI → built-in TS oracle.
 - Byte-exact behavior is pinned by `tests/pibash-parity.test.mjs`.
-- Perf reference: `custom-tools/pibash/bench-seq50000.mjs` (the `seq 50000` case).
-- Architecture doc: `docs/custom-tools-architecture.md` § pibash.
+- Perf reference: `rust-tools/pibash/bench-seq50000.mjs` (the `seq 50000` case).
+- Architecture doc: `docs/rust-tools-architecture.md` § pibash.
 - Envelope regression history: 2026-10-17 payload shipped twice (`content[0].text` + `structuredContent.output`); fixed 2026-10-19 via single-materialization + copy-on-write compression stages + one shared line split.
 
 `[uncited]` marks anything beyond that material: proposed identifiers, thresholds, fixture paths, and existing function names inside `main.rs` (unknown to this plan — verify with `rg -n` before editing and substitute real names). All signatures below are proposals; the checklist mandates only `bounded::Ring` with `capacity` + `push_bounded`.
 
-Scoped verification per step: `cargo test` for the pibash crate [uncited invocation, e.g. `cargo test --manifest-path custom-tools/pibash/Cargo.toml`], plus `node --test tests/pibash-parity.test.mjs` [uncited runner]. `npm run check` (includes doc check) once before tagging any step done. Doc updates to `docs/custom-tools-architecture.md` § pibash land in the same commit as any behavior change.
+Scoped verification per step: `cargo test` for the pibash crate [uncited invocation, e.g. `cargo test --manifest-path rust-tools/pibash/Cargo.toml`], plus `node --test tests/pibash-parity.test.mjs` [uncited runner]. `npm run check` (includes doc check) once before tagging any step done. Doc updates to `docs/rust-tools-architecture.md` § pibash land in the same commit as any behavior change.
 
 ## Design target (§1 recap — drives every step)
 
@@ -35,8 +40,8 @@ Scoped verification per step: `cargo test` for the pibash crate [uncited invocat
 ## Step 1 — `bounded::Ring`
 
 **Target files**
-- `custom-tools/pibash/src/bounded.rs` — new module `[uncited]`.
-- `custom-tools/pibash/src/main.rs` — add `mod bounded;` only. No behavior change.
+- `rust-tools/pibash/src/bounded.rs` — new module `[uncited]`.
+- `rust-tools/pibash/src/main.rs` — add `mod bounded;` only. No behavior change.
 
 **New code**
 ```rust
@@ -67,8 +72,8 @@ Invariant enforced by construction: `len() <= capacity()` after every `push_boun
 ## Step 2 — byte-level line splitter with capped pending buffer
 
 **Target files**
-- `custom-tools/pibash/src/linesplit.rs` — new module `[uncited]`.
-- `custom-tools/pibash/src/main.rs` — add `mod linesplit;` only.
+- `rust-tools/pibash/src/linesplit.rs` — new module `[uncited]`.
+- `rust-tools/pibash/src/main.rs` — add `mod linesplit;` only.
 
 **New code**
 ```rust
@@ -102,9 +107,9 @@ Rules: split on LF (0x0A) only, byte-exact, no UTF-8 validation, no CRLF normali
 ## Step 3 — candidate capture alongside the accumulator, behind a flag (equivalence gate)
 
 **Target files**
-- `custom-tools/pibash/src/capture.rs` — new module `[uncited]` holding candidate capture.
-- `custom-tools/pibash/src/main.rs` — wire a shadow path into the existing read loop [uncited: locate the post-2026-10-19 single-materialization read loop and compression stages with `rg -n` first]. Gate: env/CLI flag `PIBASH_CAPTURE_V2` `[uncited name]`, default off. Sub-modes: `shadow` (compute both old and candidate compaction, compare, report mismatch without changing output) then `exclusive` (candidate only).
-- `custom-tools/pibash/tests/capture_equivalence.rs` or `tests/pibash-capture-equivalence.test.mjs` — new `[uncited: pick the form that can drive the daemon end-to-end]`.
+- `rust-tools/pibash/src/capture.rs` — new module `[uncited]` holding candidate capture.
+- `rust-tools/pibash/src/main.rs` — wire a shadow path into the existing read loop [uncited: locate the post-2026-10-19 single-materialization read loop and compression stages with `rg -n` first]. Gate: env/CLI flag `PIBASH_CAPTURE_V2` `[uncited name]`, default off. Sub-modes: `shadow` (compute both old and candidate compaction, compare, report mismatch without changing output) then `exclusive` (candidate only).
+- `rust-tools/pibash/tests/capture_equivalence.rs` or `tests/pibash-capture-equivalence.test.mjs` — new `[uncited: pick the form that can drive the daemon end-to-end]`.
 - Corpus: the fixtures already exercised by `tests/pibash-parity.test.mjs` `[uncited location]`.
 
 **New code**
@@ -138,8 +143,8 @@ Byte-budget ring: evicts oldest lines until under budget; all arithmetic checked
 ## Step 4 — lazy spill writer
 
 **Target files**
-- `custom-tools/pibash/src/spill.rs` — new module `[uncited]`.
-- `custom-tools/pibash/src/main.rs` — wire into the read loop: every chunk read from the child pipes goes to (a) splitter/candidate capture and (b) spill writer. Read-loop order preserves the invariant that spill (post-step-7) is the only full-stream copy.
+- `rust-tools/pibash/src/spill.rs` — new module `[uncited]`.
+- `rust-tools/pibash/src/main.rs` — wire into the read loop: every chunk read from the child pipes goes to (a) splitter/candidate capture and (b) spill writer. Read-loop order preserves the invariant that spill (post-step-7) is the only full-stream copy.
 
 **New code**
 ```rust
@@ -178,7 +183,7 @@ Degradation contract: any `SpillError` (disk full, unwritable dir, eviction fail
 ## Step 5 — serialization A/B (four cells)
 
 **Target files**
-- `custom-tools/pibash/bench-serialization.mjs` — new measurement script `[uncited name]`; alternatively a mode flag on `bench-seq50000.mjs`. No production code changes.
+- `rust-tools/pibash/bench-serialization.mjs` — new measurement script `[uncited name]`; alternatively a mode flag on `bench-seq50000.mjs`. No production code changes.
 
 **Cells** (measure all four, both OSes):
 - A1 `to_writer`-into-Vec × small envelope; A2 same × large envelope (envelope at maximum post-change size: head+tail at budget — NOT full output text).
@@ -196,7 +201,7 @@ Degradation contract: any `SpillError` (disk full, unwritable dir, eviction fail
 ## Step 6 — envelope construction switches to the single-pass winner
 
 **Target files**
-- `custom-tools/pibash/src/main.rs` — the envelope builder introduced/fixed on 2026-10-19 [uncited: locate via `rg -n` for the single-materialization path]. Keep the old builder callable until step 7; select via flag `[uncited]`, default old, flip after tests pass.
+- `rust-tools/pibash/src/main.rs` — the envelope builder introduced/fixed on 2026-10-19 [uncited: locate via `rg -n` for the single-materialization path]. Keep the old builder callable until step 7; select via flag `[uncited]`, default old, flip after tests pass.
 
 **New/changed code**
 ```rust
@@ -223,7 +228,7 @@ Envelope carries `{spill: {path, bytes, lines, truncated} | null}` — string + 
 ## Step 7 — delete the old path
 
 **Target files**
-- `custom-tools/pibash/src/main.rs` — remove the old full-stream accumulator, the legacy tail serializer, the step-3 equivalence flag, and the step-6 builder-selection flag. Delete any module only the old path used.
+- `rust-tools/pibash/src/main.rs` — remove the old full-stream accumulator, the legacy tail serializer, the step-3 equivalence flag, and the step-6 builder-selection flag. Delete any module only the old path used.
 
 **Changed code** — deletions only, plus: retire the shadow dual-run equivalence test by repinning candidate output against recorded golden bytes `[uncited: keep the golden comparison, drop the dual-run]` so parity remains byte-exact after the old path is gone.
 
@@ -238,7 +243,7 @@ Envelope carries `{spill: {path, bytes, lines, truncated} | null}` — string + 
 ## Step 8 — fixtures + RSS/envelope assertions in the benchmark harness (Linux AND macOS)
 
 **Target files**
-- `custom-tools/pibash/bench-seq50000.mjs` — extend, or add `custom-tools/pibash/bench-large-output.mjs` `[uncited]`.
+- `rust-tools/pibash/bench-seq50000.mjs` — extend, or add `rust-tools/pibash/bench-large-output.mjs` `[uncited]`.
 - `tests/pibash-large-output.test.mjs` — new regression test `[uncited]`.
 - CI config to run the harness on both OS jobs `[uncited file]`.
 

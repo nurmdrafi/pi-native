@@ -7,6 +7,132 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.63.0] - 27-10-2026
+
+### Added
+
+- **`pidx --report usage` and `CONTRIBUTING.md`** — the usage report answers per-model
+  spend, cost tail and prefix trend from pidx's own extract cache (1.73 s → 0.19 s), and
+  `skills/harness-engineer/scripts/usage-metrics.py` is deleted; its last job was walking
+  110 MB of session JSONL to derive what the cache already holds. `CONTRIBUTING.md` states
+  time-to-first-PR, the daily loop, conventions and where things live.
+- **`TurnState` (`extensions/permission-gate/rules/turn-state.ts`).** The temporal rules (R10, EB,
+  LG1, R11, PH1, CN) shared thirteen `let`/`Map` bindings scattered through the extension factory,
+  with `mutationSeq` declared below the helper that read it. They now share one value and every
+  transition is a function of it. `index.ts` 1570 → 1501 lines, block reasons unchanged.
+- **`pidx` classifies gate blocks.** `results[].blk` carries the block family (`anchor`, `tokens`,
+  `loop`, …), matched only at the start of the result text so a session reading the gate's own
+  source is not counted as blocked. Extract schema `v:2`; the cache store version moves to 3 so
+  stale caches rebuild.
+- **`tests/tools/audit/gate-metrics.mjs`** — repeats, failure-streak calls, blocks by family and
+  gate token share, computed from a `pidx` extract instead of one-off scripts.
+- **`tests/gate/region-warn.test.mjs`** — pins the AG2 severity contract: `warn` passes, while a
+  never-read path and a byte-mismatched anchor still block.
+- **Tooling rule** in `AGENTS.md` and `SYSTEM.md`: reuse an existing native tool before writing a
+  script, plus the bar a new compiled tool has to clear.
+- **`rust-skills`: four compiler-optimization rules** from the "Achieving warp speed with Rust"
+  guide — `opt-flat-storage`, `opt-registers`, `opt-loop-unroll`, `opt-ilp` — plus
+  assert-hoisting guidance in `opt-bounds-check` and runtime-share guidance in
+  `perf-profile-first`. 265 → 269 rules.
+- **`npm run audit:session` and `npm run audit:bin-diff`** — two reusable audit drivers.
+  `session-blocks.mjs` parses a session JSONL directly and reports chaining, the block ledger with
+  gate families and recovery, and re-derives the piread compaction contract from recorded results;
+  it caught the compaction drift on real session data. `bin-diff.mjs` is the byte-for-byte
+  differential between two builds of one native tool — shape corpus × argument grid plus a `--serve`
+  stream mode, exit 1 on any difference; it gated the piread scanner refactor.
+- **`npm run bench:piread`, `bench:pibash` and `bench:piedit`** — all three micro-benches already existed in
+  `tests/tools/bench/` with no entry point and the same stale `../../extensions` import, so none had
+  run in weeks. All are wired, repaired and listed in `tests/README.md`.
+
+### Changed
+
+- **piread scans without per-line reads.** `Segmenter` searches each fill buffer with `memchr`
+  instead of calling `read_until` per line, and `read_text` stops decoding and buffering selected
+  lines once the head buffer is saturated — they can never be rendered, and the only state those
+  calls still moved was a counter nothing reads after the scan. Output is byte-identical (128
+  corpus × argument cases, CLI and daemon); a 250k-line / 5.7 MB read goes from 15.7 ms to 7.9 ms
+  median, while a 2,500-line read is unchanged.
+- **`piedit` borrows its fuzzy view.** `normalizeForFuzzyMatch` ran NFKC over the whole file because
+  duplicate counting needs the view even for an exact edit. The view is now borrowed when the
+  transformation is provably the identity — ASCII content with no line ending in whitespace — and
+  the `expect` that assumed a materialized view became a fallback to the content itself. Worth
+  ~0.5 ms on 589 KB (below bench noise), but it drops a full-content pass and a panic path from the
+  request handler.
+- **AG2 (`editRegionGuard`) honours its configured severity.** Its block bypassed `enforce`, so
+  `warn` blocked exactly like `error`. Each anchor decision now carries the rule that owns it and
+  severity is applied per rule. The shipped default stays `error`; plan §12 records the watch
+  criteria and flip procedure for relaxing it.
+- `config.json` `destructiveConfirm` set to `error` (the hard-rule clamp already forced it).
+- **`custom-tools/` workspace renamed to `rust-tools/`.** Docs, scripts, extensions and tests
+  updated; `docs/custom-tools-architecture.md` → `docs/rust-tools-architecture.md`; all five
+  binaries rebuilt and reinstalled from the new path.
+- **`pre-push-review` skill renamed to `code-reviewer`** (`/skill:code-reviewer`), with
+  company-specific context removed from `SKILL.md` and references.
+
+### Fixed
+
+- **Compaction tiles every window exactly.** `compact` counted lines with `split_lines`, which
+  drops the body-final empty segment, so a trailing-blank window claimed one line fewer than it
+  rendered and head+gap+tail missed it. It now splits on `'\n'` and attributes each omission from
+  `max(kept, rendered)`; `renderedCoverageFromBlocks` / `renderedSpansFromBlocks` take the read
+  window's end, so the backward anchor maps the final run onto it. Found by the cross-layer
+  differential (`tests/parity/piread-compaction-walk.test.mjs`: real `bin/piread` output → TS walk),
+  locked by the 300-case `reconstructs_the_window_exactly` sweep and
+  `trailing_empty_window_line_is_fully_accounted`.
+- A user-configured AG2 `warn` had no effect: the anchor guard returned its block directly instead
+  of through severity enforcement.
+- **`pibash` scanned each output chunk three times.** `OutputAccumulator::append_decoded_text`
+  walked a chunk to record newline offsets, walked it again with `matches('\n').count()`, then a
+  third time for `rfind`. The count now comes out of the first loop. Output is byte-identical
+  (15-file `cat` corpus plus `seq 50000`, path/timing fields excluded), a 290 KB / 50k-line command
+  drops from 12.71 to 11.84 ms median (~7%), and `seq 2500` is unchanged. Every pibash benchmark
+  class is now below its built-in oracle, so the long-standing `seq 50000` acceptance note is
+  retired.
+- **`skills/rust-skills` never loaded.** Its frontmatter had a quoted scalar followed by trailing
+  text (`- "Achieving warp speed with Rust" (jFransham, gist)`), which is invalid YAML, so the loader
+  dropped the whole skill: no `/skill:rust-skills` entry and nothing injected on invocation. The
+  scalar is plain now, and `tests/unit/skills-frontmatter.test.mjs` fails on any loader diagnostic
+  or any `skills/*/SKILL.md` directory that does not load.
+- **`pidx` no longer rewrites an up-to-date extract file.** The indexer already skipped
+  rewriting its store when nothing changed, but still rewrote the extract file that is a pure
+  function of that store — 15 MB per warm call on this corpus. A warm run now leaves an
+  up-to-date file untouched (444 → 28 ms median, ~16x; full re-parse unchanged at ~2.1 s), the
+  output stays byte-identical, and a missing or truncated file is still rebuilt. The store's
+  header is also serialized in sorted key order now: two identical cold runs used to write
+  different bytes because a `HashMap`'s iteration order leaked into the file.
+- **`docheck` resolves `--help` probes across cores.** Every (binary, flag) pair spawns the tool
+  once — git's help path drags `man` and its formatter along — so 2,771 child processes ran
+  serially. The probe loop was already isolated from finding emission, so it now fans out over
+  the available cores with indexed results. Output byte-identical, `npm run doc:check`
+  3.0 → 1.9 s on four cores.
+- **`benchmark/runs/` is no longer gitignored.** Run records are cited from `docs/native-tools.md`
+  and `docs/rust-tools-architecture.md`, so ignoring the directory broke every link to a committed
+  record. The scaffold test now asserts the directory stays trackable instead of asserting the
+  ignore line.
+
+### Removed
+
+- **`skills/llm-format-checker`.** Its rule set duplicated the `AGENTS.md` docs style that
+  `skill-manager` already enforces; the skill was deleted, its row dropped from
+  `docs/skills.md`, and its auto-apply instruction replaced with the style rule itself.
+
+### Docs
+
+- **`docs/rust-tools-optimization.md`** — the repeatable path for optimizing a native tool: model
+  the cost by stage, freeze the old binary as an oracle, pin the seam before swapping it, run the
+  verification ladder, measure with interleaved A/B next to a published noise floor. Worked
+  examples carry measured deltas, alongside the traps already paid for (stale daemons, compaction
+  budget vs the gate cap, state that goes dead after the scan).
+- Plan §10 records measured handler cost (96 µs mean per tool call), §11 the session-log
+  measurement (223 sessions, 16,249 calls, 3.7% blocked, AG2 owning 42% of anchor blocks), §12 the
+  AG2 watch decision.
+- Validation table corrected: stale `plan:` line references (+6 offset), V6's stated reason (a
+  9-byte literal against a 10-byte window is a dead comparison, not a compile error), V7's line,
+  V14's evidence, and the absent V12 row. §8's "no binary input channel" narrowed to "no channel
+  for compressed text", with binary-media billing and prompt caching added.
+- Repeat-call metric corrected from 399 to 70 after the `pidx` param-hash recount; the earlier
+  signature-based count conflated separate edits to the same file.
+
 ## [1.62.0] - 27-10-2026
 
 ### Added

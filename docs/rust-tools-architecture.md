@@ -1,7 +1,7 @@
-# Custom Tools Architecture
+# Rust Tools Architecture
 
 Four native Rust tools replace the pi built-in TypeScript tools. Each is a
-standalone binary in `custom-tools/` with a matching extension in
+standalone binary in `rust-tools/` with a matching extension in
 `extensions/`. Every tool follows the same shape:
 
 - **Extension** (`extensions/<name>/index.ts`) — individual registration, a
@@ -20,14 +20,16 @@ event (`read`/`edit`/`bash`).
 
 **Companion docs:** [`native-tools.md`](native-tools.md) (measured speedups,
 context-shaping tables, tool version pins), [`portability.md`](portability.md)
-(OS constraints), [`backlog.md`](backlog.md) (open work). Per-crate build logs
-live in `custom-tools/*/README.md`.
+(OS constraints), [`rust-tools-optimization.md`](rust-tools-optimization.md) (the
+safe path for changing one of these tools). Per-crate build logs live in
+`rust-tools/*/README.md`.
 
 ---
 
 ## Contents
 
 - [Crate layout and dependencies](#crate-layout-and-dependencies)
+- [Optimization workflow](rust-tools-optimization.md)
 - [Generic dispatch ladder](#generic-dispatch-ladder)
 - [Daemon protocol and lifecycle](#daemon-protocol-and-lifecycle)
 - [Process-group isolation](#process-group-isolation)
@@ -44,15 +46,16 @@ live in `custom-tools/*/README.md`.
 
 ## Crate layout and dependencies
 
-A Cargo workspace (`custom-tools/Cargo.toml`, resolver 2) holds four binary
+A Cargo workspace (`rust-tools/Cargo.toml`, resolver 2) holds five binary
 crates sharing one `Cargo.lock` and one `target/`:
 
 | Crate | Binary | Dependency surface |
 | --- | --- | --- |
-| `piread` | `bin/piread` | `serde`, `serde_json` (`preserve_order`) |
+| `piread` | `bin/piread` | `serde`, `serde_json` (`preserve_order`), `memchr` |
 | `piedit` | `bin/piedit` | + `unicode-normalization` (NFKC); `tempfile` (dev) |
 | `pibash` | `bin/pibash` | `serde`, `serde_json` (`preserve_order`); `tempfile` (dev) |
 | `pidx` | `bin/pidx` | + `sha1`; `preserve_order`, `float_roundtrip` |
+| `docheck` | `bin/docheck` | none — std only (all four families of the former `scripts/doc-check.mjs`, deleted after byte-parity; see `docs/plans/permission_gate_implementation_plan.md` §13) |
 
 Deliberately kept small: no `tokio`, no `clap`, no `regex`, no `libc`. Threads
 are `std::thread`; argument parsing is hand-written; `setsid`/`setpgid` are
@@ -184,7 +187,7 @@ Other lifecycle rules:
 ## Process-group isolation
 
 Every `--serve` daemon calls `setpgid(0, 0)` at startup
-(`custom-tools/*/src/procgroup.rs`), putting it in a process group of its own.
+(`rust-tools/*/src/procgroup.rs`), putting it in a process group of its own.
 
 Without this the daemon inherits the client's process group, and any group-wide
 signal reaches it — `pibash`'s own `kill_tree` signals `-<pid>` on a command
@@ -300,7 +303,7 @@ flowchart TB
         DA[bin/pibash --serve<br/>NDJSON daemon]
     end
 
-    subgraph CORE[custom-tools/pibash/src]
+    subgraph CORE[rust-tools/pibash/src]
         CLI[cli.rs<br/>--command/--cwd/--timeout/--serve]
         RUNNER[runner.rs<br/>spawn child, stream,<br/>throttled RunObserver partials]
         ACC[accumulator.rs<br/>2000-line / 50KB spill cap<br/>pi-bash temp prefix]
@@ -375,7 +378,7 @@ grows past the cap:
 
 ### Large-output fixtures (Step 8)
 
-`custom-tools/pibash/bench-large-output.mjs` pins this pipeline at
+`rust-tools/pibash/bench-large-output.mjs` pins this pipeline at
 1/10/100 MB — three shapes per size (uniform lines, one giant line, stderr
 mix) plus `yes | head -c` throughput, non-zero exit after 100 MB, and
 SIGTERM death mid-stream. The daemon arm measures the model-visible
@@ -416,7 +419,7 @@ a UTF-8 boundary.
 Constraint: a **generic** command's buried actionables are not scanned — it is
 recorded as expected-non-retaining, matching the built-in oracle's behaviour.
 
-Measured, one-shot CLI (`custom-tools/pibash/bench-seq50000.mjs`; `seq 50000`
+Measured, one-shot CLI (`rust-tools/pibash/bench-seq50000.mjs`; `seq 50000`
 ≈ 290 KB / 50k lines; stage attribution via temporary in-process timers since
 removed):
 
@@ -450,7 +453,7 @@ flowchart TB
         DA[bin/piread --serve<br/>NDJSON daemon]
     end
 
-    subgraph CORE[custom-tools/piread/src]
+    subgraph CORE[rust-tools/piread/src]
         CLI[cli.rs<br/>--path/--offset/--limit ≥ 1]
         ENV[envelope.rs<br/>Success/Failure + Node-style errors]
         PIPE[pipeline.rs<br/>streaming Segmenter + HeadTruncator]
@@ -530,7 +533,7 @@ flowchart TB
         DIFFTS[render diff via<br/>generateDiffString / generateUnifiedPatch]
     end
 
-    subgraph CORE[custom-tools/piedit/src]
+    subgraph CORE[rust-tools/piedit/src]
         CLI[cli.rs<br/>--path/--edits/--serve]
         PIPE[pipeline.rs<br/>normalizeToLF, detectLineEnding,<br/>splitBom, NFKC fuzzy match,<br/>apply, write]
         DIFF[diff.rs<br/>jsdiff port, byte-identical]
@@ -607,7 +610,7 @@ flowchart TB
         REG[First-class pidx tool registration]
     end
 
-    subgraph CORE[custom-tools/pidx/src/main.rs]
+    subgraph CORE[rust-tools/pidx/src/main.rs]
         SCAN[Scan sessions-dir<br/>key files by size + mtime_ns]
         PARSE[Parse JSONL → extract<br/>turns, calls, results,<br/>compactions, skills]
         STORE[State store<br/>byte-range header + raw extract bytes]
@@ -670,7 +673,8 @@ context cost — the model reads the shape of the corpus, then queries the file.
 
 | Technique | Where | Why |
 | --- | --- | --- |
-| Streaming `read_until` into a reused buffer | `piread`, `pibash` | one allocation per file, not per line |
+| Reused read buffer, no per-line allocation | `piread` (chunk scan + `memchr`), `pibash` (`read_until`) | one allocation per file, not per line |
+| Saturation fast path | `piread` pipeline | once the head buffer is full, later selected lines are counted but never decoded — byte-identical, ~2x on a 5.7 MB read |
 | Buffered reader with explicit capacity | `piread` (64 KiB) | amortizes syscalls on large files |
 | `Cow<str>` for non-mutating normalization | `piedit` | ASCII fast path allocates nothing |
 | Lazy shared view (`FuzzyView`) | `piedit` | removes O(edits × content) normalization |
@@ -684,6 +688,8 @@ context cost — the model reads the shape of the corpus, then queries the file.
 | Single-materialization envelope | `pibash` | `into_full_text` + `cap_full_output` read the stream once; `structuredContent` derives from the same buffer |
 | Spill-to-file above a cap | `pibash` accumulator | bounded memory with lossless recovery |
 | `(size, mtime_ns)` freshness key | `pidx` | O(changes) warm runs |
+| Output reuse on a no-op warm run | `pidx` | the extract file is a pure function of the store, so an up-to-date file is never rewritten (15 MB per call removed) |
+| Parallel independent probes | `docheck` | one `--help` spawn per (binary, flag) pair resolved across cores; indexed results keep findings byte-identical (3.0 → 1.9 s) |
 | Byte-range + atomic rename store | `pidx` | crash-safe single-file cache |
 | `setpgid(0, 0)` | all daemons | group-wide signals cannot reach the daemon |
 | ref/unref refcounting | extensions | idle daemon costs nothing; in-flight request keeps the loop |

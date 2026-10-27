@@ -48,7 +48,13 @@ review: skill `ponytail`.
 - English/Latin text only; cover multi-byte UTF-8 with accented Latin or symbol characters (é, €, emoji), never non-Latin script string.
 - Commit body lines ≤72 (commitlint hook).
 
+## Tooling
+- Reuse before writing: the native tools already parse most of what a new script would — session logs (`pidx`), file reads (`piread`), edits (`piedit`), shell (`pibash`). Extend that crate (`rust-tools/`) instead of adding a second parser.
+- A new compiled tool earns its place only when the work is byte-heavy per call, must run where Node is absent, and is called often enough for its latency to show. Otherwise the script belongs in `tests/tools/`.
+- Never add a second build workspace: new crates join `rust-tools/`, install through `scripts/lib/install-native.sh`, and emit a one-line JSON envelope on stdout.
+
 ## Docs
 - Rule writing style: concise yet self-contained — enough context that any LLM decodes it without tribal knowledge; agnostic by default — concepts, not tool names (OS/framework/language/platform/project/LLM); name tools only in rules explicitly scoped to this repo; minimal grammar, no duplicates — one rule, one home; cross-reference, never restate.
 - [docs/change-discipline.md](docs/change-discipline.md) — change ladder, root cause, deployment
 - [docs/portability.md](docs/portability.md) — macOS+Linux shell subset, dynamic paths
+- [docs/rust-tools-optimization.md](docs/rust-tools-optimization.md) — safe path for optimizing a native tool: model the cost, freeze the old binary, pin the seam, swap, verification ladder, honest measurement

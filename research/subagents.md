@@ -80,7 +80,7 @@ Additional gap: `pibash` and `pidx` never call `registerToolExtension` at all.
   `web_search` / `web_fetch` / `video_extract` / `youtube_search` /
   `google_image_search` / `safe_bash` precedent. This is load-order independent:
   resolution no longer depends on the runtime registry for these tools.
-- **Regression test** (`tests/subagents/test.ts`): `"resolves tool-extension paths
+- **Regression test** (`tests/subagents/runner.ts`): `"resolves tool-extension paths
   for the four native tools (load-order safe)"` via `__test__.getToolExtensionPath`.
   Suite result: 156/156 pass.
 - **Activation requirement**: the running orchestrator session still holds the
@@ -126,7 +126,7 @@ Additional gap: `pibash` and `pidx` never call `registerToolExtension` at all.
 7. `extensions/piread/index.ts:98`, `extensions/piedit/index.ts:73` —
    `registry?.registerToolExtension?.(name, path)` optional-chaining calls.
 8. `extensions/{pibash,pidx}/index.ts` — no `registerToolExtension` calls (rg empty).
-9. `tests/subagents/test.ts` — regression test `"resolves tool-extension paths for
+9. `tests/subagents/runner.ts` — regression test `"resolves tool-extension paths for
    the four native tools (load-order safe)"`, via `__test__.getToolExtensionPath`.
 10. `agents/worker.md` frontmatter — `tools: write, piread, piedit, pibash`.
 11. `settings.json` — `defaultProvider=z.ai`, `defaultModel=glm-5.3`,

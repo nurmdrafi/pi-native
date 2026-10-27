@@ -8,6 +8,9 @@ Research note, 2026-10-27.
 > remedy (anchor-guard.ts), SYSTEM.md's Re-reads rule is instruction-only, and
 > `permission-gate`/`piread-parity`/`read-coverage` suites carry the lock-ins
 > (§5.4). C4 remains a later option per §5.5.
+> **Superseded 2026-10-28:** C3's attribution drift is closed and the
+> approach comparison recorded in
+> [`research/piread-compaction-approaches.md`](piread-compaction-approaches.md).
 
 Scope: one design flaw in the permission-gate — the gap between what a
 compacted `piread` result puts in context and what the Anchor Guard (AG) accepts as an edit anchor.

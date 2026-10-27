@@ -23,9 +23,29 @@ Coding-agent configs rot — they accumulate always-on prompt bloat, machine-spe
 
 ## What it does
 
-- **Native Rust tools replace the built-ins** — `piread`, `piedit`, `pibash`, `pidx` dispatch through a persistent `--serve` daemon: 0.03–0.18 ms faster per call, 7.0× on 1 MiB edits, and every failure falls back one-shot → built-in, so the session never breaks.
-- **94% less model-visible output** — deterministic, idempotent compaction keeps reads and shell output under a ~2 KB ceiling without losing the tail, the errors, or the continuation notice.
-- **Discipline at the tool-call level** — a 24-rule fail-closed permission gate, subagents gated off by default (zero prompt tokens until triggered), and skills that must pass a validator before they load.
+**Native Rust tools** — five crates replace or back the built-in tools, each dispatching per call, each falling back one-shot → built-in so a session never breaks.
+
+- **`piread`** — the read tool. Window + head-tail compaction, byte-identical to the built-in on every text case that fits the budget; daemon p50 0.03–0.39 ms below the built-in across all seven corpora (2026-10-28, pinned medians).
+- **`piedit`** — the edit tool. Exact-then-fuzzy matching (NFKC, smart quotes, CRLF), native diff/patch; 2.7× faster than the built-in on a 1 MiB file, ahead on every other class.
+- **`pibash`** — the bash tool. Command-kind-aware compression with run dedupe, ANSI strip and spill-to-file; below its oracle on all nine command classes, including `seq 50000` (−5.64 ms).
+- **`pidx`** — session indexer. 110 MB of logs → a 15 MB extract cache; warm re-index 28 ms instead of a 2.1 s parse; `--report usage` prints per-model spend from the cache in ~0.2 s; only a compact pointer line enters context.
+- **`docheck`** — documentation checker. Verifies that commands, flags, paths, tool and env-var inventories declared in markdown actually resolve; 697 files in 1.9 s.
+
+**Context shaping** — deterministic, idempotent compaction caps reads and shell output at 40 lines / 2 KB (matching the gate's own cap, so results are never re-cut), keeps the tail, the errors and the continuation notice, and publishes an omission map the permission gate uses to certify what was actually seen. Measured across the benchmark suite: 273 KB → 15.6 KB of model-visible output (−94.3%). Oversized output spills to a file with a recovering path rather than vanishing.
+
+**Permission gate** — fail-closed, rule-based, per tool call: read-before-edit anchor guard, token budget, loop guard, phase labels, read-coverage certification (it knows which file lines reached the transcript), destructive-command confirmation, toolchain pinning, commitlint, output scrubbing, search guard and bash-output cap. Severity is configurable per rule; the hard safety rules clamp to `error`. `npm run gate:eval` keeps 92 fixtures green at 93% one-shot block recovery.
+
+**Agents, skills and session plumbing**
+
+- **Subagents** — separate model contexts, off by default: zero prompt tokens until a task is actually delegated.
+- **Skills** — 23 `SKILL.md` packages exposed as slash commands, loaded only when valid (a malformed frontmatter silently drops a skill, so a loader test guards the whole directory).
+- **Handoff** — opens a new session seeded with a context-transfer prompt, so long work continues without dragging the old transcript.
+- **Compact editor** — clamps the prompt box height so a paste cannot push the transcript off screen.
+- **Self-heal** — re-syncs the shell PATH pin and pinned `rg` after a pull, a pi update or a cold start.
+
+**Measurement and audits** — every claim above is a re-runnable driver: `npm run bench:piread` / `bench:piedit` / `bench:pibash` (interleaved A/B arms), `bench:model-visible` (`:compare`, `:update`) for what actually enters context, `audit:session` for block ledger + recovery + compaction contract from real sessions, `audit:bin-diff` for a byte-for-byte differential between two builds of one native tool, plus `gate:eval`, block-recovery, replay, diff-fuzz and hotpath-profile drivers under `tests/tools/`.
+
+**Development gate** — `npm run check` runs typecheck → agents lint (duplicate and contradictory rules) → doc check → 246 tests; `bootstrap.sh` sets up a fresh clone and `after-pull.sh` keeps it current. The path for changing a native tool without breaking byte-parity is written down in `docs/rust-tools-optimization.md`.
 
 ## Quick start
 
@@ -134,7 +154,7 @@ flowchart TD
     style LADDER fill:#0d1117,stroke:#238636,color:#f0f6fc
 ```
 
-Every rung byte-matches the one below it (parity-pinned by tests); `details.via` records which rung served the call. Deep dive: [docs/custom-tools-architecture.md](docs/custom-tools-architecture.md).
+Every rung byte-matches the one below it (parity-pinned by tests); `details.via` records which rung served the call. Deep dive: [docs/rust-tools-architecture.md](docs/rust-tools-architecture.md).
 
 ## Native tools
 
@@ -167,7 +187,7 @@ Every native-tool spawn re-sets the session keys from the live tool context (`ex
 | `PI_SUBAGENT_MAX_CONCURRENT` | user | cap on simultaneous subagent spawns (default 3; <1 unlimited) |
 | `PI_PIDX_MAX_INLINE`  | user       | pidx inline-output cap before spill (default 2000)             |
 
-Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`, `PI_SUBAGENT_SESSION`, `PI_SUBAGENT_ID`, `PI_SUBAGENT_ALLOWED`, `PI_SUBAGENT_ACTIVITY_FILE`, `PI_SUBAGENT_SURFACE`, `PI_SUBAGENT_AUTO_EXIT`), classified in `ENV_VAR_ALLOWLIST` in [scripts/doc-check.mjs](scripts/doc-check.mjs).
+Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`, `PI_SUBAGENT_SESSION`, `PI_SUBAGENT_ID`, `PI_SUBAGENT_ALLOWED`, `PI_SUBAGENT_ACTIVITY_FILE`, `PI_SUBAGENT_SURFACE`, `PI_SUBAGENT_AUTO_EXIT`), classified in the env-var allowlist in [rust-tools/docheck/src/main.rs](rust-tools/docheck/src/main.rs).
 
 ## Docs
 

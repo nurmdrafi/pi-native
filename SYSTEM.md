@@ -37,3 +37,8 @@ When the trigger fires:
 
 ## Shell preferences
 - `fd`, not `find`. `rg`, not `grep` (never `grep -P`). `jq` for JSON. Scope every search: path or glob, never bare recursive.
+
+## Tooling
+- Reuse before creating: check the existing native tools for a parser or CLI that already does the work, and extend it rather than writing a second one.
+- A new compiled tool is justified only when the work is byte-heavy per call or must run where the runtime is absent; otherwise keep it a script beside the tests.
+- One build workspace only: new native crates join the existing one and install through the repo's install script.

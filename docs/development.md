@@ -14,9 +14,9 @@
 ├── skills/                   # one dir per skill: SKILL.md + scripts/ references/ assets/
 ├── extensions/               # Always-on TS extensions (permission-gate, subagents, handoff)
 ├── agents/                   # Subagent definitions
-├── custom-tools/             # Rust workspace: piread, piedit, pibash, pidx
+├── rust-tools/             # Rust workspace: piread, piedit, pibash, pidx
 ├── benchmark/                # Model-graded benchmark tasks + validators; runs/ = wall-clock harness reports
-├── scripts/                  # Repo tooling (bootstrap, doc-check, agents-lint, gate-eval)
+├── scripts/                  # Repo tooling (bootstrap, agents-lint, gate-eval; doc:check runs the native docheck binary)
 ├── prompts/                  # /command prompt templates (/issue, /ship, /update-changelog)
 ├── tests/                    # Node test runner suite (permission-gate, parity, doc-check)
 ├── .github/workflows/        # Release CI/CD
@@ -60,7 +60,7 @@ Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE
 | `audit-reports/`, `handoff/` | Dated audit artifacts and handoff drafts; reports name private projects        |
 | `*.log`, `logs/`          | Debug logs and gate telemetry                                                     |
 
-Everything else — `AGENTS.md`, `docs/`, `settings.json`, `models.json`, `skills/`, `extensions/`, `agents/`, `prompts/`, `tests/`, `custom-tools/` (workspace + lockfile), `.github/workflows/`, `package.json`, `CHANGELOG.md`, `LICENSE`, `.nvmrc` — is tracked in git and portable across OSes.
+Everything else — `AGENTS.md`, `docs/`, `settings.json`, `models.json`, `skills/`, `extensions/`, `agents/`, `prompts/`, `tests/`, `rust-tools/` (workspace + lockfile), `.github/workflows/`, `package.json`, `CHANGELOG.md`, `LICENSE`, `.nvmrc` — is tracked in git and portable across OSes.
 
 ## Sync between machines
 
@@ -88,7 +88,7 @@ Every repo script is exposed through `package.json` — run `npm run <name>` fro
 | `test`             | `node --test`             | Full suite: permission-gate, parity, and doc-check suites                  |
 | `test:subagents`    | `node --test`             | Subagent unit suite (mock-based, no tmux or model needed)                  |
 | `lint:agents`       | `node scripts/agents-lint.mjs` | AGENTS.md lint — flags duplicated rules and contradictory directives (one JSON line) |
-| `doc:check`         | `node scripts/doc-check.mjs` | Verifies harness commands, paths, tool and env-var inventories declared in markdown actually resolve |
+| `doc:check`         | `~/.pi/agent/bin/docheck` | Verifies harness commands, paths, tool and env-var inventories declared in markdown actually resolve (native Rust port; the former `scripts/doc-check.mjs` is deleted) |
 | `gate:eval`         | `node tests/gate/eval/run.mjs` | Aggregates the fixture suite with the block-recovery and bash-replay audits; prints one final JSON metrics line |
 | `check`             | all of the above          | typecheck → agents lint → doc check → tests; the full pre-commit gate        |
 
