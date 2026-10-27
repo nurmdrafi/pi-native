@@ -27,6 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GATE_DIR = join(ROOT, "extensions", "permission-gate");
 const CONFIG_JSON = join(GATE_DIR, "config.json");
 const PANEL = join(GATE_DIR, "config.ts");
+const DESTRUCTIVE_TS = join(GATE_DIR, "destructive.ts");
 
 /** Read RULE_IDS keys without importing the TS module (no jiti dependency). */
 function ruleKeysFromSource() {
@@ -67,14 +68,13 @@ const KEYS = ruleKeysFromSource();
 
 /** Parse a `new Set([ "key", ... ])` rule-set literal out of config.ts —
  * same no-import trick as ruleKeysFromSource, so tests track the source sets
- * (HARD_RULES / WARN_BY_DEFAULT / OFF_BY_DEFAULT) without jiti. */
+ * (HARD_RULES / WARN_BY_DEFAULT / OFF_BY_DEFAULT) without jiti. Empty sets
+ * are valid (OFF_BY_DEFAULT is empty since the 2026-10-26 R1x revival). */
 function ruleSetFromSource(name) {
   const src = readFileSync(PANEL, "utf8");
   const block = src.match(new RegExp(`export const ${name}[^=]*= new Set\\(\\[([\\s\\S]*?)\\] as RuleKey\\[\\]\\)`));
   assert.ok(block, `${name} set not found in config.ts`);
-  const keys = [...block[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
-  assert.ok(keys.length > 0, `no keys parsed from ${name}`);
-  return keys;
+  return [...block[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
 }
 
 /** Evaluate an arbitrary snippet against the loader module in a child
@@ -311,13 +311,83 @@ test("ruleEnabled/ruleBlocks expose the warn-vs-error distinction", () => {
     process.stdout.write(JSON.stringify({
       warn: [ruleEnabled("rerunGuard"), ruleBlocks("rerunGuard")],
       error: [ruleEnabled("editAnchorGuard"), ruleBlocks("editAnchorGuard")],
-      off: [ruleEnabled("reReadConsume"), ruleBlocks("reReadConsume")],
     }));
   `;
   const res = runLoader(script);
   assert.deepEqual(res.warn, [true, false], "warn: runs but does not block");
   assert.deepEqual(res.error, [true, true], "error: runs and blocks");
-  assert.deepEqual(res.off, [false, false], "off: skipped entirely");
+  // off row moved to env: reReadConsume no longer ships off (2026-10-26)
+  const off = runLoader(`
+    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(PANEL)};
+    process.stdout.write(JSON.stringify({
+      off: [ruleEnabled("reReadConsume"), ruleBlocks("reReadConsume")],
+    }));
+  `, { PGATE_RE_READ_CONSUME: "0" });
+  assert.deepEqual(off.off, [false, false], "off: skipped entirely");
+});
+
+test("reReadConsume ships warn: enabled, non-blocking (R1x note tier)", () => {
+  const script = `
+    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(PANEL)};
+    process.stdout.write(JSON.stringify({
+      d: [ruleEnabled("reReadConsume"), ruleBlocks("reReadConsume")],
+    }));
+  `;
+  const res = runLoader(script);
+  assert.deepEqual(res.d, [true, false], "R1x default = warn (note, no block)");
+});
+
+test("R1x error tier: PGATE_RE_READ_CONSUME=2 blocks a >=50% overlap re-read at call time", () => {
+  const dir = mkdtempSync(join(tmpdir(), "r1x-err-"));
+  const f = join(dir, "f.md");
+  writeFileSync(f, Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n") + "\n");
+  const INDEX = join(GATE_DIR, "index.ts");
+  const script = `
+    const f = ${JSON.stringify(f)};
+    const lists = new Map();
+    const pi = {
+      on: (event, handler) => {
+        const l = lists.get(event) ?? [];
+        l.push(handler);
+        lists.set(event, l);
+      },
+      invoke: async (event, ev) => {
+        let result;
+        for (const h of lists.get(event) ?? []) {
+          const r = await h(ev, ev);
+          if (r !== undefined) result = r;
+        }
+        return result;
+      },
+    };
+    const gate = (await import(${JSON.stringify(INDEX)})).default;
+    gate(pi);
+    const body = Array.from({ length: 40 }, (_, i) => \`line \${i + 1}\`).join("\\n");
+    const cycle = async (id, offset) => {
+      const input = { path: f, offset, limit: 40 };
+      const block = await pi.invoke("tool_call", {
+        type: "tool_call", toolName: "piread", toolCallId: id, input,
+      });
+      if (block) return { block, res: undefined };
+      const res = await pi.invoke("tool_result", {
+        type: "tool_result", toolName: "piread", toolCallId: id, input,
+        content: [{ type: "text", text: body }],
+        details: { truncation: { truncated: false, outputLines: 40, totalLines: 100 } },
+        isError: false,
+      });
+      return { block: undefined, res };
+    };
+    const one = await cycle("e1", 10);
+    const two = await cycle("e2", 30); // 20/40 = 50% overlap with 10–49
+    process.stdout.write(JSON.stringify({
+      firstBlocked: !!one.block, secondBlocked: !!two.block,
+      reason: two.block?.reason?.slice(0, 120) ?? null,
+    }));
+  `;
+  const res = runLoader(script, { PGATE_RE_READ_CONSUME: "2" });
+  assert.equal(res.firstBlocked, false, "first read must pass");
+  assert.equal(res.secondBlocked, true, "error tier must block the >=50% overlap re-read");
+  assert.match(res.reason ?? "", /Re-read/, "block must carry the Re-read family");
 });
 
 test("safety rules cannot be configured away", () => {
@@ -332,4 +402,63 @@ test("rule IDs match the documented README rule table", () => {
   // so a rule cannot be configurable yet undocumented.
   const missing = KEYS.filter(({ id }) => !new RegExp(`\\b${id}\\b`).test(readme)).map(({ key, id }) => `${key}/${id}`);
   assert.deepEqual(missing, [], `rules absent from extensions/README.md: ${missing.join(", ")}`);
+});
+
+// ---- 1a — managed destructive command list (2026-10-26) ----
+// config.json `destructive.remove` / `destructive.extra` manage which
+// commands the H2 confirm set covers without regex surgery in destructive.ts.
+// Matcher behavior is asserted in a subprocess: PGATE_CONFIG applies at import
+// time, so an in-process import would be polluted by this file's environment.
+function loadDestructive(section, probes) {
+  const dir = mkdtempSync(join(tmpdir(), "pgate-destr-"));
+  const file = join(dir, "config.json");
+  writeFileSync(file, JSON.stringify({ destructive: section }));
+  const script = `
+    import { segmentDestructive, confirmEntryIds } from ${JSON.stringify(DESTRUCTIVE_TS)};
+    process.stdout.write(JSON.stringify({
+      ids: confirmEntryIds(),
+      probe: ${JSON.stringify(probes)}.map((c) => segmentDestructive(c)),
+    }));
+  `;
+  return runLoader(script, { PGATE_CONFIG: file });
+}
+
+test("destructive.remove drops entries by id (brew-install)", () => {
+  const { ids, probe } = loadDestructive(
+    { remove: ["brew-install"] },
+    ["brew install ripgrep", "rm -f /tmp/x"],
+  );
+  assert.ok(!ids.includes("brew-install"), "brew-install still in entry ids");
+  assert.equal(probe[0], false, "brew install must no longer confirm");
+  assert.equal(probe[1], true, "rm must still confirm");
+});
+
+test("destructive.extra adds a managed entry (docker rm)", () => {
+  const { ids, probe } = loadDestructive(
+    { extra: [{ id: "docker-rm", pattern: "docker\\s+rm\\b" }] },
+    ["docker rm -f pg1", "docker ps"],
+  );
+  assert.ok(ids.includes("docker-rm"), "extra entry missing from ids");
+  assert.equal(probe[0], true, "docker rm must confirm");
+  assert.equal(probe[1], false, "docker ps must pass");
+});
+
+test("unknown remove ids warn and are ignored", () => {
+  const { ids, probe, stderr } = loadDestructive(
+    { remove: ["no-such-entry"] },
+    ["rm -f /tmp/x"],
+  );
+  assert.match(stderr, /no-such-entry/, "no warning for unknown id");
+  assert.ok(ids.includes("rm"), "builtin rm vanished");
+  assert.equal(probe[0], true, "rm must still confirm");
+});
+
+test("malformed extra entries are skipped with a warning, set intact", () => {
+  const { probe, stderr } = loadDestructive(
+    { extra: [{ id: "bad-paren", pattern: "(" }] },
+    ["rm -f /tmp/x", "docker rm x"],
+  );
+  assert.match(stderr, /bad-paren/, "no warning for malformed pattern");
+  assert.equal(probe[0], true, "builtin set must stay intact");
+  assert.equal(probe[1], false, "broken extra must not match everything");
 });

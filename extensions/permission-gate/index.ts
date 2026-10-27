@@ -6,10 +6,11 @@
  * CURRENT rules (IDs are stable; family = block-reason prefix):
  * | ID  | Family / mechanism            | Enforces |
  * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss |
+ * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
+ * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
  * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
  * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
  * | H1  | output cap (non-blocking)     | bash output capped at 100 lines / 4KB UTF-8; oversized first line head+tail; tail spilled to $TMPDIR/pgate-spill; errors capped too |
@@ -23,6 +24,7 @@
  * | R10 | Token Economy (Re-run)         | identical command re-run within 10 min without an edit/write/mutating-bash since is blocked |
  * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
  * | CN  | cadence nudge (non-blocking)  | tool_result note at ~200 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
+ * | LG1 | loop guard                      | same-target churn: note at 4th landed same-path edit/write in a user turn, one-shot block of that path's next mutation at the 7th; 3 consecutive tool errors note once; resets per user turn + compaction |
  *
  * Destructive matching is a TRIPWIRE, not a boundary — see destructive.ts.
  * Change history lives in git log; this table lists what is CURRENTLY enforced.
@@ -76,10 +78,10 @@ import {
   hashFile,
   hashText,
   normPath,
+  overlapLines,
   renderedSpansFromBlocks,
   shiftSpansForEdit,
   snapshot,
-  subtractSpan,
 } from "./read-coverage.ts";
 import type { CoverageEntry, LineSpan } from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
@@ -96,6 +98,13 @@ import { searchCheck, searchedPathsFrom } from "./search-guard.ts";
 const BIG_READ_BYTES = 10_000;
 /** a requested window at least this wide counts as whole-file-ish */
 const BIG_READ_WIN = 500;
+/** R1x overlap bar: fraction of a read's rendered lines already certified
+ * that trips the note (warn) or block (error). 2026-10-26 session audit:
+ * >=50% = 149 avoidable re-reads/wk across 33 sessions (vs 94 at 70%),
+ * ~2.6K re-fetched lines — the ledgering slips (batch duplicate windows,
+ * post-elision re-fetch of rendered runs) sit at 0.5-1.0; warn severity
+ * carries a ~13%-of-reads note rate without gating anything. */
+const R1X_OVERLAP = 0.5;
 /** R1c locate-first: a window at least this wide on a path never searched
  * this session is a guess about where the content is. Kept well above
  * ordinary targeted reads (narrow-window cases read 5-50 lines) so a
@@ -180,6 +189,76 @@ export default function (pi: ExtensionAPI) {
   /** cadence nudge state — user turns seen; reset on session_compact/session_start */
   let turnsSeen = 0;
   let cadenceFired = false;
+  /** LG1 (2026-10-26, week of session evidence): the observed grind is
+   * same-target churn (task.md x9, index.ts x8 inside single user-turns),
+   * NOT error streaks (none exceeded 3 all week). Note at the 4th landed
+   * same-path mutation; the 7th arms a one-shot block of that path's next
+   * mutation; 3 consecutive tool errors note once. Reset per user turn. */
+  let lg1Mutations = new Map<string, number>();
+  let lg1Noted = new Set<string>();
+  let lg1Armed: string | undefined;
+  let lg1ErrStreak = 0;
+  let lg1ErrNoted = false;
+  /** AG repeat-miss hint (2026-10-26 audit v2): anchor blocks are the
+   * top LLM error class (94/wk) and cluster in churn turns (27% of all
+   * blocks+errors). 2nd+ AG miss on one file in a turn appends a
+   * loop-break hint to the block reason. Shares LG1's per-turn reset. */
+  let agMisses = new Map<string, number>();
+  const AG_MISS_HINT_AT = 2;
+  function agMissHint(path: string): string {
+    const n = (agMisses.get(path) ?? 0) + 1;
+    agMisses.set(path, n);
+    return n >= AG_MISS_HINT_AT
+      ? ` [miss ${n} on this file this turn — piread the exact target lines, then resend once]`
+      : "";
+  }
+  const LG1_NOTE_AT = 4;
+  const LG1_ARM_AT = 7;
+  function lg1Reset(): void {
+    lg1Mutations.clear();
+    lg1Noted.clear();
+    lg1Armed = undefined;
+    lg1ErrStreak = 0;
+    lg1ErrNoted = false;
+    agMisses.clear();
+  }
+  /** one-shot block of an armed path's next mutation — called from the
+   * edit/write tool_call paths after malformed-input validation */
+  function lg1GateMutation(path: string): string | undefined {
+    if (!ruleEnabled("loopGuard") || lg1Armed !== path) return undefined;
+    const n = lg1Mutations.get(path) ?? LG1_ARM_AT;
+    lg1Armed = undefined;
+    return `Loop Guard (LG1): ${path} was edited ${n} times this turn — possible loop. Stop: summarize what you tried and what remains, then ask the user before continuing.`;
+  }
+  /** landed-mutation counter; the note text rides the landing result */
+  function lg1RecordMutation(path: string): string | undefined {
+    if (!ruleEnabled("loopGuard")) return undefined;
+    const n = (lg1Mutations.get(path) ?? 0) + 1;
+    lg1Mutations.set(path, n);
+    if (n === LG1_ARM_AT) {
+      lg1Armed = path;
+      return `Loop Guard (LG1): ${path} edited ${n} times this turn — if you are circling, state what is left to finish or ask the user.`;
+    }
+    if (n === LG1_NOTE_AT && !lg1Noted.has(path)) {
+      lg1Noted.add(path);
+      return `Loop Guard (LG1): ${path} edited ${n} times this turn — if you are circling, state what is left to finish or ask the user.`;
+    }
+    return undefined;
+  }
+  /** consecutive tool errors (bash + edit/write): note once at 3, never blocks */
+  function lg1RecordResult(isError: boolean): string | undefined {
+    if (!ruleEnabled("loopGuard")) return undefined;
+    if (!isError) {
+      lg1ErrStreak = 0;
+      return undefined;
+    }
+    lg1ErrStreak++;
+    if (lg1ErrStreak === 3 && !lg1ErrNoted) {
+      lg1ErrNoted = true;
+      return "Loop Guard (LG1): 3 consecutive tool errors — if the same fix keeps failing, stop and ask the user instead of retrying.";
+    }
+    return undefined;
+  }
   /** R10: bumped on every successful edit/write — a mutation makes verify re-runs legitimate */
   let mutationSeq = 0;
   /** H2: last user-approved destructive command (verbatim) + when */
@@ -369,6 +448,8 @@ export default function (pi: ExtensionAPI) {
     turnsSeen++;
     const prompt = event.messageType === "user" ? event.prompt : "";
     promptApproves = APPROVAL_RE.test(prompt);
+    // LG1: a new user turn is the loop boundary — churn/error counters reset
+    lg1Reset();
   });
 
   on("tool_call", async (event, ctx) => {
@@ -379,6 +460,8 @@ export default function (pi: ExtensionAPI) {
           "Permission Gate (Malformed): edit call has no path string — re-send the tool call with input.path.",
         );
       const path = normPath(event.input.path, ctx?.cwd);
+      const lg1Block = lg1GateMutation(path);
+      if (lg1Block) return blockCall(lg1Block);
       // S4 fix 8: symlink-resolved protected targets confirm through the
       // same H2 ladder as destructive bash — a write into <fake-home>/.ssh
       // via an in-cwd link must never land silently
@@ -403,7 +486,7 @@ export default function (pi: ExtensionAPI) {
         // S5 M3: the hash disproved the certified spans/stat — drop them, or
         // R1 would block the corrective re-read as a dup-read (deadlock)
         if (checked.stale) coverage.delete(path);
-        return blockCall(checked.reason);
+        return blockCall(checked.reason + agMissHint(path));
       }
       pendingEdits.set(event.toolCallId, {
         path,
@@ -426,7 +509,8 @@ export default function (pi: ExtensionAPI) {
     if (
       (ruleEnabled("reReadGuard") ||
         ruleEnabled("largeReadGuard") ||
-        ruleEnabled("locateFirst")) &&
+        ruleEnabled("locateFirst") ||
+        ruleEnabled("reReadConsume")) &&
       (isToolCallEventType("read", event) ||
         isToolCallEventType("piread", event))
     ) {
@@ -521,21 +605,43 @@ export default function (pi: ExtensionAPI) {
             ) ?? prior.spans[0];
           const lo = sp.start;
           const hi = sp.end;
-          // R1x (reReadConsume, opt-in — default off): a Command-Code-style
-          // self-expiring dedup. The block spends exactly the certification
-          // it cited (the covering span, clipped), so an identical resend
-          // passes instead of looping the model through window guesses;
-          // spans outside the window keep their anchors. Guards residual
-          // false blocks (e.g. display-layer elision §9 cannot model).
-          if (ruleEnabled("reReadConsume")) {
-            coverage.set(path, { ...prior, spans: subtractSpan(prior.spans, win) });
-          }
           return blockCall(
             `Token Economy (Re-read): ${lo === hi ? `line ${lo}` : `lines ${lo}–${hi === Infinity ? "EOF" : hi}`} of '${shown}' are already in context ` +
               `(${prior.kind}, file unchanged). Read another window via piread or act on what is there.`,
           );
         }
         coverage.delete(path); // changed on disk (or no baseline) — the read is legitimate
+      }
+      // R1x error tier (2026-10-26 revival): block a read whose REQUESTED
+      // window re-fetches >=50% certified lines. At the shipped warn severity
+      // this never blocks — the note rides the read's tool_result instead
+      // (handler below). pendingReads catches the same-batch batch-slip: a
+      // sibling read of the same path fired before any result certified it.
+      if (ruleBlocks("reReadConsume") && path && win.end !== Infinity) {
+        const cov = coverage.get(path);
+        let covLines = 0;
+        if (cov) {
+          const now = await snapshot(path);
+          if (
+            now &&
+            cov.stat &&
+            (now.mtimeMs !== cov.stat.mtimeMs || now.size !== cov.stat.size)
+          ) {
+            coverage.delete(path); // stale stat — the re-read is legitimate
+          } else {
+            covLines = overlapLines(cov.spans, win);
+          }
+        }
+        let pendLines = 0;
+        for (const pr of pendingReads.values())
+          if (pr.path === path)
+            pendLines = Math.max(pendLines, overlapLines([pr.win], win));
+        const frac =
+          Math.max(covLines, pendLines) / (win.end - win.start + 1);
+        if (frac >= R1X_OVERLAP)
+          return blockCall(
+            `Token Economy (Re-read): ~${Math.round(frac * 100)}% of lines ${win.start}–${win.end} of '${shown}' are already in context — shift the window to unread lines or act on what is there.`,
+          );
       }
       pendingReads.set(event.toolCallId, { path, win });
     }
@@ -547,6 +653,8 @@ export default function (pi: ExtensionAPI) {
           "Permission Gate (Malformed): write call has no path string — re-send the tool call with input.path.",
         );
       const path = normPath(event.input.path, ctx?.cwd);
+      const lg1Block = lg1GateMutation(path);
+      if (lg1Block) return blockCall(lg1Block);
       // S4 fix 8: same symlink-resolved protected-path confirm as edit
       const prot = ruleEnabled("destructiveConfirm")
         ? protectedPathReason("write", path)
@@ -850,6 +958,9 @@ export default function (pi: ExtensionAPI) {
       // certify the ACTUAL returned lines — requested offset/limit lie at
       // EOF edges and on 2000-line/50KB truncation
       const snap = await snapshot(read.path);
+      // R1x: capture the pre-read coverage — the overlap note must measure
+      // against what was in context BEFORE this read's own certification.
+      const r1xPrior = coverage.get(read.path);
       const details = (
         event as {
           details?: {
@@ -906,6 +1017,43 @@ export default function (pi: ExtensionAPI) {
           }
         }
       }
+      // R1x warn tier (2026-10-26): >=50% of this read's RENDERED lines were
+      // already certified (stat-fresh) — append a note to the result; warn
+      // never blocks. R1 (full coverage) blocks at call time; this catches
+      // the partial ledgering slips (batch duplicate windows, post-elision
+      // re-fetch of rendered runs) the 2026-10-26 session audit quantified.
+      if (
+        ruleEnabled("reReadConsume") &&
+        lines > 0 &&
+        r1xPrior?.stat &&
+        snap &&
+        r1xPrior.stat.mtimeMs === snap.mtimeMs &&
+        r1xPrior.stat.size === snap.size
+      ) {
+        const runs =
+          (elided
+            ? renderedSpansFromBlocks(content, read.win.start)
+            : undefined) ??
+          [{ start: read.win.start, end: read.win.start + lines - 1 }];
+        const num = runs.reduce(
+          (a, s) => a + overlapLines(r1xPrior.spans, s),
+          0,
+        );
+        const frac = lines > 0 ? num / lines : 0;
+        if (num > 0 && frac >= R1X_OVERLAP) {
+          const shown =
+            read.path.length > 57 ? `…${read.path.slice(-56)}` : read.path;
+          return {
+            content: [
+              ...(event.content ?? []),
+              {
+                type: "text",
+                text: `Token Economy (Re-read): ${Math.round(frac * 100)}% of the ${lines} lines just read from '${shown}' were already in context (${r1xPrior.kind}, file unchanged) — act on them or aim the next window at unread lines.`,
+              },
+            ],
+          };
+        }
+      }
       return;
     }
     const bashBlockedCmd = pendingBashFull.get(event.toolCallId);
@@ -945,18 +1093,30 @@ export default function (pi: ExtensionAPI) {
         isMutatingCommand(String(event.input?.command ?? ""))
       )
         mutationSeq++;
+      const lg1ErrNote = lg1RecordResult(event.isError === true);
+      if (lg1ErrNote)
+        return {
+          content: [
+            ...(event.content ?? []),
+            { type: "text", text: lg1ErrNote },
+          ],
+        };
       return;
     }
     const entry = pendingEdits.get(event.toolCallId);
     if (entry === undefined) return;
     pendingEdits.delete(event.toolCallId);
     if (!entry.path) return; // malformed pathless call — nothing to track
+    let lg1Note: string | undefined;
     if (event.isError) {
       // failed edit/write: content may have drifted — a re-read is legitimate
       coverage.delete(entry.path);
+      lg1Note = lg1RecordResult(true);
     } else {
       // R10: a successful edit/write mutates the tree — verify re-runs become legitimate
       mutationSeq++;
+      // LG1: count the landed mutation; may arm the one-shot loop block
+      lg1Note = lg1RecordMutation(entry.path);
       // item 6 (2026-10-11): prior spans describe the exact pre-edit bytes.
       // Drop the path's coverage when any anchor was fuzzy (its line-shift
       // contribution is unknown) or the file drifted between certification
@@ -1003,6 +1163,13 @@ export default function (pi: ExtensionAPI) {
       const cur = coverage.get(entry.path);
       if (cur) cur.hash = await hashFile(entry.path);
     }
+    if (lg1Note)
+      return {
+        content: [
+          ...(event.content ?? []),
+          { type: "text", text: lg1Note },
+        ],
+      };
   });
 
   // cadence nudge (2026-10-11): NON-blocking — appended once to the next real
@@ -1036,6 +1203,8 @@ export default function (pi: ExtensionAPI) {
     // summary starts a fresh turn budget
     turnsSeen = 0;
     cadenceFired = false;
+    // LG1: compaction starts a fresh turn budget like cadence
+    lg1Reset();
     pendingReads.clear();
     pendingEdits.clear();
     pendingBash.clear();

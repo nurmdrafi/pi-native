@@ -248,7 +248,7 @@ byte ranges, and it changes the parity story further. Worth a design note before
 code.
 
 **Resolved (2026-10-26): implemented, measured, dropped — perf gate.** Design
-note: `docs/specs/2026-10-26-piread-compaction-eof-tail.md` (head/tail split
+note (removed with `docs/specs/`): head/tail split
 ranges accepted; marker's line count becomes the file-level gap so
 `renderedSpansFromBlocks` needs zero changes — its cursor walk lands the tail
 on the file's last lines; parity suite untouched via `PI_READ_COMPRESS=0`).

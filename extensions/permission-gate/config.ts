@@ -56,6 +56,7 @@ export const RULE_IDS = {
   findFirst: "SS3",
   searchPortability: "PB1",
   cadenceNudge: "CN",
+  loopGuard: "LG1",
   outputScrub: "OS",
 } as const;
 
@@ -80,7 +81,10 @@ export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
   "commitMessageLint",
 ] as RuleKey[]);
 
-/** Preference rules ship as `warn`: taught, counted, not blocked. */
+/** Preference rules ship as `warn`: taught, counted, not blocked. R1x
+ * notes the partial-overlap re-reads R1's full-coverage check lets through
+ * (2026-10-26 audit: 149/wk) — a note corrects ledgering without gating
+ * valid reads. */
 export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
   "toolchainPnpm",
   "toolchainNode",
@@ -90,25 +94,35 @@ export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
   "searchPortability",
   "rerunGuard",
   "largeReadGuard",
+  "reReadConsume",
 ] as RuleKey[]);
 
 /** Behavior modifiers that ship OFF: enabling changes what a block DOES
- * rather than whether it fires, so the safe default is inert. */
-export const OFF_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
-  "reReadConsume",
-] as RuleKey[]);
+ * rather than whether it fires, so the safe default is inert. (Empty since
+ * the 2026-10-26 R1x revival — no rule ships disabled.) */
+export const OFF_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([] as RuleKey[]);
 
 /** Defaults are fail-closed: active rules block unless demoted above. */
 const DEFAULTS: Record<RuleKey, Severity> = Object.fromEntries(
   (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, OFF_BY_DEFAULT.has(k) ? "off" : WARN_BY_DEFAULT.has(k) ? "warn" : "error"]),
 ) as Record<RuleKey, Severity>;
 
+export interface DestructiveExtra {
+  id: string;
+  pattern: string;
+  label?: string;
+}
+export interface DestructiveOverrides {
+  remove: string[];
+  extra: DestructiveExtra[];
+}
+
 export interface GateConfig {
   rules: Record<RuleKey, Severity>;
   severity: Record<RuleKey, Severity>;
   outputCap: { maxLines: number; maxBytes: number };
   confirm: { timeoutMs: number };
-
+  destructive: DestructiveOverrides;
 }
 
 /** Redirectable so a test can exercise a config without touching the tracked
@@ -151,6 +165,35 @@ function asPosInt(v: unknown, where: string, max: number): number | undefined {
     return undefined;
   }
   return n;
+}
+
+/** 1a (2026-10-26): managed destructive list — `remove` drops builtin entry
+ * ids from the confirm set, `extra` adds {id, pattern, label?} entries.
+ * Fail-closed: malformed items warn and are skipped; they never widen the
+ * set, narrow it unexpectedly, or throw. File-managed only (no env form). */
+function parseDestructive(raw: unknown): DestructiveOverrides {
+  if (raw === undefined) return { remove: [], extra: [] };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    warn("`destructive` must be an object — ignored");
+    return { remove: [], extra: [] };
+  }
+  const o = raw as Record<string, unknown>;
+  const remove = Array.isArray(o.remove)
+    ? o.remove.filter((x): x is string => {
+        if (typeof x === "string") return true;
+        warn(`destructive.remove item ${JSON.stringify(x)} is not a string — skipped`);
+        return false;
+      })
+    : [];
+  const extra = Array.isArray(o.extra)
+    ? o.extra.filter((x): x is DestructiveExtra => {
+        const e = (x ?? {}) as { id?: unknown; pattern?: unknown };
+        if (typeof e.id === "string" && typeof e.pattern === "string") return true;
+        warn(`destructive.extra item ${JSON.stringify(x)} needs string id+pattern — skipped`);
+        return false;
+      })
+    : [];
+  return { remove, extra };
 }
 
 function readConfigFile(): Record<string, unknown> {
@@ -200,6 +243,7 @@ function loadGateConfig(): GateConfig {
 
   const oc = (raw.outputCap ?? {}) as Record<string, unknown>;
   const cf = (raw.confirm ?? {}) as Record<string, unknown>;
+  const de = raw.destructive;
 
   // Hard rules are clamped: no config value can lower them below `error`.
   const severity = { ...rules };
@@ -220,6 +264,7 @@ function loadGateConfig(): GateConfig {
     confirm: {
       timeoutMs: asPosInt(cf.timeoutMs, "confirm.timeoutMs", 3_600_000) ?? DEFAULT_CONFIRM.timeoutMs,
     },
+    destructive: parseDestructive(de),
   };
 }
 

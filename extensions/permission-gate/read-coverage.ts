@@ -128,22 +128,17 @@ export function coversAll(spans: LineSpan[], win: LineSpan): boolean {
   return false;
 }
 
-/** Remove [win.start, win.end] from the span union, splitting a straddling
- * span into its two uncovered sides. R1x (reReadConsume): an R1 block spends
- * exactly the certification it cited, so an identical resend passes while
- * neighboring windows keep their edit anchors. Infinity ends subtract
- * naturally (Infinity > any finite window end keeps the open tail). */
-export function subtractSpan(spans: LineSpan[], win: LineSpan): LineSpan[] {
-  const out: LineSpan[] = [];
+/** Count how many lines of [win.start, win.end] are inside the span union.
+ * R1x (reReadConsume, 2026-10-26 revival): the overlap fraction decides the
+ * partial-re-read note/block — R1's coversAll is the 100% special case. */
+export function overlapLines(spans: LineSpan[], win: LineSpan): number {
+  let n = 0;
   for (const s of spans) {
-    if (s.end < win.start || s.start > win.end) {
-      out.push(s);
-      continue;
-    }
-    if (s.start < win.start) out.push({ start: s.start, end: win.start - 1 });
-    if (s.end > win.end) out.push({ start: win.end + 1, end: s.end });
+    const lo = Math.max(s.start, win.start);
+    const hi = Math.min(s.end, win.end);
+    if (hi >= lo) n += (hi === Infinity ? win.end : hi) - lo + 1;
   }
-  return out;
+  return n;
 }
 
 /** one edit region of an edit call, in ORIGINAL 1-based line coordinates:

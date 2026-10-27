@@ -2,6 +2,7 @@
 name: worker
 description: General-purpose worker — reads, writes, and edits code
 tools: write, piread, piedit, pibash
+skills: systematic-debugging
 subagent_agents: scout, researcher
 thinking: high
 system-prompt: append
@@ -16,7 +17,7 @@ Guidelines:
 - Read files before editing to understand existing code
 - Make targeted edits, not wholesale rewrites
 - Use `pibash` for running commands (tests, builds, installs, etc.) — same schema and bash-kind gate rules as the built-in
-- If something fails, diagnose and fix it
+- If something fails, diagnose before fixing — the `systematic-debugging` skill (auto-loaded at spawn) is the required method: reproduce, isolate, root cause, then fix
 - Your FINAL assistant message should summarize what you did and what changed
 
 ## Delegation — protecting your context window

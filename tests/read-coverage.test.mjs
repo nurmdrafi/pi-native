@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shiftSpansForEdit, renderedSpansFromBlocks, subtractSpan } from "../extensions/permission-gate/read-coverage.ts";
+import { shiftSpansForEdit, renderedSpansFromBlocks, overlapLines } from "../extensions/permission-gate/read-coverage.ts";
 import { globToRegex } from "../extensions/permission-gate/search-guard.ts";
 
 test("shiftSpansForEdit keeps above, shifts below, drops straddlers", () => {
@@ -148,29 +148,27 @@ test("globToRegex survives '?' globs and matches single-level", () => {
   assert.ok(!q.test("a/c"));
 });
 
-test("subtractSpan splits a straddling span into both uncovered sides", () => {
-  assert.deepEqual(subtractSpan([{ start: 1, end: 60 }], { start: 10, end: 20 }), [
-    { start: 1, end: 9 },
-    { start: 21, end: 60 },
-  ]);
-});
-
-test("subtractSpan keeps disjoint spans and drops a fully covered one", () => {
-  const spans = [
-    { start: 1, end: 9 },
-    { start: 10, end: 20 },
-    { start: 30, end: 40 },
-  ];
-  assert.deepEqual(subtractSpan(spans, { start: 10, end: 20 }), [
-    { start: 1, end: 9 },
-    { start: 30, end: 40 },
-  ]);
-});
-
-test("subtractSpan clips an Infinity tail past a finite window", () => {
-  assert.deepEqual(subtractSpan([{ start: 1, end: Infinity }], { start: 10, end: 20 }), [
-    { start: 1, end: 9 },
-    { start: 21, end: Infinity },
-  ]);
-  assert.deepEqual(subtractSpan([{ start: 1, end: Infinity }], { start: 1, end: Infinity }), []);
+test("overlapLines counts the covered part of a window (R1x fraction)", () => {
+  // 20 of 40 covered → exactly the 50% bar
+  assert.equal(
+    overlapLines([{ start: 10, end: 49 }], { start: 30, end: 69 }),
+    20,
+  );
+  // disjoint union: both pieces count, gaps do not
+  assert.equal(
+    overlapLines(
+      [
+        { start: 1, end: 9 },
+        { start: 30, end: 40 },
+      ],
+      { start: 5, end: 35 },
+    ),
+    11,
+  );
+  // Infinity tail covers any finite window start
+  assert.equal(
+    overlapLines([{ start: 90, end: Infinity }], { start: 100, end: 120 }),
+    21,
+  );
+  assert.equal(overlapLines([], { start: 1, end: 10 }), 0);
 });

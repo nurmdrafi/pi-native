@@ -187,11 +187,6 @@
       "family": "verbs"
     },
     {
-      "find": "harness",
-      "replace": "use",
-      "family": "verbs"
-    },
-    {
       "find": "embark on",
       "replace": "start",
       "family": "verbs"

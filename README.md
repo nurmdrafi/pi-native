@@ -87,7 +87,7 @@ Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE
 
 ```mermaid
 flowchart TD
-    M(["🧠 agent turn"]) --> PG{"🛡️ permission-gate<br/>24 rules · fail-closed"}
+    M(["🧠 agent turn"]) --> PG{"🛡️ permission-gate<br/>23 rules · fail-closed"}
     PG ==>|"⛔ blocked"| BX["✏️ Block + targeted fix —<br/>the model gets the fix, not the failure"]
     PG ==>|"✅ approved"| TC["⚙️ Native tool call<br/>piread · piedit · pibash · pidx"]
 

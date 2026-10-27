@@ -7,6 +7,48 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.61.0] - 26-10-2026
+
+### Added
+
+- **Anchor Guard repeat-miss hint.** The 2nd+ anchor block on one file within a user turn appends a loop-break hint (`piread the exact target lines, then resend once`) to the block reason; count resets per user turn and on compaction (shares LG1's reset). Motivated by audit v2: anchor blocks are the top LLM error class (94/wk) and churn turns (>=4 same-path edits) hold 27% of all blocks+errors. Measured: gate 289/289 (1 new case); audit v2 basis 397 user-turns, 132 blocks, mistake-turns avg 12.7K out-tok vs 2.8K clean.
+- **`scripts/session-audit.py`** — the turn-by-turn, byte-level session audit (v2) moved into the repo from /tmp: per-user-turn ledger of in/omitted bytes, elision + spill, usage tokens and cost, gate blocks by family, re-fetched read lines, duplicate commands, churn; full JSON to `.cache/session-audit.json`. Stdlib-only python3; `fd --newer <date>` scoping. Measured: week rerun from the repo reproduces the report (64 sessions, 397 turns, $62.73 basis).
+
+## [1.60.0] - 26-10-2026
+
+### Added
+
+- **R1x (`reReadConsume`) revived as the partial-overlap re-read rule.** Replaces the old inert self-expiring-dedup semantics (never enabled, zero resend-loops in a week of sessions). `warn` (new default) appends a non-blocking note when ≥50% of a read's rendered lines were already in context and the file is stat-fresh; `error` blocks at call time on the requested window and also catches same-batch sibling reads of the same path (the batch-slip shape). Threshold from the 2026-10-26 session audit. Measured: 288/288 gate cases + 28/28 gate-config (6 new); audit basis 149 ≥50%-overlap re-reads/wk (~2.6K re-fetched lines) vs 94 at 70%, 35 R1 catches, 6 same-batch dups across 33 sessions.
+
+## [1.59.0] - 26-10-2026
+
+### Added
+
+- **LG1 loop guard — action-side stop conditions (1b).** Evidence-first redesign: a week of this repo's sessions showed the grind is same-target churn (worst: task.md ×9, index.ts ×8 within single user-turns) while consecutive-error streaks never exceeded 3 — so error-streak thresholds would never have fired. LG1 notes (non-blocking, rides the tool_result) at the 4th landed same-path edit/write in a user turn; the 7th arms a one-shot block of that path's next mutation ("summarize what you tried, then ask the user"); 3 consecutive tool errors note once. Counters reset per user turn and on compaction; `loopGuard` is config-switchable like every rule. Measured: permission-gate 284/284 PASS (4 new LG1 cases), gate-config 26/26 PASS, typecheck + agents-lint + doc-check clean; rule count 22 → 23 (README map corrected).
+- **Circling-check behavior rule.** `AGENTS.md` Workflow & TDD gains the behavior-space mirror: same file edited 3+ times or the same failing fix retried twice in one turn → stop, state what remains and what failed, ask before continuing. The gate arrests a loop mid-spin; this rule teaches the finish the gate cannot. Measured: AGENTS.md 4,703 → 4,868 bytes; agents-lint 34 bullets, 0 dup/contradictions; doc-check 4/4 clean.
+
+### Changed
+
+- **Dedup + shrink pass on `AGENTS.md` + `SYSTEM.md`.** Removed intra-file duplicates (header restated the section list; TDD bullet restated itself; the two Completion bullets overlapped), cross-file duplication (tool list and `.nvmrc` chain lived in both headers — SYSTEM.md is their one home), and filler wording ("advanced", "high-speed", restated ask-first clauses). Measured: AGENTS.md 4,868 → 4,349 bytes, SYSTEM.md 3,630 → 3,500; agents-lint 33 bullets, 0 dup/contradictions; doc-check 4/4 clean.
+
+## [1.58.0] - 26-10-2026
+
+### Added
+
+- **Managed destructive-command list (1a).** The H2 confirm set is now data, not regex surgery: `destructive.ts` holds entry tables (`MUTATING_COMMANDS`, `DESTRUCTIVE_COMMANDS`, `SIDE_EFFECT_COMMANDS` — 32 stable ids like `rm`, `brew-install`, `pipe-interpreter`, `deploy-clis`) compiled into the same anchored matchers, and `config.json` gains a `destructive` section: `remove` (entry ids) / `extra` (`{id, pattern, label}`) manage which commands confirm, from both the rule path and every blocker path, without touching code. Fail-closed: unknown ids and malformed patterns warn on stderr and are skipped. Caught during the refactor: dropping the original `(?:…)` group wrap un-anchored every entry after the first (`echo rm x` would have confirmed) — now pinned by a characterization corpus case plus 4 new `gate-config` subprocess tests. Measured: permission-gate 280/280 PASS (incl. new 19-family corpus case), gate-config 26/26 PASS, typecheck + agents-lint + doc-check clean; destructive.ts 252 → 334 lines, config.ts 242 → 283.
+
+## [1.57.0] - 26-10-2026
+
+### Added
+
+- **OS-agnostic tmux startup guide.** `extensions/subagents/README.md` Requirements now carries a one-line headless verify (`tmux -V && tmux new-session -d -s pi-probe && tmux kill-session -t pi-probe && echo tmux OK`), per-OS install commands (brew / apt / dnf / pacman), and the PATH-shadowing gotcha: an AppImage `tmux` earlier on `PATH` fails with `fusermount: mount failed` where FUSE is unavailable (containers, no `/dev/fuse`) and every subagent spawn dies at pane creation — observed live and fixed by renaming the AppImage aside. Measured: doc-check 4/4 families PASS.
+- **Ponytail always-on ladder baked into AGENTS.md `## Workflow & TDD`.** Six rungs checked before any code is written (need-it-at-all → reuse → stdlib → native platform feature → installed dependency → one line → minimum that works), the understand-first rule (ladder runs after understanding, never instead of it), and the never-cut list (trust-boundary validation, data-loss error handling, security, accessibility basics, explicit requests). Intensity modes and over-engineering review stay in the `ponytail` skill. Measured: AGENTS.md 4,243 → 4,989 B (+186 tok permanent floor); agents-lint 0 dups / 0 contradictions.
+
+### Changed
+
+- **harness-engineer audit rubric: growth ceiling + eval cadence.** Context > 1,300 tok is a −30 hard-ceiling deduction whose report must carry a trim proposal or a recorded user sign-off (floor growth is a decision, never drift), and any audit following a permission-gate/extensions change must run `npm run gate:eval` and include the pass-rate delta. Body-only skill edit — no cache impact.
+- **Rejected: P3 cat-read gate rule, on evidence.** The 10 `R2_cat_file` findings behind the proposal were piped (`cat x | head -N`), multi-file, and heredoc-write shapes; a narrow bare-cat regex would have blocked ~0 of them and piped output is already H1-capped. Test cases written TDD-first were reverted; recorded so future audits stop re-proposing it.
+
 ## [1.56.0] - 26-10-2026
 
 ### Added
