@@ -1,0 +1,51 @@
+# command<TAB>expected-family. These encode DESIRED behavior (brief §3/§5).
+# A leading `?<TAB>` marks a known-bug expectation (brief §5 B8–B21): the
+# brief says current gate behavior differs — failures here are the bug-fix backlog.
+# ` ## ` separates sequential steps; the LAST step must block with the family.
+# Trailing `# …` column is a comment (ignored).
+# 2026-10-08 B12/B13/B21 fixed: desired == current; markers dropped
+git commit -am "Bad msg"	Commitlint	# B12: -m\s+ regex missed -am — fixed
+git commit -m "a > b"	Commitlint	# B10 now: R8 gone, commitlint correctly rejects
+git commit -m"x"	Commitlint	# B12: -m"x" attached form — fixed
+git commit --message=y	Commitlint	# B12: --message=y form — fixed
+# S4 (2026-10-15): transparent prefixes relocate the command word off the
+# ^-anchored positions — the wrapped core must still classify (spec §5.1, fix 4)
+env rm canary	Permission Gate (Destructive)
+command rm canary	Permission Gate (Destructive)
+exec rm canary	Permission Gate (Destructive)
+nohup rm canary	Permission Gate (Destructive)
+timeout 5 rm canary	Permission Gate (Destructive)
+nice rm canary	Permission Gate (Destructive)
+# S4: env-assignment + git global-flag lock-ins (existing stripEnvPrefix)
+TARGET=canary rm -f $TARGET	Permission Gate (Destructive)
+GIT_TERMINAL_PROMPT=0 git reset --hard	Permission Gate (Destructive)
+# S4 (2026-10-15): variable command word — unclassifiable → confirm (fix 5)
+$R canary	Permission Gate (Destructive)
+${R} canary	Permission Gate (Destructive)
+echo prep && $CMD run	Permission Gate (Destructive)
+# S4: pipe-to-shell (fix 6) — payload text never reaches a command position
+# as a segment head, but the pipe-into-interpreter shape is destructive itself
+echo 'rm -rf canary' | sh	Permission Gate (Destructive)
+printf 'rm canary' | bash	Permission Gate (Destructive)
+echo 'cm0gcmYgLXJmIGNhbmFyeQ==' | base64 -d | sh	Permission Gate (Destructive)
+cat deploy.sh | sh	Permission Gate (Destructive)
+# S4: persistence redirects + tee targets (fix 7) — same protected-prefix
+# source as the write/edit realpath check (PROTECTED_PREFIX_RE, fix 8)
+> ~/.bashrc	Permission Gate (Destructive)
+echo x >> ~/.ssh/authorized_keys	Permission Gate (Destructive)
+echo x | tee -a ~/.profile	Permission Gate (Destructive)
+tee ~/.ssh/authorized_keys	Permission Gate (Destructive)
+> /etc/passwd	Permission Gate (Destructive)
+echo x > /usr/local/bin/run	Permission Gate (Destructive)
+# S4: accepted false-positive lock-in — quoted prose "then rm" hits the
+# \bthen\b command-position anchor; documented tolerance (spec §5.1/§8), no fix
+echo "backup done, then rm -rf canary"	Permission Gate (Destructive)
+# S4 fix 9 (2026-10-18): interpreter escapes, homoglyphs, encoded evals,
+# alias indirection now BLOCK (user lifted the spec §2 non-goal 2026-10-18).
+perl -e 'unlink "canary"'	Permission Gate (Destructive)	# interpreter escape
+node -e 'require("fs").rmSync("canary")'	Permission Gate (Destructive)	# interpreter escape
+python3 -c 'import os; os.remove("canary")'	Permission Gate (Destructive)	# interpreter escape
+awk 'BEGIN {system("rm canary")}'	Permission Gate (Destructive)	# awk system()
+ｒｍ canary	Permission Gate (Destructive)	# homoglyph command word
+eval "$(echo cm0gLXJmIGNhbmFyeQ== | base64 -d)"	Permission Gate (Destructive)	# encoded payload — core never appears as text
+alias x='rm -rf canary' && x	Permission Gate (Destructive)	# alias indirection
