@@ -193,6 +193,9 @@ type PireadEnvelope = {
     originalChars: number;
     visibleChars: number;
     omittedChars: number;
+    /** Whole-line cuts, absolute 1-based file lines (C3): the coverage map
+     * the permission gate consumes. Counts match the model-visible marker. */
+    omissions?: { startLine: number; endLine: number; chars: number; lines: number }[] | null;
     partial: boolean;
   } | null;
   error?: { kind: string; message: string };

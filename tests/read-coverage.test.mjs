@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shiftSpansForEdit, renderedSpansFromBlocks, overlapLines } from "../extensions/permission-gate/read-coverage.ts";
+import { shiftSpansForEdit, renderedCoverageFromBlocks, renderedSpansFromBlocks, overlapLines, recordGaps } from "../extensions/permission-gate/read-coverage.ts";
 import { globToRegex } from "../extensions/permission-gate/search-guard.ts";
 
 test("shiftSpansForEdit keeps above, shifts below, drops straddlers", () => {
@@ -99,6 +99,78 @@ test("renderedSpansFromBlocks without a line-omission marker is undefined", () =
     ),
     undefined,
   );
+});
+
+// C3 (2026-10-27): structured omissions[] from details.compaction.
+test("renderedCoverageFromBlocks prefers consistent structured omissions and reports gaps", () => {
+  const mk = (n, off) => Array.from({ length: n }, (_, i) => `L${off + i}`);
+  const content = [
+    {
+      type: "text",
+      text: [
+        ...mk(3, 225),
+        "",
+        "[... omitted 1942 chars / 24 lines ...]",
+        "",
+        ...mk(2, 252),
+      ].join("\n"),
+    },
+  ];
+  const structured = [
+    { startLine: 228, endLine: 251, chars: 1942, lines: 24 },
+  ];
+  const got = renderedCoverageFromBlocks(content, 225, structured);
+  assert.deepEqual(got.spans, [
+    { start: 225, end: 227 },
+    { start: 252, end: 253 },
+  ]);
+  assert.deepEqual(got.gaps, [{ start: 228, end: 251 }]);
+  // agreement by construction: the regex walk yields the same coverage
+  assert.deepEqual(renderedCoverageFromBlocks(content, 225, null), got);
+});
+
+test("inconsistent structured omissions fall back to the marker walk (fence)", () => {
+  const mk = (n, off) => Array.from({ length: n }, (_, i) => `L${off + i}`);
+  const content = [
+    {
+      type: "text",
+      text: [
+        ...mk(3, 225),
+        "",
+        "[... omitted 1942 chars / 24 lines ...]",
+        "",
+        ...mk(2, 252),
+      ].join("\n"),
+    },
+  ];
+  // right count, wrong position: the tail would resync early and over-cover
+  // — the fence must reject it and keep the walked spans
+  const lie = [{ startLine: 100, endLine: 123, chars: 1942, lines: 24 }];
+  assert.deepEqual(
+    renderedCoverageFromBlocks(content, 225, lie),
+    renderedCoverageFromBlocks(content, 225, null),
+  );
+  // count mismatch (two cuts claimed vs one marker): ignored wholesale
+  const two = [
+    { startLine: 228, endLine: 233, chars: 900, lines: 6 },
+    { startLine: 234, endLine: 251, chars: 1042, lines: 18 },
+  ];
+  assert.deepEqual(
+    renderedCoverageFromBlocks(content, 225, two),
+    renderedCoverageFromBlocks(content, 225, null),
+  );
+});
+
+test("recordGaps merges into the coverage entry's gap union", () => {
+  const coverage = new Map();
+  coverage.set("f", { spans: [{ start: 1, end: 10 }], kind: "read" });
+  recordGaps(coverage, "f", [{ start: 3, end: 5 }]);
+  recordGaps(coverage, "f", [{ start: 4, end: 8 }]);
+  assert.deepEqual(coverage.get("f").gaps, [{ start: 3, end: 8 }]);
+  // no entry or no gaps: no-op
+  recordGaps(coverage, "nope", [{ start: 1, end: 1 }]);
+  recordGaps(coverage, "f", []);
+  assert.equal(coverage.get("nope"), undefined);
 });
 
 // Backlog §5 (2026-10-26): EOF-sourced compaction tails were implemented,

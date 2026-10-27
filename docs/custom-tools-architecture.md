@@ -235,7 +235,10 @@ Shared rules:
   re-compacted (re-compaction would drop kept content and rewrite the count).
 - **Explicit omission.** Every cut emits `[... omitted N chars / M lines ...]`
   with real counts — the same marker string in both tools, so one grep
-  recognizes a compacted result from either.
+  recognizes a compacted result from either. The same cut also rides the
+  piread envelope as `details.compaction.omissions[]`
+  (`{startLine, endLine, chars, lines}`, absolute file lines) so the
+  permission gate certifies the gap without parsing model-visible text.
 - **UTF-8 safe.** Every cut lands on a character boundary.
 - **Lossless elsewhere.** Full output is spilled to a temp file (`pibash`), or
   re-readable with a wider window (`piread`); `truncation` metadata is never
@@ -699,6 +702,7 @@ context cost — the model reads the shape of the corpus, then queries the file.
 | **H1 cap** | permission-gate's model-visible limit: 40 lines / 2 KB |
 | **Compaction** | Deterministic head-tail / error-priority reduction to the H1 budget |
 | **Omission marker** | `[... omitted N chars / M lines ...]` — the explicit record of a cut |
+| **Omissions list** | `details.compaction.omissions[]` — the same cut as structured absolute line ranges (piread only) |
 | **Warm run** | `pidx` run where no session file changed; replays cached extracts |
 | **Fail-open** | Any native failure advances to the next rung instead of erroring |
 | **Oracle** | The stock built-in tool the native path must byte-match — parity source of truth (see [`native-tools.md`](native-tools.md)) |

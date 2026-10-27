@@ -558,6 +558,64 @@ add("gate: node_modules read passes through to execution (NM1 removed 2026-10-18
   assert.ok(result, "read must execute after the gate passes it");
 });
 
+// ---- C2/C3 (2026-10-27): compaction dead-zone over the REAL binary ----
+// The suite pins byte parity with PI_READ_COMPRESS=0; this case flips it on
+// (the daemon reads env at spawn — kill it so it restarts under the new
+// value) and checks the full C3 contract against bin/piread's live output:
+// structured omissions[] agree with the marker walk, R1 still spares the
+// gap while blocking rendered re-reads, and the session-164 scenario
+// (gap-anchored edit → block → remedy read → edit passes) round-trips.
+add("gate C3: compaction-on read — structured omissions match the marker walk; sanctioned gap remedy round-trips", async () => {
+  if (!existsSync(BIN)) return { ok: false, diff: `missing binary ${BIN}` };
+  const path = join(dir, "c3-120");
+  writeFileSync(path, Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join("\n"));
+  process.env.PI_READ_COMPRESS = "1";
+  resetDaemon();
+  try {
+    const pi = freshGate();
+    const flow = await gateReadFlow(pi, wrapped, path, undefined, undefined);
+    if (flow.blocked) return { ok: false, diff: `compacted read blocked: ${flow.reason}` };
+    // inspect the real envelope's coverage map
+    const result = await wrapped.execute(`c3-${++gateSeq}`, { path });
+    const comp = result?.details?.compaction;
+    if (!comp) return { ok: false, diff: "details.compaction missing" };
+    if (!Array.isArray(comp.omissions) || comp.omissions.length !== 1)
+      return { ok: false, diff: `omissions[] expected, got ${JSON.stringify(comp)}` };
+    const { renderedCoverageFromBlocks } = await import("../extensions/permission-gate/read-coverage.ts");
+    const structured = renderedCoverageFromBlocks(result.content, 1, comp.omissions);
+    const walked = renderedCoverageFromBlocks(result.content, 1, null);
+    try {
+      assert.deepStrictEqual(structured, walked);
+    } catch (e) {
+      return { ok: false, diff: `structured and marker-walk paths disagree: ${e.message}` };
+    }
+    if (!structured || structured.gaps.length !== 1)
+      return { ok: false, diff: `exactly one gap expected: ${JSON.stringify(structured)}` };
+    const gap = structured.gaps[0];
+    // R1 interplay: rendered head stays re-read-blocked, the gap does not
+    const dupHead = await gateReadProbe(pi, path, 1, 5);
+    if (!dupHead.blocked) return { ok: false, diff: "re-read of rendered head lines must block (R1)" };
+    const gapRead = await gateReadProbe(pi, path, gap.start, 3);
+    if (gapRead.blocked) return { ok: false, diff: `gap sub-read must pass: ${gapRead.reason}` };
+    // the session-164 scenario, live: gap-anchored edit blocks with the
+    // sanctioned remedy; one sub-read unblocks the same edit
+    const anchor = `line ${gap.start}`;
+    const edit = [{ oldText: anchor, newText: `${anchor} edited` }];
+    const first = await gateEditProbe(pi, path, edit);
+    if (!first.blocked) return { ok: false, diff: "gap-anchored edit must block" };
+    if (!/read lines \d+–\d+ .*permitted/.test(first.reason))
+      return { ok: false, diff: `remedy must sanction the sub-window read: ${first.reason}` };
+    const remedy = await gateReadFlow(pi, wrapped, path, gap.start, 1);
+    if (remedy.blocked) return { ok: false, diff: `remedy read blocked: ${remedy.reason}` };
+    const second = await gateEditProbe(pi, path, edit);
+    if (second.blocked) return { ok: false, diff: `edit must pass after the remedy read: ${second.reason}` };
+    return { ok: true };
+  } finally {
+    process.env.PI_READ_COMPRESS = "0";
+    resetDaemon();
+  }
+});
+
 // ---- runner ----
 
 let failed = 0;

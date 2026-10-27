@@ -284,13 +284,23 @@ export async function validateEditAnchors(
           (cs) => cs.start <= os.end && os.start <= cs.end,
         );
         if (!covered) {
+          // C2: when the target sits in a recorded compaction gap, say so —
+          // the remedy read is sanctioned (R1 blocks only fully covered
+          // windows), so the gap marker must not read as a "never re-read"
+          // instruction (SYSTEM.md Re-reads).
+          const inGap = cov.gaps?.some(
+            (g) => g.start <= os.end && os.start <= g.end,
+          );
           return {
             block: true,
             reason:
               `Anchor Guard (Unread): '${shown}' edits[${os.i}] targets lines ` +
               `${os.start}–${os.end}, not in certified context — read lines ` +
               `${os.start}–${os.end} with the piread tool ` +
-              `(piread {path:'${String(input.path)}', offset:${os.start}, limit:${os.end - os.start + 1}}) first.`,
+              `(piread {path:'${String(input.path)}', offset:${os.start}, limit:${os.end - os.start + 1}}) first.` +
+              (inGap
+                ? " The target falls in a compaction gap — this sub-window read is permitted (uncertified lines are never re-reads)."
+                : ""),
           };
         }
       }

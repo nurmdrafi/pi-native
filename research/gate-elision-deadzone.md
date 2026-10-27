@@ -1,6 +1,15 @@
 # The Compaction Dead-Zone: Read Elision vs Edit Certification
 
-Research note, 2026-10-27. Scope: one design flaw in the permission-gate — the gap between what a
+Research note, 2026-10-27.
+
+> **Status: implemented 2026-10-27 (C2+C3).** `omissions[]` now ships in
+> `details.compaction` (compress.rs/envelope.rs/pipeline.rs), the gate
+> records gap spans (`read-coverage.ts`) and appends the sanctioned sub-window
+> remedy (anchor-guard.ts), SYSTEM.md's Re-reads rule is instruction-only, and
+> `permission-gate`/`piread-parity`/`read-coverage` suites carry the lock-ins
+> (§5.4). C4 remains a later option per §5.5.
+
+Scope: one design flaw in the permission-gate — the gap between what a
 compacted `piread` result puts in context and what the Anchor Guard (AG) accepts as an edit anchor.
 Research only; no code, SYSTEM.md, or tests were changed. All paths are relative to `/Users/nur/.pi/agent`
 unless absolute. Session cites are 1-based JSONL line numbers in

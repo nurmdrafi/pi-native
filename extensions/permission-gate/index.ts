@@ -6,7 +6,7 @@
  * CURRENT rules (IDs are stable; family = block-reason prefix):
  * | ID  | Family / mechanism            | Enforces |
  * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint |
+ * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search command named this session is blocked — `rg` first, then read the hit's range |
@@ -79,11 +79,17 @@ import {
   hashText,
   normPath,
   overlapLines,
+  renderedCoverageFromBlocks,
   renderedSpansFromBlocks,
+  recordGaps,
   shiftSpansForEdit,
   snapshot,
 } from "./read-coverage.ts";
-import type { CoverageEntry, LineSpan } from "./read-coverage.ts";
+import type {
+  CompactionOmission,
+  CoverageEntry,
+  LineSpan,
+} from "./read-coverage.ts";
 import { toolchainCheck } from "./toolchain.ts";
 import { searchCheck, searchedPathsFrom } from "./search-guard.ts";
 
@@ -965,7 +971,11 @@ export default function (pi: ExtensionAPI) {
         event as {
           details?: {
             truncation?: { outputLines?: unknown; truncated?: unknown };
-            compaction?: { strategy?: unknown; omittedChars?: unknown } | null;
+            compaction?: {
+              strategy?: unknown;
+              omittedChars?: unknown;
+              omissions?: CompactionOmission[] | null;
+            } | null;
           };
         }
       ).details;
@@ -975,6 +985,7 @@ export default function (pi: ExtensionAPI) {
       // whole-file request used to certify 1..Infinity regardless, which made
       // the omitted middle unreadable for the rest of the session.
       const compaction = details?.compaction;
+      const omissions = compaction?.omissions ?? undefined;
       const elided =
         !!compaction &&
         compaction.strategy !== "none" &&
@@ -1001,11 +1012,13 @@ export default function (pi: ExtensionAPI) {
           // head/tail runs entered context — the omitted middle stays
           // uncertified, so it remains readable. Runs only when the result
           // reports compaction; every other read keeps the window math.
-          const spans = elided
-            ? renderedSpansFromBlocks(content, read.win.start)
+          const rendered = elided
+            ? renderedCoverageFromBlocks(content, read.win.start, omissions)
             : undefined;
+          const spans = rendered?.spans;
           if (spans && spans.length > 0) {
             for (const s of spans) certify(coverage, read.path, s, "read", snap);
+            recordGaps(coverage, read.path, rendered.gaps);
           } else {
             certify(
               coverage,
@@ -1032,7 +1045,7 @@ export default function (pi: ExtensionAPI) {
       ) {
         const runs =
           (elided
-            ? renderedSpansFromBlocks(content, read.win.start)
+            ? renderedSpansFromBlocks(content, read.win.start, omissions)
             : undefined) ??
           [{ start: read.win.start, end: read.win.start + lines - 1 }];
         const num = runs.reduce(
@@ -1152,6 +1165,9 @@ export default function (pi: ExtensionAPI) {
               entry.delta ?? 0,
               entry.regions,
             ),
+            // pre-edit gap line numbers are stale after the shift; new
+            // reads re-record fresh gaps (C3)
+            gaps: undefined,
           });
         }
         for (const s of entry.spans)

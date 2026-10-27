@@ -68,7 +68,23 @@ pub struct CompactionWire<'a> {
     pub original_chars: usize,
     pub visible_chars: usize,
     pub omitted_chars: usize,
+    /// Whole-line cuts in absolute 1-based file lines (C3); empty when the
+    /// cut was chars-only or nothing was dropped.
+    pub omissions: Vec<OmissionWire>,
     pub partial: bool,
+}
+
+/// One compaction cut as carried in the success envelope: absolute 1-based
+/// file lines plus the chars/lines counts the model-visible marker states.
+/// Consumed by the permission gate's structured coverage path; `Serialize +
+/// PartialEq` so it rides `CompactionWire`'s derive-parity test.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OmissionWire {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub chars: usize,
+    pub lines: usize,
 }
 
 #[derive(Serialize)]
@@ -345,6 +361,22 @@ pub fn write_success_with_id(
             write_u64(buf, c.visible_chars as u64);
             buf.extend_from_slice(b",\"omittedChars\":");
             write_u64(buf, c.omitted_chars as u64);
+            buf.extend_from_slice(b",\"omissions\":[");
+            for (i, o) in c.omissions.iter().enumerate() {
+                if i > 0 {
+                    buf.push(b',');
+                }
+                buf.extend_from_slice(b"{\"startLine\":");
+                write_u64(buf, o.start_line as u64);
+                buf.extend_from_slice(b",\"endLine\":");
+                write_u64(buf, o.end_line as u64);
+                buf.extend_from_slice(b",\"chars\":");
+                write_u64(buf, o.chars as u64);
+                buf.extend_from_slice(b",\"lines\":");
+                write_u64(buf, o.lines as u64);
+                buf.push(b'}');
+            }
+            buf.push(b']');
             buf.extend_from_slice(b",\"partial\":");
             write_bool(buf, c.partial);
             buf.push(b'}');
@@ -443,6 +475,12 @@ mod tests {
             original_chars: 9_000,
             visible_chars: 1_800,
             omitted_chars: 7_200,
+            omissions: vec![OmissionWire {
+                start_line: 164,
+                end_line: 168,
+                chars: 153,
+                lines: 5,
+            }],
             partial: true,
         };
         for id in [None, Some(serde_json::json!({"nonce": 7, "tag": "\"x\n"}))] {

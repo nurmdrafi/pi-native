@@ -128,6 +128,23 @@ pub struct Compacted {
     pub omitted_chars: usize,
     /// True when a single over-budget line was cut rather than whole lines.
     pub partial: bool,
+    /// Whole-line cuts: each entry names the body lines (1-based,
+    /// window-relative — the caller maps them onto absolute file lines)
+    /// replaced by an omission marker, with the same chars/lines counts the
+    /// marker states. The permission gate's marker-regex fallback MUST agree
+    /// with this list (both paths are cross-checked by tests), so derive it
+    /// from the rendered lines plus the marker count, never from `kept`.
+    pub omissions: Vec<Omission>,
+}
+
+/// One whole-line compaction cut: body lines `start_line..=end_line`
+/// (1-based, window-relative) replaced by `[... omitted chars / lines ...]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Omission {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub chars: usize,
+    pub lines: usize,
 }
 
 /// Head-tail compaction with a head-heavy split (reads are paged top-down, so
@@ -145,6 +162,7 @@ pub fn compact(text: &str, max_lines: usize, max_bytes: usize) -> Compacted {
         visible_chars: original_chars,
         omitted_chars: 0,
         partial: false,
+        omissions: Vec::new(),
     };
 
     if fits(text, max_lines, max_bytes) || has_omission_marker(text) {
@@ -214,6 +232,21 @@ pub fn compact(text: &str, max_lines: usize, max_bytes: usize) -> Compacted {
     let omitted_chars = original_chars
         .saturating_sub(head.text.chars().count() + tail.text.chars().count());
     let marker = omission_marker(omitted_chars, omitted_lines);
+    // Structured gap: the first unrendered body line, then the marker's line
+    // count — exactly the span the gate's marker-regex walk computes. A
+    // partial first line renders its prefix (kept stays 0), so measure the
+    // head by its rendered lines, not by `kept`.
+    let head_rendered = head.text.lines().count();
+    let omissions = if omitted_lines > 0 {
+        vec![Omission {
+            start_line: head_rendered + 1,
+            end_line: head_rendered + omitted_lines,
+            chars: omitted_chars,
+            lines: omitted_lines,
+        }]
+    } else {
+        Vec::new()
+    };
     // The trailing read-continuation notice ("[Showing lines 1-2000 of 6001...]")
     // is the only place the reader learns the file continues. Compaction works on
     // the already-truncated body, so a bare head|marker|tail would end the output
@@ -232,6 +265,7 @@ pub fn compact(text: &str, max_lines: usize, max_bytes: usize) -> Compacted {
         strategy: "head-tail",
         original_chars,
         omitted_chars,
+        omissions,
         partial: head.partial || tail.partial,
     }
 }
@@ -369,6 +403,52 @@ mod tests {
         assert_eq!(out.strategy, "none");
         assert_eq!(out.content, text);
         assert_eq!(out.omitted_chars, 0);
+    }
+
+    #[test]
+    fn head_tail_reports_the_omitted_span() {
+        // C3: the cut must publish the gap as structured data — one
+        // contiguous window-relative run whose chars/lines equal the marker
+        // the model sees, so the gate's structured path and its marker-regex
+        // fallback agree by construction.
+        let body = numbered(120);
+        let out = compact(&body, 40, 1 << 20);
+        assert_eq!(out.strategy, "head-tail");
+        assert_eq!(out.omissions.len(), 1);
+        let o = &out.omissions[0];
+        assert!(o.lines > 0);
+        assert_eq!(o.end_line, o.start_line + o.lines - 1);
+        assert_eq!(o.chars, out.omitted_chars);
+        let marker = omission_marker(o.chars, o.lines);
+        let rendered: Vec<&str> = out.content.lines().collect();
+        assert!(rendered.contains(&marker.as_str()));
+        // the line before the gap is the head's last rendered line; the line
+        // after it is the tail's first — nothing inside the gap is rendered
+        let before = format!("line {}", o.start_line - 1);
+        let first_gap = format!("line {}", o.start_line);
+        let last_gap = format!("line {}", o.end_line);
+        let after = format!("line {}", o.end_line + 1);
+        assert!(rendered.contains(&before.as_str()));
+        assert!(!rendered.contains(&first_gap.as_str()));
+        assert!(!rendered.contains(&last_gap.as_str()));
+        assert!(rendered.contains(&after.as_str()));
+    }
+
+    #[test]
+    fn verbatim_reports_no_omission_and_partial_cut_mirrors_the_regex_walk() {
+        // Fits the budget: nothing cut, nothing reported.
+        let small = compact(&numbered(10), 40, 1 << 20);
+        assert_eq!(small.strategy, "none");
+        assert!(small.omissions.is_empty());
+        // A single over-budget line: head and tail render its prefix, but the
+        // marker counts the line itself as omitted — the structured path must
+        // state the same gap the marker-regex walk would compute (first
+        // unrendered line, then the marker's line count).
+        let long = compact(&"x".repeat(5000), 40, 2048);
+        assert!(long.partial);
+        assert_eq!(long.omissions.len(), 1);
+        assert_eq!(long.omissions[0].lines, 1);
+        assert_eq!(long.omissions[0].start_line, 2);
     }
 
     #[test]

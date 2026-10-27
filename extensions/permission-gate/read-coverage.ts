@@ -24,6 +24,10 @@ export interface CoverageEntry {
   kind: CoverKind;
   stat?: { mtimeMs: number; size: number };
   hash?: string;
+  /** Compaction gaps (C3): elided line ranges behind `spans`. Diagnostic —
+   * drives the Anchor Guard's sanctioned-remedy wording, never a
+   * certification decision. Dropped when an edit shifts line numbers. */
+  gaps?: LineSpan[];
 }
 
 /** sha256 of content, truncated to 16 hex — S5 M3 chain token. Mutation
@@ -114,7 +118,32 @@ export function certify(
     kind,
     stat: statSnap ?? coverage.get(key)?.stat,
     hash: hash ?? coverage.get(key)?.hash,
+    gaps: coverage.get(key)?.gaps,
   });
+}
+
+/** Record a read's compaction gaps on its coverage entry (C3). Diagnostic
+ * only — consumed for the Anchor Guard's sanctioned-remedy wording, never
+ * for a certification decision. Merges into the existing gap union. */
+export function recordGaps(
+  coverage: Map<string, CoverageEntry>,
+  key: string,
+  newGaps: LineSpan[],
+): void {
+  if (newGaps.length === 0) return;
+  const entry = coverage.get(key);
+  if (!entry) return;
+  const sorted = [...(entry.gaps ?? []), ...newGaps].sort(
+    (a, b) => a.start - b.start,
+  );
+  const merged: LineSpan[] = [];
+  for (const g of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && g.start <= last.end + 1)
+      last.end = last.end > g.end ? last.end : g.end;
+    else merged.push({ ...g });
+  }
+  entry.gaps = merged;
 }
 
 /** true when [win.start, win.end] lies entirely inside the span union */
@@ -253,18 +282,53 @@ export function countTextLines(content: unknown[]): {
 const OMISSION_MARKER_LINE =
   /^\[\.\.\. omitted \d+ chars \/ (\d+) lines \.\.\.\]$/;
 
-/** Rendered line spans of a possibly-elided read body (backlog §9): walks
- * the text, treats each line-omission marker (and the blank separators
- * piread pads it with) as a gap of the marker's stated line count, and maps
- * the surviving runs onto file lines starting at `startLine`. Only the
- * rendered runs entered context, so only they may certify. Returns undefined
- * when no line-omission marker is present — callers keep their legacy
- * whole-window certification. Under-certifies (never over) when a real
- * blank line sits directly at an elision boundary: dropped, not counted. */
-export function renderedSpansFromBlocks(
+/** One structured compaction cut as piread publishes it in
+ * `details.compaction.omissions[]` (C3): absolute 1-based file lines, with
+ * the chars/lines counts the model-visible marker states. */
+export interface CompactionOmission {
+  startLine: number;
+  endLine: number;
+  chars: number;
+  lines: number;
+}
+
+/** Structured omissions are honored only when they cover the same cuts the
+ * content's markers describe — otherwise the gate falls back to the walked
+ * marker math (binary/gate version skew fails closed, never silently
+ * over-covers). */
+const structuredOmissions = (
+  omissions: CompactionOmission[] | null | undefined,
+  markerCount: number,
+): CompactionOmission[] | undefined =>
+  Array.isArray(omissions) &&
+  omissions.length === markerCount &&
+  omissions.every(
+    (o) =>
+      Number.isInteger(o?.startLine) &&
+      Number.isInteger(o?.endLine) &&
+      o.startLine >= 1 &&
+      o.startLine <= o.endLine,
+  )
+    ? omissions
+    : undefined;
+
+/** Rendered coverage of a possibly-elided read body (backlog §9 + C3):
+ * walks the text, treats each line-omission marker (and the blank
+ * separators piread pads it with) as a gap of the marker's stated line
+ * count, and maps the surviving runs onto file lines starting at
+ * `startLine`. Only the rendered runs entered context, so only they may
+ * certify; `gaps` is the complement — elided lines that never entered
+ * context and stay readable. When piread's structured `omissions[]` names
+ * the same cuts, its absolute ranges win (no re-derivation from
+ * model-visible text). Returns undefined when no line-omission marker is
+ * present — callers keep their legacy whole-window certification.
+ * Under-certifies (never over) when a real blank line sits directly at an
+ * elision boundary: dropped, not counted. */
+export function renderedCoverageFromBlocks(
   content: unknown[],
   startLine: number,
-): LineSpan[] | undefined {
+  omissions?: CompactionOmission[] | null,
+): { spans: LineSpan[]; gaps: LineSpan[] } | undefined {
   const text = blocksToText(content);
   if (!text) return undefined;
   const { lines } = stripTailNotice(text.split("\n"));
@@ -278,19 +342,52 @@ export function renderedSpansFromBlocks(
     if (i + 1 < lines.length && lines[i + 1].trim() === "") skip.add(i + 1);
   }
   if (omits.length === 0) return undefined;
-  const spans: LineSpan[] = [];
-  let cursor = startLine;
-  for (let i = 0; i < lines.length; i++) {
-    const om = omits.find((o) => o.at === i);
-    if (om) {
-      cursor += om.lines;
-      continue;
+  const walk = (
+    src: CompactionOmission[] | undefined,
+  ): { spans: LineSpan[]; gaps: LineSpan[]; end: number } => {
+    const spans: LineSpan[] = [];
+    const gaps: LineSpan[] = [];
+    let cursor = startLine;
+    for (let i = 0; i < lines.length; i++) {
+      const k = omits.findIndex((o) => o.at === i);
+      if (k >= 0) {
+        const s = src?.[k];
+        const abs =
+          s && s.endLine - s.startLine + 1 === omits[k].lines ? s : undefined;
+        if (abs) {
+          gaps.push({ start: abs.startLine, end: abs.endLine });
+          cursor = abs.endLine + 1;
+        } else {
+          gaps.push({ start: cursor, end: cursor + omits[k].lines - 1 });
+          cursor += omits[k].lines;
+        }
+        continue;
+      }
+      if (skip.has(i)) continue;
+      const last = spans[spans.length - 1];
+      if (last && last.end === cursor - 1) last.end = cursor;
+      else spans.push({ start: cursor, end: cursor });
+      cursor++;
     }
-    if (skip.has(i)) continue;
-    const last = spans[spans.length - 1];
-    if (last && last.end === cursor - 1) last.end = cursor;
-    else spans.push({ start: cursor, end: cursor });
-    cursor++;
-  }
-  return spans;
+    return { spans, gaps, end: cursor };
+  };
+  const walked = walk(undefined);
+  const structured = structuredOmissions(omissions, omits.length);
+  if (!structured) return { spans: walked.spans, gaps: walked.gaps };
+  const viaStructured = walk(structured);
+  // Consistency fence: structured ranges must reconstruct the same window
+  // arithmetic the marker counts imply; any drift falls back to the walk
+  // (fails closed — never silently over-covers).
+  return viaStructured.end === walked.end
+    ? { spans: viaStructured.spans, gaps: viaStructured.gaps }
+    : { spans: walked.spans, gaps: walked.gaps };
+}
+
+/** Backlog §9 wrapper: the rendered spans alone. */
+export function renderedSpansFromBlocks(
+  content: unknown[],
+  startLine: number,
+  omissions?: CompactionOmission[] | null,
+): LineSpan[] | undefined {
+  return renderedCoverageFromBlocks(content, startLine, omissions)?.spans;
 }

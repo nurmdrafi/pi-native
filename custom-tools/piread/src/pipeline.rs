@@ -13,7 +13,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use crate::envelope::{ErrorKind, Truncation, TruncationKind};
+use crate::envelope::{ErrorKind, OmissionWire, Truncation, TruncationKind};
 use crate::ToolError;
 
 /// Built-in caps (`truncate.ts`): DEFAULT_MAX_LINES / DEFAULT_MAX_BYTES.
@@ -72,12 +72,25 @@ pub fn read_text_compacted(
     if compacted.omitted_chars > 0 {
         // Structured, not printed: the notice travels in the JSON envelope so
         // it stays available for debugging without ever reaching a stream a
-        // host might relay into the conversation.
+        // host might relay into the conversation. `omissions` carries
+        // absolute 1-based file lines (C3): compact() reports window-relative
+        // lines, and only this call site knows the window's start.
+        let window_start = usize::try_from(offset.unwrap_or(1)).unwrap_or(1) - 1;
         out.compaction = Some(CompactionWire {
             strategy: compacted.strategy,
             original_chars: compacted.original_chars,
             visible_chars: compacted.visible_chars,
             omitted_chars: compacted.omitted_chars,
+            omissions: compacted
+                .omissions
+                .iter()
+                .map(|o| OmissionWire {
+                    start_line: window_start + o.start_line,
+                    end_line: window_start + o.end_line,
+                    chars: o.chars,
+                    lines: o.lines,
+                })
+                .collect(),
             partial: compacted.partial,
         });
     }
@@ -708,6 +721,39 @@ mod tests {
 
         fn read(path: &Path, offset: Option<u64>, limit: Option<u64>) -> Result<PipelineOutput, ToolError> {
             read_text(&path.to_string_lossy(), &path.to_string_lossy(), offset, limit, None)
+        }
+
+        #[test]
+        fn compacted_window_reports_absolute_omission_lines() {
+            // C3: compact() speaks window-relative lines; the envelope must
+            // publish absolute file lines so the gate needs no window math.
+            let body: String = (1..=120)
+                .map(|i| format!("line {i}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let f = tmp_file("om-abs", body.as_bytes());
+            let out = read_text_compacted(
+                &f.to_string_lossy(),
+                &f.to_string_lossy(),
+                Some(60),
+                None,
+                None,
+            )
+            .unwrap();
+            let c = out
+                .compaction
+                .as_ref()
+                .expect("61 lines exceed the 40-line compaction budget");
+            assert_eq!(c.omissions.len(), 1);
+            let o = &c.omissions[0];
+            assert!(
+                o.start_line >= 60 && o.end_line <= 120,
+                "gap {o:?} must be absolute within the 60..=120 window"
+            );
+            assert_eq!(o.end_line - o.start_line + 1, o.lines);
+            assert!(out.content.starts_with("line 60"));
+            let gap_first = format!("line {}", o.start_line);
+            assert!(!out.content.lines().any(|l| l == gap_first));
         }
 
         #[test]

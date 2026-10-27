@@ -171,6 +171,14 @@ reused. Steps below follow the spec plan and the commits in order.
     parallel). `PI_READ_COMPRESS=0|false|off` restores exact parity — which the
     parity suite and `piedit`'s exact-match binding both depend on.
 
+29. Every cut is also published structurally (2026-10-27, C3): the envelope's
+    `details.compaction.omissions[]` carries `{startLine, endLine, chars, lines}`
+    in absolute 1-based file lines, counts byte-matched to the marker
+    (`compress.rs` derives both from the same rendered-lines + marker-count
+    arithmetic). The permission gate consumes it as its coverage map for
+    gap-aware certification, with the marker regex as fallback; model-visible
+    content is unchanged.
+
 29. Compaction never touches `details.truncation`, so permission-gate still derives
     read coverage from metadata (`countTextLines` is only the fallback) and windows
     are not under-certified.
