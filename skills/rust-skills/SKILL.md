@@ -1,7 +1,7 @@
 ---
 name: rust-skills
 description: >
-  Comprehensive Rust coding guidelines with 265 rules across 26 categories.
+  Comprehensive Rust coding guidelines with 269 rules across 26 categories.
   Use when writing, reviewing, or refactoring Rust code. Covers ownership,
   error handling, async patterns, concurrency, unsafe code, API design, memory
   optimization, performance, numeric safety, conversions, serde, pattern
@@ -17,12 +17,13 @@ metadata:
     - Rust Performance Book
     - Rust 2024 Edition Guide
     - The Rustonomicon
+    - Achieving warp speed with Rust (jFransham, gist)
     - ripgrep, tokio, serde, polars, axum, cargo codebases
 ---
 
 # Rust Best Practices
 
-Comprehensive guide for writing high-quality, idiomatic, and highly optimized Rust code. Contains 265 rules across 26 categories, prioritized by impact to guide LLMs in code generation and refactoring. Current for Rust 1.96 (2024 edition).
+Comprehensive guide for writing high-quality, idiomatic, and highly optimized Rust code. Contains 269 rules across 26 categories, prioritized by impact to guide LLMs in code generation and refactoring. Current for Rust 1.96 (2024 edition).
 
 ## When to Apply
 
@@ -47,7 +48,7 @@ Reference these guidelines when:
 | 5 | API Design | HIGH | `api-` | 17 |
 | 6 | Async/Await | HIGH | `async-` | 18 |
 | 7 | Concurrency | HIGH | `conc-` | 4 |
-| 8 | Compiler Optimization | HIGH | `opt-` | 12 |
+| 8 | Compiler Optimization | HIGH | `opt-` | 16 |
 | 9 | Numeric & Arithmetic Safety | HIGH | `num-` | 5 |
 | 10 | Type Safety | MEDIUM | `type-` | 13 |
 | 11 | Trait & Generics Design | MEDIUM | `trait-` | 6 |
@@ -71,7 +72,7 @@ Reference these guidelines when:
 
 ## Quick Reference
 
-See [`references/quick-reference.md`](references/quick-reference.md) for the full list of 265 rules across 26 categories, linked to individual rule files.
+See [`references/quick-reference.md`](references/quick-reference.md) for the full list of 269 rules across 26 categories, linked to individual rule files.
 
 ---
 

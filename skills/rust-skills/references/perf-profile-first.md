@@ -47,6 +47,10 @@ fn process(data: &[Item]) -> Vec<Output> {
 }
 ```
 
+## Optimize Runtime Share, Not Per-Call Cost
+
+Profilers report cumulative cost over the whole run — use that ranking. A 2 ms saving on a function called 1000 times beats a 1 s saving on one called once, and one-time costs (config parsing, startup) are almost never worth optimizing. Attack functions by their total share of runtime, not by how slow a single call looks.
+
 ## Profiling Tools
 
 ### Flamegraphs (Recommended Start)

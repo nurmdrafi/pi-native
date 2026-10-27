@@ -1,6 +1,6 @@
 # Rust Rule Quick Reference
 
-Full list of all 265 rules across 26 categories, linked to their individual rule files.
+Full list of all 269 rules across 26 categories, linked to their individual rule files.
 
 ## 1. Ownership & Borrowing (CRITICAL)
 
@@ -124,6 +124,10 @@ Full list of all 265 rules across 26 categories, linked to their individual rule
 - [`opt-bounds-check`](opt-bounds-check.md) - Use iterators and patterns that eliminate bounds checks in hot paths
 - [`opt-simd-portable`](opt-simd-portable.md) - Use portable SIMD for vectorized operations across architectures
 - [`opt-cache-friendly`](opt-cache-friendly.md) - Organize data for cache-efficient access patterns
+- [`opt-flat-storage`](opt-flat-storage.md) - Use one flat backing store for nested data; avoid `Vec<Vec<T>>` and multi-level indirection
+- [`opt-registers`](opt-registers.md) - Keep hot mutable state in local variables; minimize writes through pointers
+- [`opt-loop-unroll`](opt-loop-unroll.md) - Let the compiler unroll loops; unroll manually only to remove redundant per-iteration work
+- [`opt-ilp`](opt-ilp.md) - Structure hot computations as independent chains so the CPU and compiler can parallelize them
 
 ## 9. Numeric & Arithmetic Safety (HIGH)
 

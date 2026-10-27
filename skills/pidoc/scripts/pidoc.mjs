@@ -50,8 +50,8 @@ row(cargo ? 'PASS' : 'WARN', 'cargo', cargo ?? 'not found — pidx cannot rebuil
 
 // 3. pidx binary + freshness vs crate sources
 const pidxBin = join(AGENT, 'bin', 'pidx');
-const crateDir = join(AGENT, 'custom-tools', 'pidx');
-const workspaceDir = join(AGENT, 'custom-tools');
+const crateDir = join(AGENT, 'rust-tools', 'pidx');
+const workspaceDir = join(AGENT, 'rust-tools');
 if (!existsSync(pidxBin)) {
   row('FAIL', 'pidx', `missing ${pidxBin}${cargo ? ' — fixable with --fix' : ' — needs cargo (see cargo row)'}`);
   if (FIX && cargo) rebuildPidx(row);

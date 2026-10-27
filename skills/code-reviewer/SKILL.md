@@ -1,10 +1,10 @@
 ---
-name: pre-push-review
-description: "Runs the barikoi ollama-code-review push workflow's review locally, before the push that triggers it — same noise filtering, same reviewer prompt, same severity rules — and drives a fix loop until the CI review would find nothing to file. No argument: reviews all uncommitted changes; 'check last N commits': reviews exactly that range; 'pre-push check': reviews what the next push would send. Use for 'review my diff', 'check last 2 commits', before any non-trivial push. Not for style, formatting, or naming review."
+name: code-reviewer
+description: "Runs the ollama-code-review push workflow's review locally, before the push that triggers it — same noise filtering, same reviewer prompt, same severity rules — and drives a fix loop until the CI review would find nothing to file. No argument: reviews all uncommitted changes; 'check last N commits': reviews exactly that range; 'pre-push check': reviews what the next push would send. Use for 'review my diff', 'check last 2 commits', before any non-trivial push. Not for style, formatting, or naming review."
 disable-model-invocation: true
 ---
 
-# Pre-push review — be the CI reviewer before the push
+# Code reviewer — be the CI reviewer before the push
 
 The ollama-code-review workflow reviews every push with an LLM and files one GitHub issue listing findings at/above its severity threshold (default `medium`). Goal: run that same review on the same diff first, fix everything it would flag, push only when clean.
 
@@ -16,13 +16,11 @@ The ollama-code-review workflow reviews every push with an LLM and files one Git
 
 ```sh
 base=$(git rev-parse --verify --quiet @{push})  # empty = branch not on remote yet
-base=${base:-$(git merge-base origin/HEAD HEAD 2>/dev/null || git merge-base origin/main HEAD)}
-git diff "$base"...HEAD
 ```
 
 Skip, same as CI: tag push, head commit message contains `[skip review]`, empty diff.
 
-Then freeze the scope: `git diff "$base"...HEAD > /tmp/push-review.diff` (uncommitted: `git diff HEAD > /tmp/push-review.diff`), print `wc -c` and the file count, and review only from that file.
+Then freeze the scope: `git diff "$base"...HEAD > /tmp/code-review.diff` (uncommitted: `git diff HEAD > /tmp/code-review.diff`), print `wc -c` and the file count, and review only from that file.
 
 ## 2. Scope
 
@@ -40,8 +38,6 @@ Mechanics — a truncated or skimmed diff is the main way this review silently m
 - When a hunk swaps one call form for another (wrapper adoption, migration, rename sweep), compare the removed call's arguments/config against the replacement field-by-field — dropped headers, params, and error handling live only in the `-` lines and look fine in the `+` lines.
 
 Core contract:
-
-- Only findings worth acting on: bugs, broken logic, security issues, data loss, race conditions, resource leaks, incorrect API usage, clearly misleading code. Never style, formatting, naming taste, missing comments, speculative advice.
 - Severity: `high` = will break at runtime, lose data, or is exploitable; `medium` = likely bug or security weakness under realistic conditions; `low` = minor correctness or robustness concern.
 - Only code visible in the diff; `line` = line in the NEW version from the `@@ -a,b +c,d @@` header, 0 if no single line applies.
 - Per finding: `file`, `line`, `severity`, `title` (one short sentence), `detail` (why it is a problem), `suggestion` (what to change). Plus a 1–3 sentence `summary` of the whole range.

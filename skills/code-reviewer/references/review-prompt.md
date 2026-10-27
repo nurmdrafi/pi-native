@@ -1,4 +1,4 @@
-# Reviewer prompt — verbatim from barikoi/code-review `prompt.md`
+# Reviewer prompt — verbatim from the ollama-code-review workflow's `prompt.md`
 
 Sent verbatim as the system message by the workflow's LLM call. Everything below the `---` line is the exact prompt; apply it as written, reading "the diff of a git push" as the diff of the local range under review.
 

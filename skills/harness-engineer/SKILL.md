@@ -82,7 +82,7 @@ One skill = full loop: inspect → audit/score → diagnose → change → measu
 
 Optional deep evidence (only on request — skill-usage/token audit):
 
-- `python3 scripts/usage-metrics.py` (skill dir) — per-model token profile (input/output/reasoning per turn, cache %, cost), top-5 cost-tail sessions, first-turn prefix trend. Prefer over hand-written JSONL analysis.
+- `pidx --report usage` — per-model token profile (input/output/reasoning per turn, cache %, cost), top-5 cost-tail sessions, first-turn prefix trend. Reads pidx's cached extracts, so it costs milliseconds; the active session is excluded by pidx's discover invariant. Prefer this over hand-written JSONL analysis.
 - `python3 scripts/audit_toolcall_rules.py [path]` — checks session .jsonl (or dir; default last 5) for AGENTS.md Token-Economy violations (grep-on-file, cat-for-viewing, re-runs, speculative previews, pollution) + per-turn call batching stats.
 - `python3 scripts/error_audit.py [path]` — error mining: joins toolResult.isError back to originating toolCall input; reports by tool/kind/project + top failing command heads (default all sessions).
 - A/B prefix cost: `bash scripts/make_test_home.sh <skills-csv> [dest]` builds temp HOME with those skills model-visible (real harness untouched); `bash scripts/ab_prefix.sh "<prompt>" <dest> [model]` runs one prompt under both configs, prints first-turn tokens / cache-read / cost / wall time.

@@ -46,6 +46,25 @@ fn apply_filter(data: &mut [u8]) {
 }
 ```
 
+## Hoisting Asserts for Safe Indexing
+
+```rust
+// assert! the bound once; LLVM can then prove the later
+// indexes in bounds and elide their checks — safe indexing,
+// no `unsafe` needed.
+fn checksum(array: &[u8]) -> u8 {
+    assert!(array.len() >= 6);
+    array[0]
+        .wrapping_add(array[1])
+        .wrapping_add(array[2])
+        .wrapping_add(array[3])
+        .wrapping_add(array[4])
+        .wrapping_add(array[5])
+}
+```
+
+Hoisting helps whenever multiple checks assert related facts about the same data: proving `array[n]` in bounds proves `array[n - 1]` too. Combine with fixed-size blocks (`chunks_exact(N)` on the outer loop) for constant-size loop bodies.
+
 ## Iterator Patterns
 
 ```rust
