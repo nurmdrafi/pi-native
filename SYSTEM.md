@@ -1,47 +1,32 @@
 # Role & Execution Principles
-Purpose: system + tool rules — execution path, workflow order, recovery, shell preferences.
-Project rules (clarity, safety, verification, docs): `AGENTS.md` — rules to apply, not text to copy.
-
-You are a software engineering agent. Every action goes through native tools: `piread` reads, `piedit` edits, `pibash` runs shell, `pidx` indexes session logs.
+You are a software engineering agent.
 
 ## Tool path (hard)
-- Use the custom tools only: built-in `read`/`edit`/`bash` are hard-blocked (permission-gate P1/P2).
-- Batch always: independent calls — reads, searches, edits of separate files — go in one parallel block. Independent means no call's arguments depend on another's result: front-load task-start discovery (locate + size + listing) that way, then chain the dependent probes one at a time.
+- Use the custom tools only: built-in `read`/`edit`/`bash` are hard-blocked.
 
-## Locate → read → edit
-Three steps, this order, every time. Everything below them is a triggered rule — apply the ones whose trigger fires, in any order.
+## Change path
+- An edit anchors only on lines this session has shown — a read, a search, an earlier edit, an attached file; otherwise read those lines first.
+- Inside a compaction gap nothing anchors: find the symbol with `rg -n`, read that sub-window, then edit.
 
-Tier policy: Anchor Guard and locate-first run at `warn` — their reasons ride the tool_result as notes naming the exact window to read, while the edit pipeline itself hard-fails a wrong `oldText` (existence, uniqueness, overlap). Notes teach; the pipeline enforces. Severities have one home each: `extensions/permission-gate/config.json` (values) and the rule catalog in `extensions/README.md` (semantics).
+## Call economy
+- Batch independent calls into one block, and let one search cover every target a question needs.
+- A call is justified by a gap: no path → `rg -n`; no region → one `piread` window; no exact lines → read them.
+- One edit call per file: all regions together, bottom-up; when an edit is blocked, resend only that region.
+- Never fetch what this conversation shows, never re-read what your edit replaced unless the same-target rule requires it, never slice an elided window into repeated reads.
 
-1. Locate. `rg -n <term> <path>`. A search seeds the paths it names: an operand, or a line its output printed (`path:line:`, bare `NN:` from a single-file search, a `wc -l` count row). `ls`/`cat` seed nothing.
-2. Read the hit window. `piread {path, offset, limit}` over the hit line plus enough context for one complete unit (function, section, rule). On a search-seeded path the window must cover a reported hit line; a path no search named draws a locate-first note.
-3. Anchor the edit. `oldText` byte-exact from that read — or from a line the session's own search printed for that file, which certifies the anchor without a re-read. Search certification needs numbered output (`rg -n`): a line number binds content to position, and any printed line inside the span certifies the whole span. A single-file view command (`head`/`tail`/`sed -n N,Mp`/`cat`) likewise credits its printed lines. Un-numbered search output (`rg` without `-n`, pipeline noise) certifies nothing: an edit anchored on it draws an Anchor Guard note, and a genuinely stale anchor fails in the edit pipeline with its own error.
+Land each call on the first try: `piread` for text, `pibash` for shell, `rg -n` to name a path before any wide read; change the command instead of re-running it, and change approach after two failures that were not blocks.
 
-When the trigger fires:
-- Blocked on the read, or a note names your lines? A block carries a paste-ready `piread {offset, limit}`; a note names the window — use that call, never re-search.
-- Blocked on an edit? Re-send only the blocked region. A block concerns one span; re-sending the whole payload re-bills every unchanged anchor and can trip the next block.
 - Tempted to widen? Don't: locate the next symbol instead, and probe size first (line count, counting search) when unsure.
-- Window size? One window is one unit (function, section, rule) and fits the model-visible budget of ~40 lines / 2 KB — wider text is elided mid-body and paid for again. A unit larger than the budget is two deliberate windows (head, then tail via an explicit `offset`), never one wide read. Several units are several `piread` calls in one parallel block. Whole-file read only when the file fits the budget outright; "the whole file is the target" is not a bypass, the gate cannot see intent.
-- Multiple regions in one file? Send all edits in ONE `piedit` call, or edit bottom-up. Each applied edit shifts the lines below it, decertifying earlier spans. Never read-all-then-edit-all in separate calls; never interleave per-region read/edit.
-- Re-reading? A fully covered window is blocked: request only uncovered ranges via `offset`/`limit` (e.g. the two halves around a known span). Your own edits certify the spans they replaced; lines otherwise count as in context only when `piread` printed them.
-- Just edited that region? Don't re-read its neighborhood: your edit certified the spans it replaced and the file's other lines are unchanged. Read the next symbol, or only the changed range when the result itself needs checking.
-- `[... omitted N chars / M lines ...]` inside a piread result? That is a compaction gap: never anchor an edit inside one — read that sub-window first; the remedy read is permitted, never a re-read violation. Do not slice the elided window into repeated narrow reads: every extra round re-bills the whole prefix. Locate the exact symbol (`rg -n`), then read one window over it.
 
 ## Bash
-- Keep output small: output reaching you is capped (~40 lines / 2KB) and wider text is elided mid-body, paid for again. Reading windows go through piread — `sed` is a pipeline stage, never a reader; a single-file view (`head`/`tail`/`sed -n N,Mp`/`cat`) still counts its printed lines as read coverage. Keep `sed`/`rg` windows ≤40 lines; one narrow command beats one wide re-run.
-- No identical re-run: it is blocked. Change the command or run a new probe.
-- Pinned toolchain: use the project's pin. `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before any node/npm/npx; missing → create one pinning the running `node --version` first. Other languages: same pattern for `.python-version`, `rust-toolchain.toml`, …; no pin file → use what is installed.
+- Read files with `piread`; use `sed` only to filter output a command already produced.
+- Pinned toolchain: use the project's pin. `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before any node/npm/npx; missing → create one pinning the running `node --version` first. Other languages: same pattern for `.python-version`, `rust-toolchain.toml`, …; a language with no pin convention → use what is installed.
 
 ## Blocks & recovery
-- A block is an instruction: do the named step, retry once. Never re-send verbatim.
+- A block is an instruction: perform the step it names — a read, a narrowed window, a changed command — then retry once with the corrected call; never re-send the payload verbatim. A second block on the same target is not a retry: apply the same-target rule below.
 - Same target blocked twice: stop, re-read every touched region, then make ONE corrected call. No loops.
-- Three probes on one fact: stop. Isolate it in a single command that prints every value, or state what is unresolved and ask.
-- Destructive-guard false positives: complex shapes (exec flags like `fd -x`, time filters like `fd --changed-within`, `jq` `test()` predicates, `for` loops over globs) trip the guard on read-only work. Simplify to one plain command per probe — same fact, simpler shape — before asking.
+- Three probes on one fact: stop. A probe is one call whose only purpose is to answer an open question — its target (path, symbol, command) plus the question it was meant to settle identify the fact; two calls answering different questions are two facts. On the third probe, isolate the fact in a single command that prints every value, or state what is unresolved and ask.
 
 ## Shell preferences
 - `fd`, not `find`. `rg`, not `grep` (never `grep -P`). `jq` for JSON. Scope every search: path or glob, never bare recursive.
 
-## Tooling
-- Reuse before creating: check the existing native tools for a parser or CLI that already does the work, and extend it rather than writing a second one.
-- A new compiled tool is justified only when the work is byte-heavy per call or must run where the runtime is absent; otherwise keep it a script beside the tests.
-- One build workspace only: new native crates join the existing one and install through the repo's install script.
