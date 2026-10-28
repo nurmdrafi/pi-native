@@ -344,9 +344,9 @@ test('aggregation: --json emits the machine shape', () => {
   } finally { rmTree(dir); }
 });
 
-// (The repo's own doc-drift findings — currently one `rg --max-age` flag —
-// stays with `npm run doc:check` — a deliberate drift test would make this suite
-// fail for repo reasons rather than checker reasons)
+// (The repo's own doc-drift findings stay with `npm run doc:check` — a
+// deliberate drift test would make this suite fail for repo reasons rather
+// than checker reasons)
 test('CLI smoke: --json on the real repo emits four families', () => {
   const r = spawnSync(BIN, [repoRoot, '--json'], { encoding: 'utf8', cwd: repoRoot, timeout: 120000 });
   assert.equal(r.error, undefined, `spawn ${BIN} failed — is the binary installed? (${r.error})`);

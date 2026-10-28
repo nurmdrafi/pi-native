@@ -23,6 +23,7 @@ All skills are **manual** — invoke with `/skill:<name>`; none auto-load. Bodie
 | pidoc                | Harness setup health check; `--fix` rebuilds tools                 | `/skill:pidoc`                |
 | playwright-tester    | e2e specs, stress runs, untested-critical-path coverage             | `/skill:playwright-tester`    |
 | refactoring-ui       | Audit/fix existing UI: hierarchy, spacing, color, depth            | `/skill:refactoring-ui`       |
+| self-learn          | Behaviour retro over session extracts; rule/skills/gate sync | `/skill:self-learn`          |
 | session-audit        | Token/cost waste audit of `~/.pi/agent/sessions`                   | `/skill:session-audit`        |
 | skill-manager        | Create/modify SKILL.md + mandatory validator gate                  | `/skill:skill-manager`        |
 | rust-skills          | Comprehensive Rust coding guidelines — 269 rules across 26 categories | `/skill:rust-skills`          |

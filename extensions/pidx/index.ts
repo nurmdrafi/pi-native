@@ -24,9 +24,7 @@ import { resolve, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
-// pi-ai ships nested under pi-coding-agent (not a top-level dependency here);
-// deep import avoids adding a dependency entry for one TypeBox schema builder.
-import { Type } from "../../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/index.js";
+import { Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
   type ExtensionAPI,

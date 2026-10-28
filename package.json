@@ -27,6 +27,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",
     "@commitlint/config-conventional": "^19.6.1",
+    "@earendil-works/pi-ai": "^1.4.0",
     "@sinclair/typebox": "^0.34.49",
     "@types/node": "^26.4.1",
     "husky": "^9.1.7",

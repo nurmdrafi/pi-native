@@ -27,6 +27,7 @@
  * binary is missing).
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -142,7 +143,7 @@ function resolveTimeout(timeout: number | undefined): void {
  * daemon — whose own environment is frozen at startup — runs commands exactly
  * as the in-process built-in would.
  */
-function buildEnv(ctx: ExecContext | undefined): Record<string, string> {
+export function buildEnv(ctx: ExecContext | undefined): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
@@ -163,6 +164,11 @@ function buildEnv(ctx: ExecContext | undefined): Record<string, string> {
   if (!entries.includes(binDir)) {
     env[pathKey] = [binDir, ...entries].join(delimiter);
   }
+  // BASH_ENV (nvm bootstrap) for non-interactive daemon shells: default to
+  // the repo's scripts/env.sh when unset so node resolves without per-command
+  // `nvm use` prefixes; an explicit value always wins, absent file = no-op.
+  if (env.BASH_ENV === undefined && existsSync(join(extDir, "..", "..", "scripts", "env.sh")))
+    env.BASH_ENV = join(extDir, "..", "..", "scripts", "env.sh");
   return env;
 }
 

@@ -12,7 +12,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 
 ## Safety
 - permission-gate authoritative.
-- Ask before: package install, destructive command, out-of-scope edit, sudo, `curl | sh`, secrets, forced git ops.
+- Ask before: package install, out-of-scope edit, sudo, `curl | sh`, secrets, forced git ops.
 - Never commit, push, tag, or bump the version / `CHANGELOG.md` on your own. A repo instruction to append a changelog entry means propose, wait for approval. Commit body lines ≤72.
 - On block: stop → report reason → fix cause. No workaround without approval. Mechanics (retry once, then one corrected call): `SYSTEM.md` § Blocks & recovery.
 
@@ -37,7 +37,7 @@ Always loaded. Deeper rules in `docs/` — read linked doc only when task touche
 - Machine/device/OS agnostic — detail: docs/portability.md.
 
 ## Token Economy
-- Past ~150K context or ~200 turns, the accumulated prefix dominates cost: propose compaction or a fresh session rather than continuing.
+- Past ~150K context or ~120 turns, the accumulated prefix dominates cost: propose compaction or a fresh session rather than continuing.
 
 ## Verification
 - Completion: tests + lint + typecheck scoped to changed files only (10 files changed → only their tests), once at task end — TDD-loop scoped runs fine.

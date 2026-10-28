@@ -510,42 +510,63 @@ function gateEditProbe(pi, toolName, path, edits) {
   );
 }
 
-add("gate: unread piedit edit blocks identically to edit (Anchor Guard Unread)", async () => {
+/** call + result replay: warn-tier AG rides the tool_result as a note — the
+ * parity contract post-2026-10-28 demotion is identical NOTES, not blocks */
+async function gateEditVerdict(pi, toolName, path, edits) {
+  const id = `pg${++gateSeq}`;
+  const input = { path, edits };
+  const block = await pi.invoke(
+    "tool_call",
+    { type: "tool_call", toolName, toolCallId: id, input },
+    GATE_CTX,
+  );
+  if (block) return `BLOCKED: ${block.reason}`;
+  const res = await pi.invoke(
+    "tool_result",
+    { type: "tool_result", toolName, toolCallId: id, input, content: [{ type: "text", text: "ok" }], isError: false },
+    GATE_CTX,
+  );
+  const note = (res?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join(" ");
+  return `PASS: ${note}`;
+}
+
+add("gate: unread piedit edit warns identically to edit (Anchor Guard Unread)", async () => {
   const path = fixture("gate-unread.txt", "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\n");
-  const a = await gateEditProbe(freshGate(), "edit", path, [{ oldText: "L3", newText: "X" }]);
-  const b = await gateEditProbe(freshGate(), "piedit", path, [{ oldText: "L3", newText: "X" }]);
-  assert.ok(a, "edit must block unread");
-  assert.ok(b, "piedit must block unread");
-  assert.equal(b.reason, a.reason, "piedit and edit must produce identical block reasons");
-  assert.match(b.reason, /^Anchor Guard \(Unread\)/, `reason was: ${b.reason}`);
+  const a = await gateEditVerdict(freshGate(), "edit", path, [{ oldText: "L3", newText: "X" }]);
+  const b = await gateEditVerdict(freshGate(), "piedit", path, [{ oldText: "L3", newText: "X" }]);
+  assert.ok(!a.startsWith("BLOCKED"), `edit must pass with a note: ${a}`);
+  assert.ok(!b.startsWith("BLOCKED"), `piedit must pass with a note: ${b}`);
+  assert.equal(b, a, "piedit and edit must produce identical warn notes");
+  assert.match(a, /Anchor Guard \(Unread\)/, `note was: ${a}`);
 });
 
-add("gate: overlapping piedit edits block identically to edit", async () => {
+add("gate: overlapping piedit edits warn identically to edit", async () => {
   const path = fixture("gate-overlap.txt", "abcdef\n");
   const edits = [{ oldText: "abc", newText: "X" }, { oldText: "bcd", newText: "Y" }];
-  const a = await gateEditProbe(freshGate(), "edit", path, edits);
-  const b = await gateEditProbe(freshGate(), "piedit", path, edits);
-  assert.ok(a && b, "both must block overlapping edits");
-  assert.equal(b.reason, a.reason);
-  assert.match(b.reason, /overlap/i, `reason was: ${b.reason}`);
+  const a = await gateEditVerdict(freshGate(), "edit", path, edits);
+  const b = await gateEditVerdict(freshGate(), "piedit", path, edits);
+  assert.ok(!a.startsWith("BLOCKED") && !b.startsWith("BLOCKED"), `both must pass with notes: ${a} / ${b}`);
+  assert.equal(b, a, "piedit and edit must produce identical warn notes");
+  assert.match(a, /overlap/i, `note was: ${a}`);
 });
 
-add("gate: missing anchor blocks identically for edit and piedit", async () => {
+add("gate: missing anchor warns identically for edit and piedit", async () => {
   const path = fixture("gate-missing.txt", "present\n");
   const edits = [{ oldText: "absent-text", newText: "X" }];
-  const a = await gateEditProbe(freshGate(), "edit", path, edits);
-  const b = await gateEditProbe(freshGate(), "piedit", path, edits);
-  assert.ok(a && b, "both must block a missing anchor");
-  assert.equal(b.reason, a.reason);
-  assert.match(b.reason, /not found/i, `reason was: ${b.reason}`);
+  const a = await gateEditVerdict(freshGate(), "edit", path, edits);
+  const b = await gateEditVerdict(freshGate(), "piedit", path, edits);
+  assert.ok(!a.startsWith("BLOCKED") && !b.startsWith("BLOCKED"), `both must pass with notes: ${a} / ${b}`);
+  assert.equal(b, a, "piedit and edit must produce identical warn notes");
+  assert.match(a, /not found/i, `note was: ${a}`);
 });
 
 add("gate: read→piedit wins the region requirement", async () => {
   const path = fixture("gate-region.txt", "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\n");
   const pi = freshGate();
-  // Negative control: the same edit with no prior read must block.
-  const unread = await gateEditProbe(freshGate(), "piedit", path, [{ oldText: "L3", newText: "L3-edited" }]);
-  assert.ok(unread, "negative control: unread piedit edit must block");
+  // Negative control: the same edit with no prior read must warn (Unread).
+  const unread = await gateEditVerdict(freshGate(), "piedit", path, [{ oldText: "L3", newText: "L3-edited" }]);
+  assert.ok(!unread.startsWith("BLOCKED"), `unread piedit edit must pass, not block: ${unread}`);
+  assert.match(unread, /Anchor Guard \(Unread\)/, `negative control note was: ${unread}`);
   // Read the region through the piread tool so the gate certifies it
   // (P1, 2026-10-15: built-in `read` on text files is blocked piread-first).
   const { createReadTool } = await import(
@@ -566,9 +587,10 @@ add("gate: read→piedit wins the region requirement", async () => {
     { type: "tool_result", toolName: "piread", toolCallId: readId, input: readInput, content: readResult.content, isError: false, details: readResult.details },
     GATE_CTX,
   );
-  // An anchor inside the certified region now passes the region requirement.
-  const pass = await gateEditProbe(pi, "piedit", path, [{ oldText: "L3", newText: "L3-edited" }]);
-  assert.ok(!pass, pass?.reason ?? "piedit edit within the certified region must pass");
+  // An anchor inside the certified region now passes with no AG note.
+  const pass = await gateEditVerdict(pi, "piedit", path, [{ oldText: "L3", newText: "L3-edited" }]);
+  assert.ok(!pass.startsWith("BLOCKED"), `certified-region edit must pass: ${pass}`);
+  assert.ok(!pass.includes("Anchor Guard"), `region requirement must be satisfied (note-free): ${pass}`);
 });
 
 add("gate: protected-path piedit blocks at tool_call before execution", async () => {

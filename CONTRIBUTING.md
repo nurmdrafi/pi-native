@@ -43,8 +43,8 @@ Benchmarks and audits are manual drivers, never part of the gate:
   cost, freeze the old binary, pin the seam with tests, then run the verification
   ladder including `npm run audit:bin-diff`.
 - **Docs**: reference material in `docs/`, session/historical records in `research/`,
-  entry points in `tests/README.md`. Run `npm run doc:check` before pushing; the one
-  known finding (`rg --max-age`) is the accepted baseline.
+  entry points in `tests/README.md`. Run `npm run doc:check` before pushing — zero
+  known findings; fix new findings rather than extending any baseline.
 - **Never invent literals**: copy route paths, permission strings and env names from
   source (`rg -n` first). `npm run doc:check` catches the env-var half of this.
 

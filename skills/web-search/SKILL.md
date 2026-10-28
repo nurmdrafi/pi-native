@@ -1,7 +1,6 @@
 ---
 name: web-search
 description: "Web search and URL content extraction via the Tavily CLI (tvly). SEARCH current information when no URL is known: 'search for', 'find articles about', 'what's the latest on'. EXTRACT clean markdown/text from specific URLs: 'extract', 'grab the content from', 'pull the text from', 'get the page at', 'read this webpage' — handles JavaScript-rendered pages, up to 20 URLs per call. Workflow: search → extract; --include-raw-content on a search can skip the extract step. NOT deep multi-source research reports (→ research)."
-allowed-tools: pibash(tvly *)
 disable-model-invocation: false
 ---
 

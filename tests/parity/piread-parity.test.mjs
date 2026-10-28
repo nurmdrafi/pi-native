@@ -192,7 +192,7 @@ add("registration: individual name/label, schema byte-equal to createReadToolDef
   assert.equal(wrapped.name, "piread");
   assert.equal(wrapped.label, "piread");
   assert.notEqual(wrapped.description, sdkDefinition.description);
-  assert.match(wrapped.description, /piread/);
+  assert.match(wrapped.description, /offset\/limit/, "description keeps the windowing contract");
   assert.equal(wrapped.promptSnippet, sdkDefinition.promptSnippet);
   assert.deepStrictEqual(wrapped.parameters, sdkDefinition.parameters);
   assert.deepStrictEqual(wrapped.outputSchema, sdkDefinition.outputSchema);
@@ -532,12 +532,17 @@ add("gate R1: piread-wrapped read result certifies coverage (dup read blocked)",
 });
 add("gate S5 M2: edit-after-piread-read passes region requirement", async () => {
   const path = join(dir, "mid30");
-  // negative control: the same edit with no prior read must block (proves the
-  // gate is armed — the pass below is not vacuous)
+  // negative control: the same edit with no prior read must warn (Unread note
+  // since the 2026-10-28 demotion — proves the gate is armed, the pass below
+  // is not vacuous)
   const control = freshGate();
-  const unread = await gateEditProbe(control, path, [{ oldText: "L11", newText: "L11-edited" }]);
-  assert.ok(unread.blocked, "negative control: unread edit must block");
-  assert.match(unread.reason, /^Anchor Guard \(Unread\)/, `reason was: ${unread.reason}`);
+  const cId = `g${++gateSeq}`;
+  const cInput = { path, edits: [{ oldText: "L11", newText: "L11-edited" }] };
+  const cBlock = await control.invoke("tool_call", { type: "tool_call", toolName: "edit", toolCallId: cId, input: cInput }, GATE_CTX);
+  assert.ok(!cBlock, `unread edit must pass with a note, not block: ${cBlock?.reason}`);
+  const cRes = await control.invoke("tool_result", { type: "tool_result", toolName: "edit", toolCallId: cId, input: cInput, content: [{ type: "text", text: "ok" }], isError: false }, GATE_CTX);
+  const cNote = (cRes?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join(" ");
+  assert.match(cNote, /Anchor Guard \(Unread\)/, `negative control note was: ${cNote}`);
   const pi = freshGate();
   const first = await gateReadFlow(pi, wrapped, path, 10, 5);
   assert.ok(!first.blocked, first.reason ?? "read must not block");
