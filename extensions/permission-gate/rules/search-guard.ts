@@ -93,6 +93,12 @@ const SS2_MSG =
 const SS3_MSG =
   "Search (fd-first): 'find' is the fallback, not the default — use 'fd PATTERN path/' (regex pattern; -e exact, -H hidden, -t f files). If fd genuinely errored, say so in chat and wait for approval before using find.";
 
+/** SS4 (2026-11-01): `-r` is a grep habit, not an rg recursion flag — rg recurses
+ * by default and reads `-r`/`--replace` as display substitution, so the search
+ * still runs but answers the wrong question and costs a re-run. */
+const SS4_MSG =
+  "Search (rg -r): '-r' on rg is --replace (display substitution), not recursion — rg already recurses, so drop it: 'rg PATTERN path/'. The flag comes from grep idioms and silently changes what the command reports.";
+
 /**
  * SS1's crawl-cost premise applies to all searches.
  * PB1 (deterministic BSD failure) still blocks.
@@ -106,6 +112,8 @@ export interface SearchRules {
   midPipe?: boolean;
   /** SS3: find head — prefer fd */
   findFirst?: boolean;
+  /** SS4: rg -r/--replace, a grep idiom for a flag rg reads as substitution */
+  replaceFlag?: boolean;
 }
 
 /** SE1 (2026-10-28): `|| true` / `|| :` swallows the failure exit code.
@@ -140,6 +148,7 @@ export function searchCheck(
     portability: rules.portability ?? true,
     midPipe: rules.midPipe ?? true,
     findFirst: rules.findFirst ?? true,
+    replaceFlag: rules.replaceFlag ?? true,
   };
   const toks = tokens(seg);
   let i = 0;
@@ -148,6 +157,15 @@ export function searchCheck(
   if (head !== "grep" && head !== "egrep" && head !== "fgrep") {
     // SS3 fd-first: find head → fd
     if (on.findFirst && head === "find") return SS3_MSG;
+    // SS4: rg -r / --replace — substitution, never recursion
+    if (on.replaceFlag && head === "rg")
+      for (let k = i + 1; k < toks.length && toks[k].startsWith("-"); k++) {
+        const t = toks[k];
+        if (t === "--") break;
+        if (t === "--replace" || t.startsWith("--replace=")) return SS4_MSG;
+        // rg's short --replace form is -r; a short cluster like -rn carries it
+        if (!t.startsWith("--") && t.slice(1).includes("r")) return SS4_MSG;
+      }
     // SS2 mid-pipe: a grep segment headed by another command
     if (on.midPipe)
       for (let k = 1; k < toks.length; k++)

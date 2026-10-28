@@ -868,6 +868,7 @@ export default function (pi: ExtensionAPI) {
         portability: ruleEnabled("searchPortability"),
         midPipe: ruleEnabled("searchMidPipe"),
         findFirst: ruleEnabled("findFirst"),
+        replaceFlag: ruleEnabled("searchReplaceFlag"),
       });
       if (sc) {
         const key = sc.startsWith("Search (Scope)")
@@ -876,7 +877,9 @@ export default function (pi: ExtensionAPI) {
             ? "searchMidPipe"
             : sc.startsWith("Search (fd-first)")
               ? "findFirst"
-              : "searchPortability";
+              : sc.startsWith("Search (rg -r)")
+                ? "searchReplaceFlag"
+                : "searchPortability";
         const r = enforce(key, sc, event.toolCallId);
         if (r) return r;
       }

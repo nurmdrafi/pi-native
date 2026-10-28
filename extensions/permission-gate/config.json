@@ -20,6 +20,7 @@
     "toolchainNode": "warn",
     "searchScope": "warn",
     "searchMidPipe": "warn",
+    "searchReplaceFlag": "warn",
     "findFirst": "warn",
     "searchPortability": "warn",
     "errorSwallow": "warn",

@@ -98,12 +98,32 @@ test("searchCheck flags grep --perl-regexp on darwin", () => {
 });
 
 test("searchCheck does not flag rg -P on darwin (the suggested remedy)", () => {
-  assert.equal(searchCheck("rg -Prn 'x' src/", true), undefined);
+  // -Pn, not -Prn: the stray r is SS4's display-replace flag, a separate family
+  assert.equal(searchCheck("rg -Pn 'x' src/", true), undefined);
 });
 
 test("searchCheck never raises the Portability family off darwin", () => {
   const r = searchCheck("grep -Prn 'x' src/", false);
   assert.ok(!r?.startsWith("Portability (grep -P)"), `got: ${r}`);
+});
+
+// ---- rg -r is display-replace, not recursive ----
+
+test("searchCheck flags rg -r as display-replace", () => {
+  for (const cmd of ["rg -r term src/", "rg -rn 'foo' src/"]) {
+    const r = searchCheck(cmd, false);
+    assert.ok(r?.startsWith("Search (rg -r)"), `${cmd} got: ${r}`);
+  }
+});
+
+test("searchCheck flags rg --replace too", () => {
+  const r = searchCheck("rg --replace=hit 'x' src/", false);
+  assert.ok(r?.startsWith("Search (rg -r)"), `got: ${r}`);
+});
+
+test("searchCheck leaves recursive-by-default rg alone", () => {
+  for (const cmd of ["rg -n term src/", "rg -n -F 'x' src/"])
+    assert.equal(searchCheck(cmd, false), undefined, cmd);
 });
 
 // ---- C4 hit-anchored seeding (argv-blind spot) ----

@@ -53,6 +53,7 @@ export const RULE_IDS = {
   toolchainNode: "TC2",
   searchScope: "SS1",
   searchMidPipe: "SS2",
+  searchReplaceFlag: "SS4",
   findFirst: "SS3",
   errorSwallow: "SE1",
   readerBypass: "SE2",
