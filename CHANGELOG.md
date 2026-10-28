@@ -7,6 +7,36 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.65.0] - 01-11-2026
+
+### Added
+
+- **`pidx --report lifecycle [--session ID]`.** A per-turn ledger — input, cache-read,
+  output, calls, result bytes — alongside four cross-turn waste detectors: `dupCall`,
+  `resendAfterBlock` (a duplicate edit whose earlier attempt was blocked), `probeRepeat`
+  (one target, three turns) and `proseOnly` (an output-heavy tool-free turn). Waste is
+  priced against the session's mean prefix, and the model is printed with the numbers so
+  an estimate is never read as an attribution. The detector core is pure, so the case
+  corpus pins the model without a session directory.
+- **SS4 search rule.** `rg -r` / `--replace` is display substitution, not recursion —
+  `rg` recurses by default, so the flag silently changes what the command reports. Warned
+  under the new `searchReplaceFlag` key.
+
+### Changed
+
+- **One read budget.** `SYSTEM.md` drops the 500-line window, the ~10 KB whole-file
+  bypass and the ~100-line tier for a single rule: one window is one unit inside the
+  ~40-line / 2 KB model-visible budget, a larger unit is two deliberate windows, and
+  several units are several calls in one parallel block.
+- **Anchor blocks carry their remedy.** A not-found anchor returns the closest region as
+  paste-ready `oldText` on the fragment path, or a bounded window (15 lines / 1.5 KB) plus
+  a `piread {path, offset, limit}` call when no fragment matches — so a block costs no
+  remedy round instead of a read plus a full payload re-send.
+- **`--max` no longer hides the live session.** `select_sessions` folds a dropped session
+  inside the live window back into the slice.
+- **Post-block discipline** in `SYSTEM.md`: a block concerns one span, so only that region
+  is re-sent.
+
 ## [1.64.0] - 29-10-2026
 
 ### Added
