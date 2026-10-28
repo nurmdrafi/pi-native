@@ -1,0 +1,2 @@
+- Run `npm run no-such-target` after editing `docs/missing-file.md`.
+- Then run `npm run check`, which does exist.

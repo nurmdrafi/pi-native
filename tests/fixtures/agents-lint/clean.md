@@ -1,0 +1,3 @@
+- Run `npm run check` and read `docs/development.md`.
+- Placeholders like `docs/<area>.md` and globs like `skills/*/scripts/` are not references.
+- The former `scripts/gone.mjs` is deleted, so a historical mention is not a broken reference.

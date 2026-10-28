@@ -1,0 +1,2 @@
+- Run `npm run check` before committing, and read `extensions/README.md`.
+- Harness commands live in the harness repo's own docs.
