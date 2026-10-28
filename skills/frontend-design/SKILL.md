@@ -50,15 +50,16 @@ Match existing patterns before introducing new ones. New framework = new file un
 
 - Error boundaries wrap the page + major subtrees — one thrown panel must not blank the app.
 - Every async surface: loading/empty/error states; a failed poll keeps the last good view.
-- Non-2xx = error, not data: reject, set timeouts, surface the failure; never a silent empty state.
+- Non-2xx = error, not data: reject, set timeouts, surface the failure; never a silent empty state. Failures also arrive resolved (data layers return `{error}` instead of rejecting) — branch on the error field before the empty check, or a 500 renders as "No data found".
 - Validate/parse API values pre-use — nullable/string numbers hitting `.toFixed`/`.map`/`.charAt` blank the UI.
 - No success toast/modal close on a failed mutation; reset prior entity state on selection change.
-- One owner per failure: a single global layer catches/normalizes/logs/decides — components don't each re-handle (no duplicate toasts/logs/sign-outs).
+- One owner per failure: a single global layer catches/normalizes/logs/decides — components don't each re-handle (no duplicate toasts/logs/sign-outs). Mark a failure as surfaced the moment it toasts (identity on the error object) so no layer repeats it; local handlers add context only when the owner stayed silent. Cancellation — unmount, superseded request, client timeout — is not a failure: no toast.
 - Handlers at every level: process (`window.onerror`, `unhandledrejection`), router/app error page, component boundaries, data layer (one API interceptor).
-- Classify every status/kind, never one generic message: network/timeout, 400/422 validation, 401 auth, 403 permission, 404 missing, 409 conflict, 429 throttle, 5xx server — each → user message + recovery action.
+- Classify every status/kind, never one generic message: network/timeout, 400/422 validation, 401 auth, 403 permission, 404 missing, 409 conflict, 429 throttle, 5xx server — each → user message + recovery action. Prefer the backend's own message; frontend text is fallback — a hardcoded guess (fixed "already exists" on any 500) lies to the user.
 - Never swallow: no empty `catch`, no `console.error` stripped in prod.
 - Retry only transient failures, with backoff — never infinite, never deterministic.
 - Fallback UI: error page/boundary with reset/retry; keep the last good view.
+- Full failure-UX architecture (transport-owned toasts, message precedence, single-toast dedupe): `references/error-ux.md`.
 
 ## Design Thinking (GREENFIELD ONLY — skip if Pattern Audit found existing UI)
 
