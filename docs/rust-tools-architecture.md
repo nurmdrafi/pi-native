@@ -83,15 +83,26 @@ order, not alphabetical.
 
 ```mermaid
 flowchart TB
-    M[Model / core calls tool] --> E[Extension index.ts<br/>individual registration]
-    E --> D{Daemon alive?}
-    D -- yes --> DA[bin/X --serve<br/>NDJSON over stdio<br/>id-matched, lazy restart]
-    D -- no / transport fails --> OS[One-shot spawn<br/>bin/X per call]
-    DA -- spawn / timeout parity failure --> OS
-    OS -- spawn / parse failure --> BF[Built-in TypeScript tool<br/>final fallback]
-    DA --> RES[Envelope result to model]
+    M(["Model / core calls tool"]) --> E["Extension index.ts<br/>individual registration"]
+    E --> D{"Daemon alive?"}
+    D ==>|"yes"| DA["🚀 Rung 1 · bin/X --serve<br/>NDJSON over stdio<br/>id-matched, lazy restart"]
+    D -->|"no / transport fails"| OS["⚡ Rung 2 · one-shot spawn<br/>bin/X per call"]
+    DA -.->|"spawn / timeout parity failure"| OS
+    OS -.->|"spawn / parse failure"| BF["🧭 Rung 3 · built-in TypeScript tool<br/>final fallback — always correct"]
+    DA ==> RES(["Envelope result to model"])
     OS --> RES
     BF --> RES
+
+    classDef entry fill:#8957e5,stroke:#bc8cff,color:#ffffff
+    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
+    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
+    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
+    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
+    class M,RES entry
+    class E ext
+    class DA rung
+    class OS oneshot
+    class BF oracle
 ```
 
 The ladder is **fail-open**: every rung's failure advances to the next, and the
@@ -295,43 +306,58 @@ injection and TUI rendering.
 
 ```mermaid
 flowchart TB
-    subgraph EXT[extensions/pibash/index.ts]
-        ENVV[Inject env + PI_* vars,<br/>resolve cwd, cancellation]
-        TUIGET[TUI live render + cancel]
-        OS[One-shot spawn<br/>bin/pibash per call]
-        BF[Built-in bash<br/>final fail-open rung]
-        DA[bin/pibash --serve<br/>NDJSON daemon]
+    subgraph EXT["extensions/pibash/index.ts"]
+        direction TB
+        ENVV["Inject env + PI_* vars,<br/>resolve cwd, cancellation"]
+        TUIGET["TUI live render + cancel"]
+        OS["⚡ Rung 2 · one-shot spawn<br/>bin/pibash per call"]
+        BF["🧭 Rung 3 · built-in bash<br/>final fail-open rung"]
+        DA["🚀 Rung 1 · bin/pibash --serve<br/>NDJSON daemon"]
     end
 
-    subgraph CORE[rust-tools/pibash/src]
-        CLI[cli.rs<br/>--command/--cwd/--timeout/--serve]
-        RUNNER[runner.rs<br/>spawn child, stream,<br/>throttled RunObserver partials]
-        ACC[accumulator.rs<br/>2000-line / 50KB spill cap<br/>pi-bash temp prefix]
-        COMPRESS[compress.rs<br/>Tier-1 shadow pre-pass over FULL stream]
-        TRUNC[truncate.rs<br/>oracle-shaped truncation object]
-        RENDER[render.rs<br/>format_output + status append]
-        ENV[envelope.rs<br/>Success / Failure JSON]
-        SERVE[serve.rs<br/>NDJSON daemon, start/partial lines]
-        MAIN[main.rs<br/>execute / execute_with / execute_observed]
+    subgraph CORE["rust-tools/pibash/src"]
+        direction TB
+        CLI["cli.rs<br/>--command/--cwd/--timeout/--serve"]
+        RUNNER["runner.rs<br/>spawn child, stream,<br/>throttled RunObserver partials"]
+        ACC["accumulator.rs<br/>2000-line / 50KB spill cap<br/>pi-bash temp prefix"]
+        COMPRESS["compress.rs<br/>Tier-1 shadow pre-pass over FULL stream"]
+        TRUNC["truncate.rs<br/>oracle-shaped truncation object"]
+        RENDER["render.rs<br/>format_output + status append"]
+        ENV["envelope.rs<br/>Success / Failure JSON"]
+        SERVE["serve.rs<br/>NDJSON daemon, start/partial lines"]
+        MAIN["main.rs<br/>execute / execute_with / execute_observed"]
     end
 
-    ENVV --> D{Daemon alive?}
-    D -- yes --> CLI
-    D -- no / transport fails --> OS
-    OS -- spawn / parse failure --> BF
-    CLI --> MAIN
-    MAIN --> RUNNER --> ACC
-    ACC -->|into_full_text / spill read| COMPRESS
-    COMPRESS -->|pruned to 40 lines / 2 KB| TRUNC
-    TRUNC --> RENDER
-    RENDER --> ENV
-    ENV -->|envelope JSON| LADDER
-    ACC -.->|fullOutputPath spill ref| ENV
-    RUNNER -.->|pid + throttled partials| TUIGET
-    DA -.->|spawn / timeout parity failure| OS
-    ENV --> LADDER_OUT[Envelope to model]
+    ENVV --> D{"Daemon alive?"}
+    D ==>|"yes"| CLI
+    D -->|"no / transport fails"| OS
+    OS -.->|"spawn / parse failure"| BF
+    CLI ==> MAIN
+    MAIN ==> RUNNER ==> ACC
+    ACC -->|"into_full_text / spill read"| COMPRESS
+    COMPRESS -->|"pruned to 40 lines / 2 KB"| TRUNC
+    TRUNC ==> RENDER
+    RENDER ==> ENV
+    ENV -->|"envelope JSON"| LADDER["resolve rung"]
+    ACC -.->|"fullOutputPath spill ref"| ENV
+    RUNNER -.->|"pid + throttled partials"| TUIGET
+    DA -.->|"spawn / timeout parity failure"| OS
+    ENV --> LADDER_OUT["Envelope to model"]
     OS --> LADDER_OUT
     BF --> LADDER_OUT
+
+    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
+    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
+    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
+    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
+    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
+    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
+    class ENVV,TUIGET ext
+    class DA rung
+    class OS oneshot
+    class BF oracle
+    class CLI,RUNNER,ACC,COMPRESS,TRUNC,RENDER,ENV,SERVE,MAIN,LADDER core
+    class LADDER_OUT out
 ```
 
 ### Execution
@@ -446,37 +472,52 @@ a single JSON envelope.
 
 ```mermaid
 flowchart TB
-    subgraph EXT[extensions/piread/index.ts]
-        IMG[Image extensions → private built-in read]
-        OS[One-shot spawn<br/>bin/piread per call]
-        BF[Built-in read<br/>final fail-open rung]
-        DA[bin/piread --serve<br/>NDJSON daemon]
+    subgraph EXT["extensions/piread/index.ts"]
+        direction TB
+        IMG["Image extensions → private built-in read"]
+        OS["⚡ Rung 2 · one-shot spawn<br/>bin/piread per call"]
+        BF["🧭 Rung 3 · built-in read<br/>final fail-open rung"]
+        DA["🚀 Rung 1 · bin/piread --serve<br/>NDJSON daemon"]
     end
 
-    subgraph CORE[rust-tools/piread/src]
-        CLI[cli.rs<br/>--path/--offset/--limit ≥ 1]
-        ENV[envelope.rs<br/>Success/Failure + Node-style errors]
-        PIPE[pipeline.rs<br/>streaming Segmenter + HeadTruncator]
-        COMP[compress.rs<br/>head-tail to 40 lines / 2 KB]
-        SERVE[serve.rs<br/>NDJSON daemon]
-        MAIN[main.rs]
+    subgraph CORE["rust-tools/piread/src"]
+        direction TB
+        CLI["cli.rs<br/>--path/--offset/--limit ≥ 1"]
+        ENV["envelope.rs<br/>Success/Failure + Node-style errors"]
+        PIPE["pipeline.rs<br/>streaming Segmenter + HeadTruncator"]
+        COMP["compress.rs<br/>head-tail to 40 lines / 2 KB"]
+        SERVE["serve.rs<br/>NDJSON daemon"]
+        MAIN["main.rs"]
     end
 
-    IMG --> D{Daemon alive?}
-    D -- yes --> CLI
-    D -- no / transport fails --> OS
-    OS -- spawn / parse failure --> BF
-    CLI --> MAIN --> PIPE
-    PIPE -->|File::open → ENOENT/EACCES/EISDIR| ENV
-    PIPE -->|NUL sniff first 8 KiB| ENV
-    PIPE -->|offset beyond EOF| ENV
-    PIPE --> COMP
-    COMP --> ENV
-    ENV -->|envelope JSON| LADDER_OUT[Envelope to model]
+    IMG --> D{"Daemon alive?"}
+    D ==>|"yes"| CLI
+    D -->|"no / transport fails"| OS
+    OS -.->|"spawn / parse failure"| BF
+    CLI ==> MAIN ==> PIPE
+    PIPE -->|"File::open → ENOENT/EACCES/EISDIR"| ENV
+    PIPE -->|"NUL sniff first 8 KiB"| ENV
+    PIPE -->|"offset beyond EOF"| ENV
+    PIPE ==> COMP
+    COMP ==> ENV
+    ENV -->|"envelope JSON"| LADDER_OUT["Envelope to model"]
     OS --> LADDER_OUT
     BF --> LADDER_OUT
-    DA -.->|spawn / timeout parity failure| OS
-    IMG -.->|non-image path continues| D
+    DA -.->|"spawn / timeout parity failure"| OS
+    IMG -.->|"non-image path continues"| D
+
+    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
+    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
+    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
+    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
+    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
+    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
+    class IMG ext
+    class DA rung
+    class OS oneshot
+    class BF oracle
+    class CLI,ENV,PIPE,COMP,SERVE,MAIN core
+    class LADDER_OUT out
 ```
 
 ### Streaming parser
@@ -525,36 +566,51 @@ apply → write → native diff/patch render.
 
 ```mermaid
 flowchart TB
-    subgraph EXT[extensions/piedit/index.ts]
-        QUEUE[withFileMutationQueue<br/>re-entrancy guard]
-        OS[One-shot spawn<br/>bin/piedit per call]
-        BF[Built-in edit<br/>final fail-open rung]
-        DA[bin/piedit --serve<br/>NDJSON daemon]
-        DIFFTS[render diff via<br/>generateDiffString / generateUnifiedPatch]
+    subgraph EXT["extensions/piedit/index.ts"]
+        direction TB
+        QUEUE["withFileMutationQueue<br/>re-entrancy guard"]
+        OS["⚡ Rung 2 · one-shot spawn<br/>bin/piedit per call"]
+        BF["🧭 Rung 3 · built-in edit<br/>final fail-open rung"]
+        DA["🚀 Rung 1 · bin/piedit --serve<br/>NDJSON daemon"]
+        DIFFTS["render diff via<br/>generateDiffString / generateUnifiedPatch"]
     end
 
-    subgraph CORE[rust-tools/piedit/src]
-        CLI[cli.rs<br/>--path/--edits/--serve]
-        PIPE[pipeline.rs<br/>normalizeToLF, detectLineEnding,<br/>splitBom, NFKC fuzzy match,<br/>apply, write]
-        DIFF[diff.rs<br/>jsdiff port, byte-identical]
-        ENV[envelope.rs<br/>diff/patch/firstChangedLine]
-        SERVE[serve.rs]
-        MAIN[main.rs]
+    subgraph CORE["rust-tools/piedit/src"]
+        direction TB
+        CLI["cli.rs<br/>--path/--edits/--serve"]
+        PIPE["pipeline.rs<br/>normalizeToLF, detectLineEnding,<br/>splitBom, NFKC fuzzy match,<br/>apply, write"]
+        DIFF["diff.rs<br/>jsdiff port, byte-identical"]
+        ENV["envelope.rs<br/>diff/patch/firstChangedLine"]
+        SERVE["serve.rs"]
+        MAIN["main.rs"]
     end
 
-    QUEUE --> D{Daemon alive?}
-    D -- yes --> CLI
-    D -- no / transport fails --> OS
-    OS -- spawn / parse failure --> BF
-    CLI --> MAIN --> PIPE
-    PIPE -->|exact/fuzzy match fails| ENV
-    PIPE --> DIFF
-    DIFF -->|diff + unified patch| ENV
-    ENV -->|envelope JSON| LADDER_OUT[Envelope to model]
+    QUEUE --> D{"Daemon alive?"}
+    D ==>|"yes"| CLI
+    D -->|"no / transport fails"| OS
+    OS -.->|"spawn / parse failure"| BF
+    CLI ==> MAIN ==> PIPE
+    PIPE -->|"exact/fuzzy match fails"| ENV
+    PIPE ==> DIFF
+    DIFF -->|"diff + unified patch"| ENV
+    ENV -->|"envelope JSON"| LADDER_OUT["Envelope to model"]
     OS --> LADDER_OUT
     BF --> LADDER_OUT
-    DA -.->|spawn / timeout parity failure| OS
-    LADDER_OUT -.->|legacy baseContent/newContent| DIFFTS
+    DA -.->|"spawn / timeout parity failure"| OS
+    LADDER_OUT -.->|"legacy baseContent/newContent"| DIFFTS
+
+    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
+    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
+    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
+    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
+    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
+    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
+    class QUEUE,DIFFTS ext
+    class DA rung
+    class OS oneshot
+    class BF oracle
+    class CLI,PIPE,DIFF,ENV,SERVE,MAIN core
+    class LADDER_OUT out
 ```
 
 ### Why the queue matters
@@ -606,23 +662,32 @@ per-session extracts consumed by session-audit's fast path.
 
 ```mermaid
 flowchart TB
-    subgraph EXT[extensions/pidx/index.ts]
-        REG[First-class pidx tool registration]
+    subgraph EXT["extensions/pidx/index.ts"]
+        direction TB
+        REG["First-class pidx tool registration"]
     end
 
-    subgraph CORE[rust-tools/pidx/src/main.rs]
-        SCAN[Scan sessions-dir<br/>key files by size + mtime_ns]
-        PARSE[Parse JSONL → extract<br/>turns, calls, results,<br/>compactions, skills]
-        STORE[State store<br/>byte-range header + raw extract bytes]
-        OUT[Write one JSON line per session<br/>newest first → --out; summary → stderr]
+    subgraph CORE["rust-tools/pidx/src/main.rs"]
+        direction TB
+        SCAN["Scan sessions-dir<br/>key files by size + mtime_ns"]
+        PARSE["Parse JSONL → extract<br/>turns, calls, results,<br/>compactions, skills"]
+        STORE["State store<br/>byte-range header + raw extract bytes"]
+        OUT["Write one JSON line per session<br/>newest first → --out; summary → stderr"]
     end
 
-    REG --> SCAN
-    SCAN -->|file changed?| PARSE
-    SCAN -->|unchanged| STORE
-    PARSE --> STORE
-    STORE -->|replay cached extract| OUT
-    PARSE --> OUT
+    REG ==> SCAN
+    SCAN ==>|"file changed"| PARSE
+    SCAN -.->|"unchanged"| STORE
+    PARSE ==> STORE
+    STORE -.->|"replay cached extract"| OUT
+    PARSE ==> OUT
+
+    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
+    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
+    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
+    class REG ext
+    class SCAN,PARSE,STORE core
+    class OUT out
 ```
 
 ### Incremental contract
