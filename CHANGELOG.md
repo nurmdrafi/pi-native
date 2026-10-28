@@ -7,6 +7,29 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.64.0] - 29-10-2026
+
+### Added
+
+- **`skills/self-learn` and bash-env nvm loading.** `scripts/env.sh` is a `BASH_ENV` target that
+  loads nvm once for daemon-spawned non-interactive shells (shells whose node already resolves
+  skip the ~200 ms source), pinned by `tests/unit/pibash-env.test.mjs`; `settings.json` re-enables
+  `pidx`.
+- **Warn-rule corpus cases.** `errorSwallow`, `readerBypass` and `viewCredit` join the gate case
+  corpus, with matching updates to anchor-guard, bash-cap, read-coverage and search-guard, the
+  case harness, region tests and the plan doc.
+
+### Changed
+
+- **Rule severities have one home: `extensions/permission-gate/config.json`.** `config.ts` is
+  renamed `loader.ts` and keeps only mechanics — the rule-key registry, severity coercion, env
+  overrides and the hard-rule floor — while the `WARN_BY_DEFAULT`/`OFF_BY_DEFAULT` shadow tables
+  are deleted. A key the file omits or garbles now fails closed to `error` with a stderr warning
+  instead of consulting a code table; shipped behavior is unchanged because the tracked file lists
+  every key. The `_comment` documents the `off`/`warn`/`error` vocabulary, `PGATE_<KEY>` one-off
+  overrides and the `destructiveConfirm`/`commitMessageLint` floor. Measured: gate-config 28/28,
+  full check 249/249; loader 300 → 269 lines.
+
 ## [1.63.0] - 27-10-2026
 
 ### Added
