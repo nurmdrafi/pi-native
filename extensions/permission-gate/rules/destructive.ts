@@ -8,7 +8,7 @@
  * the actual boundary. */
 import { homedir } from "os";
 import { realpathSync } from "fs";
-import { config } from "../config.ts";
+import { config } from "../loader.ts";
 
 
 /**
@@ -56,8 +56,9 @@ const MUTATING_BASH = new RegExp(
  * before running — the suite's must-ask tasks (t08 npm install, t09 git
  * reset --hard) failed 6/6 with AGENTS.md text alone: the model never asked.
  * With a UI (TUI/RPC) → ctx.ui.confirm dialog; headless/print → fail CLOSED
- * with a reason that tells the model to ask in chat and wait. The list mirrors
- * AGENTS.md "Safety" (single source of truth). Approved commands are
+ * with a reason that tells the model to ask in chat and wait. This list is
+ * the single home of the confirm set (moved out of the general ask-before
+ * rule list, 2026-10-28 — the gate owns it). Approved commands are
  * remembered verbatim for 2 min so an immediate re-send (hook retry) does not
  * re-prompt.
  *
@@ -82,7 +83,7 @@ const MUTATING_BASH = new RegExp(
  * $() wrapped payloads, like the rest of CORE. `curl|sudo sh` is already
  * covered by core `sudo`. */
 const SIDE_EFFECT_COMMANDS: CmdEntry[] = [
-  { id: "pipe-interpreter", label: "curl/wget piped to sh", re: String.raw`(?:curl|wget)\b[^|;&\n]*\|\s*(?:ba|z|da|fi)?sh\b` },
+  { id: "pipe-interpreter", label: "curl/wget piped to sh", re: String.raw`(?:curl|wget)\b[^|;&\n]*\|\s*(?:ba|z|da|fi)?sh\b(?![\w-])` },
   { id: "js-migrate-deploy", label: "js package migrate/deploy/publish", re: String.raw`(?:npx|npm|pnpm|yarn|bun)\s+(?:run\s+)?\S*(?:migrat|deploy|publish)\S*` },
   { id: "db-migrators", label: "orm/db migrators", re: String.raw`(?:npx\s+)?(?:\S*[/\\])?(?:prisma\s+(?:migrate|db\s+push)|knex\s+migrate|sequelize(?:-cli)?\s+db:migrate|alembic\s+(?:upgrade|downgrade)|flyway\s+migrate|db-migrate\s+up|migrate\b[^|;&\n]*\s(?:up|down))` },
   { id: "artisan-migrate", label: "laravel artisan migrate", re: String.raw`(?:php\s+)?(?:\S*[/\\])?artisan\s+migrate` },
@@ -157,7 +158,7 @@ const DESTRUCTIVE_BASH = new RegExp(
     // S4 fix 6 (§6.6): pipe-to-interpreter — unanchored on purpose (matches
     // anywhere in the segment, incl. inside sh -c "…" payloads); `bash
     // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed
-    String.raw`|\|\s*(?:ba|z|da|k)?sh\b` +
+    String.raw`|\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
     String.raw`|\b(?:DROP\s+(?:TABLE|DATABASE)|DELETE\s+FROM)\b|\bfind\b[^|;&]*\s-[a-zA-Z]*delete\b`,
   "i",
 );

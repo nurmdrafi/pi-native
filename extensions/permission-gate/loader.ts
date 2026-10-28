@@ -54,6 +54,9 @@ export const RULE_IDS = {
   searchScope: "SS1",
   searchMidPipe: "SS2",
   findFirst: "SS3",
+  errorSwallow: "SE1",
+  readerBypass: "SE2",
+  bashViewCredit: "VC",
   searchPortability: "PB1",
   cadenceNudge: "CN",
   loopGuard: "LG1",
@@ -76,39 +79,16 @@ export type RuleKey = keyof typeof RULE_IDS;
  */
 export type Severity = "off" | "warn" | "error";
 
-/** Safety rules whose severity is never below `error`, whatever config says. */
+/** Safety rules whose severity is never below `error`, whatever config says.
+ * editAnchorGuard left this set 2026-10-28 by user direction: the edit
+ * pipeline itself enforces oldText existence/uniqueness/overlap, so AG is
+ * a teaching layer — warn notes carry the fix; content match decides. */
 export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
-  "editAnchorGuard",
   "destructiveConfirm",
   "commitMessageLint",
 ] as RuleKey[]);
 
-/** Preference rules ship as `warn`: taught, counted, not blocked. R1x
- * notes the partial-overlap re-reads R1's full-coverage check lets through
- * (2026-10-26 audit: 149/wk) — a note corrects ledgering without gating
- * valid reads. */
-export const WARN_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([
-  "toolchainPnpm",
-  "toolchainNode",
-  "searchScope",
-  "searchMidPipe",
-  "findFirst",
-  "searchPortability",
-  "rerunGuard",
-  "largeReadGuard",
-  "reReadConsume",
-  "phaseNudge",
-] as RuleKey[]);
 
-/** Behavior modifiers that ship OFF: enabling changes what a block DOES
- * rather than whether it fires, so the safe default is inert. (Empty since
- * the 2026-10-26 R1x revival — no rule ships disabled.) */
-export const OFF_BY_DEFAULT: ReadonlySet<RuleKey> = new Set([] as RuleKey[]);
-
-/** Defaults are fail-closed: active rules block unless demoted above. */
-const DEFAULTS: Record<RuleKey, Severity> = Object.fromEntries(
-  (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, OFF_BY_DEFAULT.has(k) ? "off" : WARN_BY_DEFAULT.has(k) ? "warn" : "error"]),
-) as Record<RuleKey, Severity>;
 
 export interface DestructiveExtra {
   id: string;
@@ -220,7 +200,11 @@ function readConfigFile(): Record<string, unknown> {
 function loadGateConfig(): GateConfig {
   const raw = readConfigFile();
 
-  const rules = { ...DEFAULTS };
+  // config.json is the single home for severities: anything it omits or
+  // garbles fails closed to `error` rather than consulting a shadow table.
+  const rules = Object.fromEntries(
+    (Object.keys(RULE_IDS) as RuleKey[]).map((k) => [k, "error" as Severity]),
+  ) as Record<RuleKey, Severity>;
   const rawRules = raw.rules;
 
   if (rawRules !== undefined && (rawRules === null || typeof rawRules !== "object" || Array.isArray(rawRules))) {
@@ -228,7 +212,7 @@ function loadGateConfig(): GateConfig {
   } else if (rawRules) {
     for (const [key, value] of Object.entries(rawRules as Record<string, unknown>)) {
       if (!(key in RULE_IDS)) {
-        warn(`unknown rule "${key}" in config.json — ignored (see RULE_IDS in config.ts for valid keys)`);
+        warn(`unknown rule "${key}" in config.json — ignored (see RULE_IDS in loader.ts for valid keys)`);
         continue;
       }
       const b = asSeverity(value, `rules.${key}`);

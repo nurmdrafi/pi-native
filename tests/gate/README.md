@@ -2,7 +2,7 @@
 
 Everything for the gate lives under `tests/gate/`: cases, harness, fixtures, and the eval
 driver. The extension itself keeps only the composition root plus config
-(`index.ts`, `config.ts`, `config.json`); rule modules live in
+(`index.ts`, `loader.ts`, `config.json`); rule modules live in
 `extensions/permission-gate/rules/`.
 
 ```
@@ -48,7 +48,7 @@ greppable in one shot. Section files inside a single rule's directory are kebab-
 ## Adding a rule
 
 1. Add the module under `extensions/permission-gate/rules/`.
-2. Register the key in `config.ts` (`RULE_IDS`, and `WARN_BY_DEFAULT`/`HARD_RULES` as fits).
+2. Register the key in `loader.ts` (`RULE_IDS`, and `HARD_RULES` as fits) and set the shipped severity in `config.json`.
 3. Add the row to the catalog in `extensions/README.md` — a test fails otherwise.
 4. Add `cases/rules/<ruleKey>.mjs`.
 

@@ -48,7 +48,7 @@ Single `tool_call` interceptor; one handler, deterministic order (edit → read 
 ### Configuring rules
 
 Every rule is switchable from [`config.json`](permission-gate/config.json) — no source edit needed. Keys are
-descriptive (`rerunGuard`), not the terse source ID (`R10`); `config.ts` → `RULE_IDS` maps the two and is the
+descriptive (`rerunGuard`), not the terse source ID (`R10`); `loader.ts` → `RULE_IDS` maps the two and is the
 single place they meet. Scalar knobs (`outputCap`, `confirm`) live beside the switches.
 
 ```json
@@ -111,6 +111,9 @@ any config that removes it.
 | (removed)        | read/search       | node_modules fully allowed (2026-10-18) — read/grep/inspect freely; SS1 scope rule still applies                                                                                                                                                                                                                                                                    |
 | CN              | all tools         | cadence nudge, non-blocking: appended to a tool_result at ~200 user turns / ~150K context tokens; resets on compaction                                                                                                                                                                                                                                                                                              |
 | LG1             | edit/write/bash   | loop guard (non-blocking note + one-shot block): note rides the tool_result at the 4th landed same-path edit/write in a user turn; the 7th arms a one-shot block of that path's next mutation ("summarize, then ask the user"); 3 consecutive tool errors note once; counters reset per user turn and on compaction. Calibrated on 2026-10-19..26 session evidence: worst churn was task.md ×9 / index.ts ×8 in single turns, while error streaks never exceeded 3 |
+| SE1 (`errorSwallow`) | bash | warn tier, non-blocking: an error-swallow tail (`\|\| true`) rides the tool_result as a note — a swallowed failure hides the real error from the loop; the edit pipeline and exit codes stay authoritative |
+| SE2 (`readerBypass`) | bash | warn tier, non-blocking: `sed -n` / `cat` used as a file reader rides a note pointing at the native read pipeline (windowed reads, spill handling, compaction markers); reconciled with VC (2026-10-29) — the printed lines still certify, the note teaches the preference |
+| VC (`bashViewCredit`) | bash | warn tier (severity inert — any non-`off` value enables): the printed, H1-visible lines of a mappable single-file view command (`head`/`tail`/`sed -n N,Mp`/`cat`: one segment, one file operand, numeric ranges, no pipes/redirects/other flags) certify read spans in the coverage model; `tail -n K` maps through the current file line count (≤ hash cap); error results credit nothing (2026-10-29, Claude Code parity) |
 
 State (per extension instance): `coverage` (path → merged span union + last kind + stat snapshot), `pendingEdits`, `pendingReads` drive R1; `pendingBash`/`lastBashRun` plus a `mutationSeq` counter (edit/write/mutating bash) drive R10. A failed edit drops coverage; `session_compact` clears everything; `session_start` hydrates coverage by replaying the prior branch's read/write entries (entry-timestamp freshness: a file changed after the replayed read certifies nothing). Fuzzy matching mirrors edit-diff.js `normalizeForFuzzyMatch` so the guard and the tool agree on what "matches"; a call with any fuzzy anchor drops the path's coverage instead of certifying line math that skipped it. Anchor validation runs before coverage registration, so a blocked edit never enters the map.
 
@@ -123,7 +126,7 @@ State (per extension instance): `coverage` (path → merged span union + last ki
 ## Verifying changes
 
 - Strict typecheck against the installed package's types (`npx tsc --noEmit --strict` with a `paths` mapping to the global `@earendil-works/pi-coding-agent/dist/index.d.ts` — the global path is machine-specific).
-- `permission-gate` fixture test: `node tests/gate/runner.test.mjs` — 166 black-box cases through a stubbed ExtensionAPI (exit 0 = pass; preflight symlinks the global package into the gitignored root `node_modules`).
+- `permission-gate` fixture test: `node tests/gate/runner.test.mjs` — 319 black-box cases through a stubbed ExtensionAPI (exit 0 = pass; preflight symlinks the global package into the gitignored root `node_modules`).
 - `node tests/tools/audit/block-recovery.mjs` — re-measures what the model does after blocks (families, message sizes, one-shot recovery) over logged sessions; exits 1 below 85% recovery on a ≥10-block sample. Run after every permission-gate change.
 - `npm run doc:check` must exit 0 (validates every command/path this README declares).
 - Restart pi to load changes; watch the first few tool calls — a misfiring rule shows up immediately as a block.

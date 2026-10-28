@@ -11,7 +11,7 @@
  * argument. `mutationSeq` is the shared clock: R10, EB and R11 all ask whether
  * something landed, so one counter answers all three and they cannot disagree.
  */
-import { ruleEnabled } from "../config.ts";
+import { ruleEnabled } from "../loader.ts";
 import { type ActionKind, type Phase, nextPhase } from "./phase.ts";
 
 /** LG1: note at the 4th landed same-path mutation, arm the one-shot block at the 7th. */

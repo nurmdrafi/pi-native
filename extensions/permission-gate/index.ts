@@ -6,8 +6,8 @@
  * CURRENT rules (IDs are stable; family = block-reason prefix):
  * | ID  | Family / mechanism            | Enforces |
  * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
- * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
+ * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27); Stale bind (stat or hash drift since the certified read) with every anchor exact in the CURRENT file passes with a Stale-relaxed note (M2 skipped, coverage dropped; miss/fuzzy/duplicate reverts to the Stale warn) (2026-10-29) |
+ * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation; single-file view commands in bash results credit their printed H1-visible lines (VC, 2026-10-29) |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; the block lists those hit lines and the piread call that covers them |
  * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
@@ -25,14 +25,14 @@
  * | R11 | Loop Guard (Failure loop)     | >=5 consecutive tool failures with no landed mutation since the streak began: the next shell call is blocked (a red-green cycle edits between runs, so it never arms) |
  * | PH1 | Phase label (Advisory)        | labels the turn's stage and notes once per turn when a verify-family command fails right after an edit; never blocks, and never displaces H1's cap |
  * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
- * | CN  | cadence nudge (non-blocking)  | tool_result note at ~200 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
+ * | CN  | cadence nudge (non-blocking)  | tool_result note at ~120 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
  * | LG1 | loop guard                      | same-target churn: note at 4th landed same-path edit/write in a user turn, one-shot block of that path's next mutation at the 7th; 3 consecutive tool errors note once; resets per user turn + compaction |
  *
  * Destructive matching is a TRIPWIRE, not a boundary — see destructive.ts.
  * Change history lives in git log; this table lists what is CURRENTLY enforced.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { config, ruleBlocks, ruleEnabled, ruleSeverity } from "./config.ts";
+import { config, ruleBlocks, ruleEnabled, ruleSeverity } from "./loader.ts";
 
 /** Bash-kind predicate: `bash` plus the native `pibash` tool (2026-10-18
  * pibash adoption). Both share the bash schema and both must run the full
@@ -61,7 +61,7 @@ import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
 
 import { toLF, validateEditAnchors } from "./rules/anchor-guard.ts";
-import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed } from "./rules/bash-cap.ts";
+import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed, visibleLineCount } from "./rules/bash-cap.ts";
 import { scrubBashText } from "./rules/output-scrub.ts";
 import {
   APPROVED_WINDOW_MS,
@@ -75,6 +75,7 @@ import {
 import { validateCommitMessages } from "./rules/commitlint.ts";
 import {
   certify,
+  countFileLines,
   countTextLines,
   coversAll,
   HASH_CAP_BYTES,
@@ -87,11 +88,13 @@ import {
   recordGaps,
   shiftSpansForEdit,
   snapshot,
+  viewCommandOf,
 } from "./rules/read-coverage.ts";
 import type {
   CompactionOmission,
   CoverageEntry,
   LineSpan,
+  ViewCommand,
 } from "./rules/read-coverage.ts";
 import { toolchainCheck } from "./rules/toolchain.ts";
 import { isVerifyCommand } from "./rules/phase.ts";
@@ -112,6 +115,8 @@ import {
   hitWindowHint,
   isSearchSegment,
   searchCheck,
+  swallowCheck,
+  readerBypassCheck,
   searchHitsFrom,
   searchedPathsFrom,
 } from "./rules/search-guard.ts";
@@ -145,12 +150,15 @@ const LOCATE_MIN_WIN = 100;
  * while piread existed). */
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"];
 /** cadence nudge thresholds, counted like AGENTS.md Token Economy does:
- * user turns (~200) or estimated context tokens (~150K) before proposing a
+ * user turns (~120) or estimated context tokens (~150K) before proposing a
  * compaction/fresh-session hop (2026-10-10: 354/303-turn marathons re-billed
- * ~100M cacheRead each with zero compactions). The nudge is NON-blocking
- * (2026-10-11): appended to the next tool_result — the blocking variant cost
- * a re-issue turn and the model could not act on it mid-call anyway. */
-const CADENCE_TURNS = 200;
+ * ~100M cacheRead each with zero compactions; 2026-10-29 pidx audit: the
+ * 281/177-turn permission-gate sessions paid 85–94% of spend in cacheRead —
+ * rounds × prefix turns quadratic, and it is sunk well before 200). The
+ * nudge is NON-blocking (2026-10-11): appended to the next tool_result —
+ * the blocking variant cost a re-issue turn and the model could not act on
+ * it mid-call anyway. */
+const CADENCE_TURNS = 120;
 const CADENCE_CTX_TOKENS = 150_000;
 
 /** R10: re-running an unchanged base command inside this window re-sends output already in context */
@@ -219,6 +227,9 @@ export default function (pi: ExtensionAPI) {
   // results. One lastBlockedBash slot: only the immediately preceding blocked
   // bash call can be "re-sent verbatim".
   const pendingBashFull = new Map<string, string>();
+  /** View-command credit (bashViewCredit): bash toolCallId -> parsed
+   * single-file view (head/tail/sed -n/cat), awaiting its tool_result */
+  const pendingViews = new Map<string, ViewCommand>();
 
   /** Turn state for the temporal rules (R10/EB/LG1/R11/PH1/CN) — one value,
    * threaded into rules/turn-state.ts, which documents each field. LG1's
@@ -281,15 +292,27 @@ export default function (pi: ExtensionAPI) {
     reason,
   });
   /** `warn` severity: proceed without blocking. */
-  const warnCall = (_reason: string): undefined => undefined;
+  /** `warn` severity: proceed without blocking; the reason rides the tool
+   * result as a note (pendingWarns) so warn rules teach instead of
+   * silently passing (fixes the taught-but-discarded desync, 2026-10-28). */
+  const pendingWarns = new Map<string, string[]>();
+  const warnCall = (reason: string, id?: string): undefined => {
+    if (id) {
+      const a = pendingWarns.get(id) ?? [];
+      a.push(reason);
+      pendingWarns.set(id, a);
+    }
+    return undefined;
+  };
   /**
    * Apply a rule decision at its configured severity: `error` blocks, `warn`
-   * returns undefined (call proceeds).
+   * records the reason against the call id (when given) and proceeds.
    */
   const enforce = (
     key: Parameters<typeof ruleSeverity>[0],
     reason: string,
-  ): { block: true; reason: string } | undefined => (ruleBlocks(key) ? blockCall(reason) : warnCall(reason));
+    id?: string,
+  ): { block: true; reason: string } | undefined => (ruleBlocks(key) ? blockCall(reason) : warnCall(reason, id));
   // S4 fix 1 (2026-10-15, spec §5.2): fail-closed handler wrap — an unexpected
   // exception in ANY handler must never fail open. tool_call → generic internal
   // block (the call never runs; a rejected handler otherwise lets the tool
@@ -500,11 +523,22 @@ export default function (pi: ExtensionAPI) {
         const decision = enforce(
           checked.rule ?? "editAnchorGuard",
           checked.reason + agMissHint(path),
+          event.toolCallId,
         );
         if (decision) return decision;
       }
       // a relaxed (warn) AG2 block carries no certified spans to register
       const validated = checked && !("block" in checked) ? checked : undefined;
+      // Relaxation A (2026-10-29): a Stale bind whose every anchor matched
+      // the CURRENT file exactly passes with a note instead of the Stale
+      // warn — the exact match is the binding evidence, the note carries
+      // the drift risk. The old coverage still drops (its other spans
+      // describe disproven bytes); the edit's own spans re-certify fresh
+      // at tool_result.
+      if (validated?.staleNote) {
+        warnCall(validated.staleNote, event.toolCallId);
+        coverage.delete(path);
+      }
       pendingEdits.set(event.toolCallId, {
         path,
         spans: validated?.spans,
@@ -843,9 +877,23 @@ export default function (pi: ExtensionAPI) {
             : sc.startsWith("Search (fd-first)")
               ? "findFirst"
               : "searchPortability";
-        const r = enforce(key, sc);
+        const r = enforce(key, sc, event.toolCallId);
         if (r) return r;
       }
+    }
+
+    // SE1 (2026-10-28): `|| true` swallows failure exit codes — command-level
+    // check (splitSegments splits on `||`, so no segment carries the shape).
+    // Warn by default; the reason rides the tool result as a note.
+    const sw = swallowCheck(cmd);
+    if (sw) {
+      const r = enforce("errorSwallow", sw, event.toolCallId);
+      if (r) return r;
+    }
+    const rb = readerBypassCheck(cmd);
+    if (rb) {
+      const r = enforce("readerBypass", rb, event.toolCallId);
+      if (r) return r;
     }
 
     // H2 (2026-10-08): destructive/mutating commands need explicit user
@@ -911,6 +959,14 @@ export default function (pi: ExtensionAPI) {
       if (r) return r;
     }
     pendingBash.set(event.toolCallId, base);
+    // View-command credit (2026-10-29): parse the call, credit at result —
+    // a single-file view whose output maps 1:1 onto file lines. Regular
+    // files only (a directory operand errors and prints nothing creditable).
+    if (ruleEnabled("bashViewCredit")) {
+      const view = viewCommandOf(cmd, ctx?.cwd, normPath, existsSync);
+      if (view && statSync(view.path, { throwIfNoEntry: false })?.isFile())
+        pendingViews.set(event.toolCallId, view);
+    }
     // R1c: remember which paths this command targeted, so a later wide read of
     // one counts as a located lookup rather than a guess.
     if (ruleEnabled("locateFirst")) {
@@ -973,6 +1029,42 @@ export default function (pi: ExtensionAPI) {
       if (!cur) searchHits.set(p, lines);
       else for (const l of lines) cur.add(l);
     }
+  });
+
+  // View-command span credit (2026-10-29): the printed lines of a
+  // single-file view (head/tail/sed -n N,Mp/cat) enter context like a read
+  // window — certify them so a later edit anchored on them skips the forced
+  // re-read (Claude Code parity). SE2 still prefers piread (structured
+  // windows, no cap); the warn teaches the preference, this credits what
+  // was actually seen. Registered before the H1 cap like the searchHits
+  // handler; clamped to the H1-visible line budget so capped-off lines
+  // never certify. Stat-only, like plain reads (spec §7 R2).
+  on("tool_result", async (event) => {
+    const view = pendingViews.get(event.toolCallId);
+    if (!view) return;
+    pendingViews.delete(event.toolCallId);
+    if (event.isError) return;
+    let text = (event.content ?? [])
+      .map((b) => (b as { text?: unknown }).text)
+      .filter((t): t is string => typeof t === "string")
+      .join("\n");
+    if (text.endsWith("\n")) text = text.slice(0, -1);
+    const visible = visibleLineCount(text);
+    if (visible <= 0) return;
+    let start = view.from;
+    if (view.last !== undefined) {
+      // tail -n K: the printed lines are the file's LAST K — map through
+      // the current line count (over-cap files skip the credit: mapping a
+      // tail through a multi-MB read costs more than the re-read it saves)
+      const total = await countFileLines(view.path);
+      if (!total || total <= 0) return;
+      start = Math.max(1, total - view.last + 1);
+    }
+    const end = Math.min(start + visible - 1, view.to);
+    if (end < start) return;
+    const snap = await snapshot(view.path);
+    if (!snap) return;
+    certify(coverage, view.path, { start, end }, "read", snap);
   });
 
   // H1 cap handler (2026-10-08) — registered BEFORE the bookkeeping handler
@@ -1212,9 +1304,13 @@ export default function (pi: ExtensionAPI) {
       // H1 owns oversized results: returning content here would replace the cap
       // (later handlers win the composition), so the note is skipped when the
       // output is already at H1's 40-line / 2 KB budget.
-      if (phNote && !oversizedBashResult(event))
+      const warnList = pendingWarns.get(event.toolCallId) ?? [];
+      pendingWarns.delete(event.toolCallId);
+      const warnNote = warnList.join(" ");
+      const notes = [phNote, warnNote].filter(Boolean).join(" ");
+      if (notes && !oversizedBashResult(event))
         return {
-          content: [...(event.content ?? []), { type: "text", text: phNote }],
+          content: [...(event.content ?? []), { type: "text", text: notes }],
         };
       return;
     }
@@ -1273,11 +1369,24 @@ export default function (pi: ExtensionAPI) {
             gaps: undefined,
           });
         }
-        // search-printed line numbers are pre-edit coordinates: after a shift
-        // they would certify whatever now sits at those numbers (2026-10-27).
-        // Drop them — the edit certifies its own post-edit spans, and R1c keeps
-        // passing through coverage.
-        searchHits.delete(entry.path);
+        // search-printed line numbers are pre-edit coordinates — shift them
+        // by the edit's exact delta instead of dropping (2026-10-28: the
+        // drop decertified lines the diff proves moved; the session watched
+        // ~5 needless Unread blocks from it). Fuzzy/drifted edits deleted
+        // coverage above and never reach here with spans.
+        const hits = searchHits.get(entry.path);
+        if (hits && hits.size > 0 && entry.firstEditedLine !== undefined) {
+          const shiftedHits = shiftSpansForEdit(
+            [...hits].map((n) => ({ start: n, end: n })),
+            entry.firstEditedLine,
+            entry.delta ?? 0,
+            entry.regions,
+          );
+          searchHits.set(
+            entry.path,
+            new Set(shiftedHits.map((s) => s.start)),
+          );
+        }
         for (const s of entry.spans)
           certify(coverage, entry.path, s, entry.kind, snap);
       }
@@ -1287,11 +1396,17 @@ export default function (pi: ExtensionAPI) {
       const cur = coverage.get(entry.path);
       if (cur) cur.hash = await hashFile(entry.path);
     }
-    if (lg1Note)
+    // edit-path warn notes (AG family at warn since 2026-10-28): flush
+    // pendingWarns exactly like the bash branch — a warn whose reason never
+    // reaches the model is a silent pass, not a teaching layer.
+    const warnNote = (pendingWarns.get(event.toolCallId) ?? []).join(" ");
+    pendingWarns.delete(event.toolCallId);
+    const notes = [lg1Note, warnNote].filter(Boolean).join(" ");
+    if (notes)
       return {
         content: [
           ...(event.content ?? []),
-          { type: "text", text: lg1Note },
+          { type: "text", text: notes },
         ],
       };
   });
@@ -1313,7 +1428,7 @@ export default function (pi: ExtensionAPI) {
         ...(event.content ?? []),
         {
           type: "text",
-          text: `Cadence: ~${CADENCE_TURNS} turns / high context this session — the prefix now dominates cost. Propose compaction or a fresh session (AGENTS.md Token Economy: past ~150K context or ~200 turns).`,
+          text: `Cadence: ~${CADENCE_TURNS} turns / high context this session — the prefix now dominates cost. Propose compaction or a fresh session (AGENTS.md Token Economy: past ~150K context or ~${CADENCE_TURNS} turns).`,
         },
       ],
     };

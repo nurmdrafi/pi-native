@@ -26,14 +26,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const GATE_DIR = join(ROOT, "extensions", "permission-gate");
 const CONFIG_JSON = join(GATE_DIR, "config.json");
-const PANEL = join(GATE_DIR, "config.ts");
+const LOADER = join(GATE_DIR, "loader.ts");
 const DESTRUCTIVE_TS = join(GATE_DIR, "rules", "destructive.ts");
 
 /** Read RULE_IDS keys without importing the TS module (no jiti dependency). */
 function ruleKeysFromSource() {
-  const src = readFileSync(PANEL, "utf8");
+  const src = readFileSync(LOADER, "utf8");
   const block = src.match(/export const RULE_IDS = \{([\s\S]*?)\} as const;/);
-  assert.ok(block, "RULE_IDS block not found in config.ts");
+  assert.ok(block, "RULE_IDS block not found in loader.ts");
   const keys = [...block[1].matchAll(/^\s*(\w+):\s*"([^"]+)",/gm)].map((m) => ({ key: m[1], id: m[2] }));
   assert.ok(keys.length > 0, "no rule keys parsed from RULE_IDS");
   return keys;
@@ -51,7 +51,7 @@ function loadConfig(env = {}, rules) {
     settingsEnv = { PGATE_CONFIG: file };
   }
   const script = `
-    import { config, RULE_IDS } from ${JSON.stringify(PANEL)};
+    import { config, RULE_IDS } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({ config, ids: RULE_IDS }));
   `;
   const res = spawnSync("node", ["--experimental-strip-types", "--input-type=module", "-e", script], {
@@ -66,14 +66,13 @@ function loadConfig(env = {}, rules) {
 
 const KEYS = ruleKeysFromSource();
 
-/** Parse a `new Set([ "key", ... ])` rule-set literal out of config.ts —
- * same no-import trick as ruleKeysFromSource, so tests track the source sets
- * (HARD_RULES / WARN_BY_DEFAULT / OFF_BY_DEFAULT) without jiti. Empty sets
- * are valid (OFF_BY_DEFAULT is empty since the 2026-10-26 R1x revival). */
+/** Parse a `new Set([ "key", ... ])` rule-set literal out of loader.ts —
+ * same no-import trick as ruleKeysFromSource, so tests track the hard-rule
+ * floor without jiti. */
 function ruleSetFromSource(name) {
-  const src = readFileSync(PANEL, "utf8");
+  const src = readFileSync(LOADER, "utf8");
   const block = src.match(new RegExp(`export const ${name}[^=]*= new Set\\(\\[([\\s\\S]*?)\\] as RuleKey\\[\\]\\)`));
-  assert.ok(block, `${name} set not found in config.ts`);
+  assert.ok(block, `${name} set not found in loader.ts`);
   return [...block[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
 }
 
@@ -99,7 +98,7 @@ function loadConfigBody(body, env = {}) {
   const file = join(dir, "config.json");
   writeFileSync(file, body);
   const script = `
-    import { config, RULE_IDS } from ${JSON.stringify(PANEL)};
+    import { config, RULE_IDS } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({ config, ids: RULE_IDS }));
   `;
   return runLoader(script, { PGATE_CONFIG: file, ...env });
@@ -123,20 +122,16 @@ test("rule IDs are unique", () => {
   assert.equal(new Set(ids).size, ids.length, `duplicate rule IDs: ${ids.join(", ")}`);
 });
 
-test("defaults are fail-closed: every rule on", () => {
+test("tracked config.json loads every rule at warn or error", () => {
   const { config } = loadConfig();
-  // Fail closed = every rule runs at least as `warn`. Only explicit config
-  // lowers one to `off`.
-  const inert = ruleSetFromSource("OFF_BY_DEFAULT");
-  const off = Object.entries(config.severity).filter(([, v]) => v === "off").map(([k]) => k);
-  assert.deepEqual(off, inert, `only OFF_BY_DEFAULT rules may ship off; off: ${off.join(", ")}`);
+  const bad = Object.entries(config.severity).filter(([, v]) => v !== "warn" && v !== "error");
+  assert.deepEqual(bad, [], `rules not loaded from config.json: ${bad.map(([k]) => k).join(", ")}`);
 });
 
 test("env override disables exactly one rule", () => {
   const { config } = loadConfig({ PGATE_RERUN_GUARD: "0" });
   assert.equal(config.severity.rerunGuard, "off", "PGATE_RERUN_GUARD=0 should disable rerunGuard");
-  const inert = new Set(ruleSetFromSource("OFF_BY_DEFAULT"));
-  const others = Object.entries(config.severity).filter(([k, v]) => k !== "rerunGuard" && v === "off" && !inert.has(k));
+  const others = Object.entries(config.severity).filter(([k, v]) => k !== "rerunGuard" && v === "off");
   assert.deepEqual(others, [], "env override must not affect other rules");
 });
 
@@ -169,7 +164,7 @@ test("severity strings parse like ESLint (off/warn/error)", () => {
     for (const value of rows) {
       const fs = await import("node:fs");
       fs.writeFileSync(cfgPath, JSON.stringify({ rules: { rerunGuard: value } }));
-      const mod = await import(${JSON.stringify(PANEL)} + "?v=" + encodeURIComponent(String(value)));
+      const mod = await import(${JSON.stringify(LOADER)} + "?v=" + encodeURIComponent(String(value)));
       out[JSON.stringify(value)] = mod.config.severity.rerunGuard;
     }
     process.stdout.write(JSON.stringify(out));
@@ -201,7 +196,7 @@ test("an invalid severity keeps the rule at its default and warns", () => {
   const file = join(dir, "config.json");
   writeFileSync(file, JSON.stringify({ rules: { rerunGuard: "loud" } }));
   const script = `
-    import { config } from ${JSON.stringify(PANEL)};
+    import { config } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({ sev: config.severity.rerunGuard }));
   `;
   const res = spawnSync("node", ["--experimental-strip-types", "--input-type=module", "-e", script], {
@@ -211,8 +206,8 @@ test("an invalid severity keeps the rule at its default and warns", () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   assert.equal(res.status, 0, `child failed: ${res.stderr}`);
-  // rerunGuard is a preference rule, so its DEFAULT is `warn`, not `error`.
-  assert.equal(JSON.parse(res.stdout).sev, "warn", "fallback is the rule's default severity");
+  // Fail closed: garbage escalates to `error`, never silently weakens a rule.
+  assert.equal(JSON.parse(res.stdout).sev, "error", "fallback for an invalid severity is error");
   assert.match(res.stderr, /severity/i, "a bad value must be reported, not silently ignored");
 });
 
@@ -226,31 +221,31 @@ test("PGATE_<RULE> env var accepts a severity too", () => {
 test("missing config file: every rule at its default, warning on stderr", () => {
   const dir = mkdtempSync(join(tmpdir(), "pgate-cfg-"));
   const script = `
-    import { config } from ${JSON.stringify(PANEL)};
+    import { config } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({ sev: config.severity.rerunGuard }));
   `;
   const res = runLoader(script, { PGATE_CONFIG: join(dir, "absent.json") });
-  assert.equal(res.sev, "warn", "a missing redirected config must fall back to built-in defaults");
+  assert.equal(res.sev, "error", "a missing redirected config must fail closed to error");
   assert.match(res.stderr, /no config\.json/, "a missing redirected config must be reported");
 });
 
 test("malformed JSON config: every rule at its default, warning on stderr", () => {
   const res = loadConfigBody('{ "rules": { "rerunGuard": "of');
-  assert.equal(res.config.severity.rerunGuard, "warn", "parse failure must fall back to built-in defaults");
+  assert.equal(res.config.severity.rerunGuard, "error", "parse failure must fail closed to error");
   assert.match(res.stderr, /not valid JSON/);
 });
 
 test("non-object config (array, scalar, string): rejected with a warning", () => {
   for (const body of ["[1,2,3]", "42", '"nope"']) {
     const res = loadConfigBody(body);
-    assert.equal(res.config.severity.rerunGuard, "warn", `body ${body} must not configure anything`);
+    assert.equal(res.config.severity.rerunGuard, "error", `body ${body} must not configure anything`);
     assert.match(res.stderr, /must be a JSON object/);
   }
 });
 
 test("`rules` section that is not an object is ignored with a warning", () => {
   const res = loadConfigBody(JSON.stringify({ rules: 42 }));
-  assert.equal(res.config.severity.rerunGuard, "warn");
+  assert.equal(res.config.severity.rerunGuard, "error");
   assert.match(res.stderr, /`rules` must be an object/);
 });
 
@@ -263,13 +258,10 @@ test("env var beats config.json — the documented precedence, both directions",
   assert.equal(up.config.severity.rerunGuard, "error", "PGATE_RERUN_GUARD=2 must beat rules.rerunGuard: off");
 });
 
-test("built-in defaults: OFF_BY_DEFAULT off, WARN_BY_DEFAULT warn, rest error", () => {
-  const { config, stderr } = loadConfigBody("{}"); // nothing configured: pure built-ins
-  const off = ruleSetFromSource("OFF_BY_DEFAULT");
-  const warn = ruleSetFromSource("WARN_BY_DEFAULT");
+test("a rule the config omits loads as error (fail-closed default)", () => {
+  const { config, stderr } = loadConfigBody("{}"); // nothing configured
   for (const { key } of KEYS) {
-    const want = off.includes(key) ? "off" : warn.includes(key) ? "warn" : "error";
-    assert.equal(config.severity[key], want, `built-in default for ${key}`);
+    assert.equal(config.severity[key], "error", `omitted rule ${key} must fail closed to error`);
   }
   // Absent optional sections (outputCap/confirm) are not problems: nothing
   // may be "ignored" when the file simply does not mention them.
@@ -307,10 +299,10 @@ test("outputCap/confirm: valid overrides apply, garbage keeps documented default
 
 test("ruleEnabled/ruleBlocks expose the warn-vs-error distinction", () => {
   const script = `
-    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(PANEL)};
+    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({
       warn: [ruleEnabled("rerunGuard"), ruleBlocks("rerunGuard")],
-      error: [ruleEnabled("editAnchorGuard"), ruleBlocks("editAnchorGuard")],
+      error: [ruleEnabled("destructiveConfirm"), ruleBlocks("destructiveConfirm")],
     }));
   `;
   const res = runLoader(script);
@@ -318,7 +310,7 @@ test("ruleEnabled/ruleBlocks expose the warn-vs-error distinction", () => {
   assert.deepEqual(res.error, [true, true], "error: runs and blocks");
   // off row moved to env: reReadConsume no longer ships off (2026-10-26)
   const off = runLoader(`
-    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(PANEL)};
+    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({
       off: [ruleEnabled("reReadConsume"), ruleBlocks("reReadConsume")],
     }));
@@ -328,7 +320,7 @@ test("ruleEnabled/ruleBlocks expose the warn-vs-error distinction", () => {
 
 test("reReadConsume ships warn: enabled, non-blocking (R1x note tier)", () => {
   const script = `
-    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(PANEL)};
+    import { ruleEnabled, ruleBlocks } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({
       d: [ruleEnabled("reReadConsume"), ruleBlocks("reReadConsume")],
     }));
@@ -391,8 +383,10 @@ test("R1x error tier: PGATE_RE_READ_CONSUME=2 blocks a >=50% overlap re-read at 
 });
 
 test("safety rules cannot be configured away", () => {
-  const { config } = loadConfig({}, { rules: { editAnchorGuard: "off", destructiveConfirm: "off" } });
-  assert.equal(config.severity.editAnchorGuard, "error", "anchor guard must not be disableable by config");
+  // editAnchorGuard left HARD_RULES 2026-10-28: the edit pipeline enforces
+  // oldText correctness, so AG is config-controlled teaching, not a clamp.
+  const { config } = loadConfig({}, { editAnchorGuard: "off", destructiveConfirm: "off" });
+  assert.equal(config.severity.editAnchorGuard, "off", "anchor guard is config-controlled (demoted from hard)");
   assert.equal(config.severity.destructiveConfirm, "error", "destructive confirm must not be disableable");
 });
 
