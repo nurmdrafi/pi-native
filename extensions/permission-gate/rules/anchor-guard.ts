@@ -83,6 +83,54 @@ function findClosestFragment(
  * or the call's post-application edited line spans (exact-match anchors only)
  * if ok.
  */
+
+/**
+ * P3 (2026-11-01): a block that says "not found" leaves the model with one
+ * cheap-looking move — read the file again — and that round re-bills the whole
+ * prefix. The guard already holds the content, so it can hand back the region
+ * the anchor meant: the real bytes to paste as `oldText`, plus the exact
+ * `piread` call for when more context is needed. Bounded on purpose (15 lines,
+ * ~1.5 KB): a remedy is a pointer, not a file dump.
+ */
+const REMEDY_MAX_LINES = 15;
+const REMEDY_MAX_CHARS = 1_500;
+
+function remedyWindow(
+  content: string,
+  oldText: string,
+  filePath: string,
+): string | undefined {
+  const anchorLines = oldText.split("\n");
+  // Probe the most distinctive lines of the intended anchor, longest first: a
+  // short generic line (`}`, `  return;`) matches everywhere and would point at
+  // the wrong region.
+  const probes = anchorLines
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 8)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 5);
+  const lines = content.split("\n");
+  for (const probe of probes) {
+    const at = content.indexOf(probe);
+    if (at === -1) continue;
+    const line = lineOf(content, at);
+    const start = Math.max(1, line - 1);
+    const end = Math.min(
+      lines.length,
+      start - 1 + Math.max(anchorLines.length + 2, REMEDY_MAX_LINES),
+    );
+    const window = lines.slice(start - 1, end);
+    let text = window.join("\n");
+    if (text.length > REMEDY_MAX_CHARS)
+      text = `${text.slice(0, REMEDY_MAX_CHARS)}\n…`;
+    return (
+      `Closest region, paste as oldText — piread {path: '${filePath}', offset: ${start}, limit: ${window.length}} only if you need more:\n` +
+      `<<<\n${text}\n>>>`
+    );
+  }
+  return undefined;
+}
+
 export async function validateEditAnchors(
   input: {
     path?: unknown;
@@ -207,9 +255,17 @@ export async function validateEditAnchors(
       const near = frag
         ? `Its ${edge} ${frag.lines} line(s) occur at line ${lineOf(fuzzyContent, frag.index)}; the inferred lines around them are wrong:\n${snippetAround(content, lineOf(fuzzyContent, frag.index), frag.lines)}\nUse these exact lines (incl. whitespace) as oldText.`
         : `No part exists — rebuild oldText from the window already in context; use the piread tool (path/offset/limit) only for a region not yet in context.`;
+      const fragLine = frag ? lineOf(fuzzyContent, frag.index) : undefined;
+      const remedy = remedyWindow(content, oldText, String(input.path));
+      const hint = frag
+        ? `\nRead it with piread {path: '${String(input.path)}', offset: ${Math.max(1, fragLine! - 1)}, limit: ${Math.min(15, frag.lines + 2)}} when you need the whole unit.`
+        : remedy
+          ? ` ${remedy}`
+          : "";
       return {
         block: true,
-        reason: `Anchor Guard: edits[${i}].oldText not found in ${String(input.path)} (exact+fuzzy). ${near}`,
+        reason:
+          `Anchor Guard: edits[${i}].oldText not found in ${String(input.path)} (exact+fuzzy). ${near}${hint}`,
       };
     }
 
