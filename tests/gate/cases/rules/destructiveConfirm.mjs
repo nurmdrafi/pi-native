@@ -107,6 +107,26 @@ export const cases = [
     async (pi) =>
       bash(pi, 'git commit -m "fix: cap git log output" 2>&1 | tail -20'),
   ],
+  [
+    "H2: pipe-to-shell does not fire on hyphenated tokens (quoted rg pattern)",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        'rg -o "AnchorGuard: [a-zA-Z- ]+|Bash-cap: [a-zA-Z- ]+|Token Economy \\([A-Za-z0-9+ ]+\\)" . 2>/dev/null | sort | uniq -c | sort -rn | head -14',
+        { hasUI: false, mode: "print" },
+      ),
+  ],
+  [
+    "H2: fd -x rg with quoted alternation passes",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        'fd --changed-within 24h -t f . -x rg -o "Bash-cap: [a-z- ]+|permission-gate" {} 2>/dev/null | head -15',
+        { hasUI: false, mode: "print" },
+      ),
+  ],
   // ---- 1a (2026-10-26) — destructive command table characterization ----
   // One case walks every entry family of the managed confirm set
   // (destructive.ts entry table): each family must confirm, each negative
@@ -144,6 +164,7 @@ export const cases = [
         "ls -la",
         "rg -n foo src/",
         "npm test",
+        'rg -o "x|Bash-cap: [a-z- ]+" . 2>/dev/null | sort | uniq -c | head',
       ];
       for (const cmd of families) {
         const r = await bash(pi, cmd, denyUi());

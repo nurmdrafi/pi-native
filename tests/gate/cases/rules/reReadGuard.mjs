@@ -6,7 +6,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { textBlocks, lineText, read, piread, edit, write, tmp, fileA, relA, skillFile, fileC, fileD, fileE, hydrate, spanFile, nextId } from "../../harness/helpers.mjs";
+import { textBlocks, lineText, read, piread, edit, runEdit, noteOf, write, tmp, fileA, relA, skillFile, fileC, fileD, fileE, hydrate, spanFile, nextId } from "../../harness/helpers.mjs";
 
 export const cases = [
   // ---- B3/H9 (2026-10-08): true post-edit spans via position-sorted overlay math ----
@@ -218,11 +218,13 @@ export const cases = [
     "pass",
     async (pi) => {
       const f = join(tmp, "drift.ts");
-      // S5 M1: drift before the edit call now blocks at tool_call (family 1);
-      // the blocked edit never certifies — and the stale span must not block the re-read
-      const e = await edit(pi, f, [{ oldText: "a", newText: "z" }]);
-      if (!e.blocked || !e.reason.startsWith("Anchor Guard (Stale):"))
-        return { blocked: false, reason: `family: ${e.reason ?? "(pass)"}` };
+      // S5 M1 relax (exact anchor): the drift appends a line, so "a" still
+      // matches the current file exactly — the edit passes with a
+      // Stale-relaxed note, and the stale span must not block the re-read
+      const e = await runEdit(pi, f, [{ oldText: "a", newText: "z" }]);
+      const note = noteOf(e);
+      if (e.blocked || !note.includes("Anchor Guard (Stale-relaxed):"))
+        return { blocked: true, reason: `family: ${note || "(none)"}` };
       return read(pi, f, { offset: 3, limit: 1 }, { outputLines: 1 });
     },
   ],

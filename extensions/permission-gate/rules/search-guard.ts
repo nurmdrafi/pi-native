@@ -12,6 +12,7 @@
  * | SS1 | recursive grep with no path/glob scope           | scope path/--include or rg |
  * | SS2 | bare grep/egrep/fgrep head or mid-pipe (rg-first policy) | rg PATTERN path/           |
  * | SS3 | bare find head (fd-first policy)                    | fd PATTERN path/           |
+ * | SE1 | `|| true` / `|| :` swallows the failure exit code (warn) | drop it / handle explicitly |
  *
  * `ls node_modules/<pkg>` stays allowed (presence checks are legitimate);
  * rg is gitignore-aware and fast, so unscoped rg passes by design.
@@ -105,6 +106,28 @@ export interface SearchRules {
   midPipe?: boolean;
   /** SS3: find head — prefer fd */
   findFirst?: boolean;
+}
+
+/** SE1 (2026-10-28): `|| true` / `|| :` swallows the failure exit code.
+ * Warn by default — taught, counted, not blocked. `|| echo fallback` keeps
+ * the failure visible and is not flagged. */
+export function swallowCheck(seg: string): string | undefined {
+  return /\|\|\s*(?:true|:)(?=$|[\s;&|)])/.test(seg)
+    ? "Hygiene (Error-swallow): '|| true' hides the failure exit code — drop it or handle the error explicitly."
+    : undefined;
+}
+
+/** SE2 (2026-10-28): read windows belong to piread — sed is a pipeline
+ * stage, never a reader. Command-level check (segments split on pipes).
+ * Warn by default; the reason rides the result as a note. Reconciled with
+ * view-command credit (2026-10-29): the preference stands — piread gives
+ * offset windows and compaction markers, bash output is capped and
+ * unnumbered — but the printed lines of a mappable single-file view DO
+ * certify spans, so the reason must not claim they seed nothing. */
+export function readerBypassCheck(cmd: string): string | undefined {
+  return /(?:^|&&|\|\||;|\||\bdo\b|\bthen\b)\s*(?:sed\s+[^|;&]*-n\b|cat\s)/.test(cmd)
+    ? "Hygiene (Reader-bypass): read windows go through piread — sed is a pipeline stage, never a reader; view-command output is capped and unnumbered, though its printed lines do count as read coverage."
+    : undefined;
 }
 
 export function searchCheck(

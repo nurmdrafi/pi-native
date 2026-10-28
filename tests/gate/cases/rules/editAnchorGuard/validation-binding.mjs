@@ -6,7 +6,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { gate, rc, lineText, read, edit, editApplied, editsApplied, bash, runBash, write, approveUi, compact, tmp, fileA, fileB, elidedReadC3, nextId, getHydT, setHydT } from "../../../harness/helpers.mjs";
+import { gate, rc, lineText, read, edit, runEdit, noteOf, editApplied, editsApplied, bash, runBash, runSearch, write, approveUi, compact, tmp, fileA, fileB, elidedReadC3, nextId, getHydT, setHydT } from "../../../harness/helpers.mjs";
 
 export const cases = [
   // ---- S5 (2026-10-16) edit-validation hardening (spec §9) ----
@@ -77,36 +77,60 @@ export const cases = [
 
   // Step 2 (family 1): M1 stale-bind for edit — spec §5.1
   [
-    "S5 M1: external write since last read blocks the edit (Stale)",
-    "blocked",
+    "S5 M1: external write since last read — exact anchor passes with a relaxed note",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-m1-stale.ts");
       writeFileSync(f, "alpha\nbeta\ngamma\n");
       await read(pi, f);
       writeFileSync(f, "alpha\nbeta\ngamma\nepsilon\n"); // external writer: content + stat change
-      const r = await edit(pi, f, [{ oldText: "gamma", newText: "GAMMA" }]);
-      return r.blocked && r.reason.startsWith("Anchor Guard (Stale):")
-        ? r
-        : { blocked: false, reason: `family: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "gamma", newText: "GAMMA" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("Anchor Guard (Stale-relaxed):")
+        ? { blocked: false }
+        : { blocked: true, reason: `family: ${note || "(none)"}` };
     },
   ],
   [
-    "S5 M1: targeted re-read clears the stale block",
+    "S5 M1: external write that removes the anchor still warns (Stale)",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "s5-m1-miss.ts");
+      writeFileSync(f, "alpha\nbeta\ngamma\n");
+      await read(pi, f);
+      writeFileSync(f, "alpha\nbeta\ndelta\n"); // external writer removed the anchor bytes
+      // equal-size writes can share one mtime tick — pin the drift explicitly
+      // (a plain read carries no hash, so same-stat drift stays invisible to M1)
+      const T = new Date(Date.now() + 60_000);
+      utimesSync(f, T, T);
+      const r = await runEdit(pi, f, [{ oldText: "gamma", newText: "GAMMA" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("Anchor Guard (Stale):")
+        ? { blocked: false }
+        : { blocked: true, reason: `family: ${note || "(none)"}` };
+    },
+  ],
+  [
+    "S5 M1: targeted re-read clears the stale warn",
     "pass",
     async (pi) => {
       const f = join(tmp, "s5-m1-reread.ts");
       writeFileSync(f, "a\nb\nc\n");
       await read(pi, f);
       writeFileSync(f, "a\nb\nc\nd\n");
-      const b1 = await edit(pi, f, [{ oldText: "c", newText: "C" }]);
-      if (!b1.blocked) return { blocked: false, reason: "precondition: first edit not blocked" };
+      const b1 = await runEdit(pi, f, [{ oldText: "c", newText: "C" }]);
+      if (b1.blocked || !noteOf(b1).includes("Anchor Guard (Stale-relaxed):"))
+        return { blocked: true, reason: `precondition: stale note missing: ${noteOf(b1) || "(none)"}` };
       await read(pi, f); // fresh stat certified
-      return edit(pi, f, [{ oldText: "c", newText: "C" }]);
+      const b2 = await runEdit(pi, f, [{ oldText: "c", newText: "C" }]);
+      return !b2.blocked && !noteOf(b2).includes("(Stale")
+        ? { blocked: false }
+        : { blocked: true, reason: `still stale after re-read: ${noteOf(b2) || "(none)"}` };
     },
   ],
   [
-    "S5 M1: mutating bash (sed -i) makes a subsequent edit stale",
-    "blocked",
+    "S5 M1: mutating bash (sed -i) — exact anchor relaxes to a note",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-m1-sed.ts");
       writeFileSync(f, "alpha\nbeta\n");
@@ -115,10 +139,11 @@ export const cases = [
       // `-i.bak` is the BSD+GNU portable form: BSD sed needs a suffix, GNU reads `-i ''` as script+file
       execSync(`sed -i.bak 's/^beta/BBB/' ${f}`);
       await runBash(pi, `sed -i.bak 's/^beta/BBB/' ${f}`);
-      const r = await edit(pi, f, [{ oldText: "alpha", newText: "ALPHA" }]);
-      return r.blocked && r.reason.startsWith("Anchor Guard (Stale):")
-        ? r
-        : { blocked: false, reason: `family: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "alpha", newText: "ALPHA" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("Anchor Guard (Stale-relaxed):")
+        ? { blocked: false }
+        : { blocked: true, reason: `family: ${note || "(none)"}` };
     },
   ],
   [
@@ -154,8 +179,8 @@ export const cases = [
     },
   ],
   [
-    "S5 M3: same-stat drift after own edit is blocked by the hash chain",
-    "blocked",
+    "S5 M3: same-stat drift after own edit relaxes an exact anchor via the hash chain",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-m3-chain.ts");
       const T0 = new Date(Math.floor(Date.now() / 1000) * 1000);
@@ -168,14 +193,17 @@ export const cases = [
       if (e1.blocked) return e1;
       writeFileSync(f, "z\nb\nx\n"); // same-size silent change
       utimesSync(f, T1, T1); // stat identical to the post-edit snapshot
-      const r = await edit(pi, f, [{ oldText: "z", newText: "Z" }]);
-      return r.blocked && r.reason.includes("without mtime/size change")
-        ? r
-        : { blocked: false, reason: `family: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "z", newText: "Z" }]);
+      const note = noteOf(r);
+      return !r.blocked &&
+        note.includes("Anchor Guard (Stale-relaxed):") &&
+        note.includes("without mtime/size change")
+        ? { blocked: false }
+        : { blocked: true, reason: `family: ${note || "(none)"}` };
     },
   ],
   [
-    "S5 M3: re-read after a hash block is allowed and clears it",
+    "S5 M3: re-read after a hash warn is allowed and clears it",
     "pass",
     async (pi) => {
       const f = join(tmp, "s5-m3-recover.ts");
@@ -188,13 +216,17 @@ export const cases = [
       if (e1.blocked) return e1;
       writeFileSync(f, "z\nb\nx\n");
       utimesSync(f, T1, T1);
-      const b2 = await edit(pi, f, [{ oldText: "z", newText: "Z" }]);
-      if (!b2.blocked) return { blocked: false, reason: "precondition: hash block missing" };
+      const b2 = await runEdit(pi, f, [{ oldText: "z", newText: "Z" }]);
+      if (b2.blocked || !noteOf(b2).includes("without mtime/size change"))
+        return { blocked: true, reason: `precondition: hash warn missing: ${noteOf(b2) || "(none)"}` };
       // the corrective re-read must NOT be R1-blocked as a dup-read (the hash
-      // proved the certified spans wrong — coverage was dropped on block)
+      // proved the certified spans wrong — coverage was dropped on warn)
       const rr = await read(pi, f);
       if (rr.blocked) return rr;
-      return edit(pi, f, [{ oldText: "z", newText: "Z" }]);
+      const b3 = await runEdit(pi, f, [{ oldText: "z", newText: "Z" }]);
+      return !b3.blocked && !noteOf(b3).includes("without mtime/size change")
+        ? { blocked: false }
+        : { blocked: true, reason: `hash warn persists after re-read: ${noteOf(b3) || "(none)"}` };
     },
   ],
   [
@@ -248,27 +280,29 @@ export const cases = [
 
   // Step 4 (family 3): M2 region-read requirement for edit — spec §5.2
   [
-    "S5 M2: never-read path with a valid anchor is blocked (Unread)",
-    "blocked",
+    "S5 M2: never-read path with a valid anchor warns (Unread)",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-m2-unread.ts");
       writeFileSync(f, "alpha\nbeta\ngamma\n"); // anchor exists & is unique — but never read
-      const r = await edit(pi, f, [{ oldText: "beta", newText: "BETA" }]);
-      return r.blocked && r.reason.startsWith("Anchor Guard (Unread):")
-        ? r
-        : { blocked: false, reason: `family: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "beta", newText: "BETA" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("Anchor Guard (Unread):")
+        ? { blocked: false }
+        : { blocked: true, reason: `family: ${note || "(none)"}` };
     },
   ],
   [
-    "S5 M2: never-read block names the anchor's line range",
-    "blocked",
+    "S5 M2: never-read note names the anchor's line range",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-m2-range.ts");
       writeFileSync(f, "l1\nl2\nl3\nl4\nl5\n");
-      const r = await edit(pi, f, [{ oldText: "l4", newText: "x" }]);
-      return r.blocked && r.reason.includes("lines 4–4")
-        ? r
-        : { blocked: false, reason: `range missing: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "l4", newText: "x" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("lines 4–4")
+        ? { blocked: false }
+        : { blocked: true, reason: `range missing: ${note || "(none)"}` };
     },
   ],
   [
@@ -330,38 +364,61 @@ export const cases = [
     },
   ],
   [
-    "S5 M2: post-compaction edit is blocked until re-read",
-    "blocked",
+    "S5 M2: post-compaction edit warns until re-read",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-m2-compact.ts");
       writeFileSync(f, "alpha\nbeta\n");
       await read(pi, f);
       compact(pi); // compaction replaced the content — nothing is in context anymore
-      const r = await edit(pi, f, [{ oldText: "alpha", newText: "ALPHA" }]);
-      return r.blocked && r.reason.startsWith("Anchor Guard (Unread):")
-        ? r
-        : { blocked: false, reason: `family: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "alpha", newText: "ALPHA" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("Anchor Guard (Unread):")
+        ? { blocked: false }
+        : { blocked: true, reason: `family: ${note || "(none)"}` };
     },
   ],
   [
-    "S5 M2: region below a prior edit's first line needs a re-read (B4)",
+    "S5 M2: sibling line below a prior edit stays certified (B4, shift model)",
     "pass",
     async (pi) => {
       const f = join(tmp, "s5-m2-b4.ts");
       writeFileSync(f, "aaa\nbbb\n");
       await read(pi, f);
-      const e1 = await edit(pi, f, [{ oldText: "aaa", newText: "AAA" }]);
+      const e1 = await runEdit(pi, f, [{ oldText: "aaa", newText: "AAA" }]);
       if (e1.blocked) return e1;
-      // B4 truncation dropped lines ≥1 at edit 1 — line 2 is no longer certified
-      const e2 = await edit(pi, f, [{ oldText: "bbb", newText: "BBB" }]);
-      if (!e2.blocked || !e2.reason.startsWith("Anchor Guard (Unread):"))
-        return { blocked: false, reason: `expected Unread: ${e2.reason ?? "(pass)"}` };
-      await read(pi, f, { offset: 2, limit: 1 }, { outputLines: 1 }); // targeted re-read
-      return edit(pi, f, [{ oldText: "bbb", newText: "BBB" }]);
+      // span-shift model (2026-10-18): the edit's own result re-certifies by
+      // exact line delta — line 2 must NOT need a re-read. The old B4
+      // truncation decertified siblings; that behavior is gone and stays gone.
+      const e2 = await runEdit(pi, f, [{ oldText: "bbb", newText: "BBB" }]);
+      return !e2.blocked && !noteOf(e2).includes("Anchor Guard")
+        ? { blocked: false }
+        : { blocked: true, reason: `sibling line decertified: ${noteOf(e2) || "(none)"}` };
     },
   ],
 
   // Step 5 (families 2+4): binding for the write tool — spec §5.1–§5.3.
   // A blind full overwrite silently reverts external changes — the worst
   // failure class — so writes to EXISTING files bind like edits.
+
+  // S5 M3 (2026-10-28): search-printed hits shift with the session's own
+  // exact-delta edit instead of being dropped — the diff proves the shift.
+  [
+    "S5 M3: search-printed hits shift with the session's own edit (not dropped)",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "s5-m3-hitshift.ts");
+      const T0 = new Date(Math.floor(Date.now() / 1000) * 1000);
+      writeFileSync(f, "a\nb\nc\n");
+      utimesSync(f, T0, T0);
+      // seed ONLY via search output — no read
+      const s = await runSearch(pi, `rg -n "a|b" ${f}`, `${f}:1:a\n${f}:2:b`);
+      if (s.blocked) return s;
+      const T1 = new Date(T0.getTime() + 60_000);
+      const e1 = await editApplied(pi, f, "a", "x\ny\na", T1); // +2 lines above the hits
+      if (e1.blocked) return e1;
+      const T2 = new Date(T0.getTime() + 120_000);
+      return editApplied(pi, f, "b", "B", T2); // anchored on the shifted hit — must pass
+    },
+  ],
 ];

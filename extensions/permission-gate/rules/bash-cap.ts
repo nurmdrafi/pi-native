@@ -80,6 +80,26 @@ const CAP_READ_BYTES = 8_192;
  * command the model legitimately needs still delivers its head; only the
  * flood is cut.
  */
+/** Lines of a bash result the model actually sees — the view-credit path
+ * must never certify capped-off lines. Mirrors capBashOutput's kept-loop
+ * (head-only; the byte budget bites first for wide lines). */
+export function visibleLineCount(text: string): number {
+  if (!text) return 0;
+  const lines = text.split("\n");
+  if (lines.length <= CAP_LINES && Buffer.byteLength(text, "utf8") <= CAP_BYTES)
+    return lines.length;
+  let kept = 0;
+  let bytes = 0;
+  for (const l of lines) {
+    if (kept >= CAP_LINES) break;
+    const b = Buffer.byteLength(l, "utf8") + 1;
+    if (bytes + b > CAP_BYTES) break;
+    kept++;
+    bytes += b;
+  }
+  return kept;
+}
+
 export function capBashOutput(event: {
   toolCallId: string;
   content?: unknown[];

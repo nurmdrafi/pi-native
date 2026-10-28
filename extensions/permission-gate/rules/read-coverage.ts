@@ -146,6 +146,104 @@ export function recordGaps(
   entry.gaps = merged;
 }
 
+/** View-command span credit (2026-10-29, Claude Code parity): the printed
+ * lines of a single-file view command in a bash result enter context like a
+ * read window, so they certify spans. Only shapes whose output maps 1:1
+ * onto file lines parse: ONE segment (no pipes/redirects/compounds — a
+ * `cat f | wc -l` result is wc's output, not the file's bytes), ONE file
+ * operand (multi-file views interleave headers), numeric ranges only.
+ * `to` is the REQUESTED bound (head -n K / sed N,M / cat); the result-time
+ * credit clamps it to the lines actually visible after the H1 cap.
+ * `last` (tail -n K) maps through the file's current line count. */
+export interface ViewCommand {
+  path: string;
+  from: number;
+  to: number;
+  last?: number;
+}
+export function viewCommandOf(
+  cmd: string,
+  cwd: string | undefined,
+  norm: (p: unknown, cwd?: string) => string,
+  exists: (p: string) => boolean,
+): ViewCommand | undefined {
+  if (cmd.includes("|") || /[<>;`]|\$\(/.test(cmd)) return undefined;
+  const toks: string[] = [];
+  for (const raw of cmd.trim().split(/\s+/)) {
+    let t = raw;
+    if (
+      ((t.startsWith("'") && t.endsWith("'")) ||
+        (t.startsWith('"') && t.endsWith('"'))) &&
+      t.length > 1
+    )
+      t = t.slice(1, -1);
+    toks.push(t);
+  }
+  const [head, ...rest] = toks;
+  const operands: string[] = [];
+  let n: number | undefined; // head/tail count
+  let plus: number | undefined; // tail -n +N (from line N)
+  let quiet = false; // sed -n
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i]!;
+    if (!t.startsWith("-")) {
+      operands.push(t);
+      continue;
+    }
+    if (t === "-n" && (head === "head" || head === "tail")) {
+      const v = rest[++i];
+      if (/^\d+$/.test(v ?? "")) n = Number(v);
+      else if (v !== undefined && v.startsWith("+") && /^\d+$/.test(v.slice(1)))
+        plus = Number(v.slice(1));
+      else return undefined;
+    } else if (/^-\d+$/.test(t)) n = Number(t.slice(1));
+    else if (t === "-n" && head === "sed") quiet = true;
+    else return undefined; // any other flag: unmappable (or a mutator like sed -i)
+  }
+  const file =
+    head === "sed"
+      ? operands.length === 2 && /^(\d+)(?:,(\d+))?p$/.test(operands[0]!)
+        ? operands[1]
+        : undefined
+      : operands.length === 1
+        ? operands[0]
+        : undefined;
+  if (!file) return undefined;
+  const path = norm(file, cwd);
+  if (!exists(path)) return undefined;
+  if (head === "head") return { path, from: 1, to: n ?? 10 };
+  if (head === "tail")
+    return plus !== undefined
+      ? { path, from: plus, to: Infinity }
+      : { path, from: 0, to: Infinity, last: n ?? 10 };
+  if (head === "cat") return { path, from: 1, to: Infinity };
+  if (head === "sed" && quiet) {
+    const m = /^(\d+)(?:,(\d+))?p$/.exec(operands[0]!);
+    if (!m) return undefined;
+    const a = Number(m[1]);
+    const b = m[2] ? Number(m[2]) : a;
+    return b < a ? undefined : { path, from: a, to: b };
+  }
+  return undefined;
+}
+
+/** 1-based line count of a file's current content; undefined when missing,
+ * unreadable, or above the hash cap (mapping a tail through a multi-MB
+ * read costs more than the re-read it saves). */
+export async function countFileLines(
+  key: string,
+): Promise<number | undefined> {
+  try {
+    const s = await stat(key);
+    if (s.size > HASH_CAP_BYTES) return undefined;
+    const raw = await readFile(key, "utf8");
+    if (!raw) return 0;
+    return raw.split("\n").length - (raw.endsWith("\n") ? 1 : 0);
+  } catch {
+    return undefined;
+  }
+}
+
 /** true when [win.start, win.end] lies entirely inside the span union */
 export function coversAll(spans: LineSpan[], win: LineSpan): boolean {
   let pos = win.start;

@@ -288,7 +288,8 @@ is not turn state.
 approval) are untouched — they belong to rules that are not turn-scoped, and each would need
 its own seam.
 - Verified: 307/307 gate cases, `npm test` 235/235, `gate:eval` 92/92 (recovery 93%, commands
-6427), typecheck clean, `doc:check` unchanged (1 pre-existing `rg --max-age` finding). Gate
+6427), typecheck clean, `doc:check` unchanged (1 pre-existing flag finding at the
+ time — the rg max-age example — since resolved in the live docs). Gate
 suite 1.80 s vs 1.86 s before — within noise; the refactor buys legibility, not speed.
 
 ### Measured cost (2026-10-28, Node 24.21.0, stub harness, 20k calls)

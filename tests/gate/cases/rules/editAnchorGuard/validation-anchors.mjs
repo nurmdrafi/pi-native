@@ -6,7 +6,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { gate, rc, lineText, read, edit, editApplied, editsApplied, bash, runBash, write, approveUi, compact, tmp, fileA, fileB, elidedReadC3, nextId, getHydT, setHydT } from "../../../harness/helpers.mjs";
+import { gate, rc, lineText, read, edit, runEdit, noteOf, editApplied, editsApplied, bash, runBash, write, approveUi, compact, tmp, fileA, fileB, elidedReadC3, nextId, getHydT, setHydT } from "../../../harness/helpers.mjs";
 
 export const cases = [
   [
@@ -41,16 +41,17 @@ export const cases = [
     },
   ],
   [
-    "S5 D4: exact multi-match still blocks with line numbers",
-    "blocked",
+    "S5 D4: exact multi-match still warns with line numbers",
+    "pass",
     async (pi) => {
       const f = join(tmp, "s5-d4-multi.ts");
       writeFileSync(f, "same\nx\nsame\n");
       await read(pi, f);
-      const r = await edit(pi, f, [{ oldText: "same", newText: "S" }]);
-      return r.blocked && r.reason.includes("lines 1, 3")
-        ? r
-        : { blocked: false, reason: `lines: ${r.reason ?? "(pass)"}` };
+      const r = await runEdit(pi, f, [{ oldText: "same", newText: "S" }]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("lines 1, 3")
+        ? { blocked: false }
+        : { blocked: true, reason: `lines: ${note || "(none)"}` };
     },
   ],
 ];

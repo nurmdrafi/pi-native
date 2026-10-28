@@ -203,6 +203,24 @@ async function edit(pi, path, edits) {
   return { blocked: false };
 }
 
+/** edit call + result replay exposing the result: warn notes ride the
+ * tool_result as appended text blocks, so noteOf(r) reads them — mirrors
+ * runBash (plain edit() replays no result, so warns stay invisible) */
+async function runEdit(pi, path, edits) {
+  const toolCallId = `tc${++seqId}`;
+  const input = { path, edits };
+  const block = await pi.invoke("tool_call", {
+    type: "tool_call", toolName: "edit", toolCallId, input,
+  });
+  if (block) return { blocked: true, reason: block.reason };
+  const res = await pi.invoke("tool_result", {
+    type: "tool_result", toolName: "edit", toolCallId, input,
+    content: textBlocks("ok"),
+    isError: false,
+  });
+  return { blocked: false, ...res };
+}
+
 /** own single edit that ACTUALLY applies to disk between call and result
  * (S5 M3): the real edit tool writes the file before its tool_result fires,
  * so post-op stat/hash certification sees the applied content. Optional T
@@ -283,7 +301,7 @@ async function runBash(pi, command, { error = false, ctx } = {}) {
     ctx,
   );
   if (block) return { blocked: true, reason: block.reason };
-  await pi.invoke("tool_result", {
+  const res = await pi.invoke("tool_result", {
     type: "tool_result",
     toolName: "bash",
     toolCallId,
@@ -291,7 +309,7 @@ async function runBash(pi, command, { error = false, ctx } = {}) {
     content: textBlocks("out"),
     isError: error,
   });
-  return { blocked: false };
+  return { blocked: false, ...res };
 }
 /** R1c/C4 (2026-10-27): bash call + result replay carrying raw command
  * OUTPUT — hit-anchored seeding parses the result text of rg-family
@@ -629,4 +647,4 @@ let HYD_T = new Date();
 /** Imported bindings are read-only: cases mutate the round timestamp via these. */
 export function getHydT() { return HYD_T; }
 export function setHydT(d) { HYD_T = d; }
-export { ROOT, pkgLink, gate, rc, makePi, freshGate, textBlocks, lineText, rawRead, noteOf, read, piread, readVia, edit, editApplied, editsApplied, bash, runBash, runSearch, pibash, nestedBash, write, approveUi, denyUi, compact, tmp, fileA, fileInj, relA, skillFile, fileC, fileD, fileE, prevBranch, hydrate, fileB, tinyFile, bigFile, spanFile, hitRoot, hitApi, hugeFile, midFile, canary, canaryBytes, startCanary, stopCanary, canaryIntact, HARD_NET, gatedExec, canaryBlocked, elidedReadC3 };
+export { ROOT, pkgLink, gate, rc, makePi, freshGate, textBlocks, lineText, rawRead, noteOf, read, piread, readVia, edit, runEdit, editApplied, editsApplied, bash, runBash, runSearch, pibash, nestedBash, write, approveUi, denyUi, compact, tmp, fileA, fileInj, relA, skillFile, fileC, fileD, fileE, prevBranch, hydrate, fileB, tinyFile, bigFile, spanFile, hitRoot, hitApi, hugeFile, midFile, canary, canaryBytes, startCanary, stopCanary, canaryIntact, HARD_NET, gatedExec, canaryBlocked, elidedReadC3 };

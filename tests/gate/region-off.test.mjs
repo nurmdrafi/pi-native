@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /** AG2 (editRegionGuard) — the Claude-Code-parity rung: with the rule off,
  * an edit needs only that the PATH was read this session (file-level), not
- * that the target region itself is certified. Blind-edit protection (the
- * never-read block) must stay. Mirrors research 2026-10-25: Claude Code's
- * Edit enforces read-file + exact-match + uniqueness, but no region check.
+ * that the target region itself is certified. The AG warn tier (demoted
+ * 2026-10-28) teaches via notes; the edit pipeline enforces oldText
+ * correctness. Mirrors research 2026-10-25: Claude Code's Edit enforces
+ * read-file + exact-match + uniqueness, but no region check.
  * Run: node tests/pgate-region-off.test.mjs  (env set BEFORE the import). */
 process.env.PGATE_EDIT_REGION_GUARD = "0";
 
@@ -62,7 +63,14 @@ async function edit(path, edits) {
   const toolCallId = `tc${++seqId}`;
   const input = { path, edits };
   const block = await pi.invoke("tool_call", { type: "tool_call", toolName: "edit", toolCallId, input });
-  return block ? `BLOCKED: ${block.reason.slice(0, 100)}` : "edit ok";
+  if (block) return `BLOCKED: ${block.reason.slice(0, 100)}`;
+  // replay the result so warn-tier notes surface (AG demoted 2026-10-28)
+  const res = await pi.invoke("tool_result", {
+    type: "tool_result", toolName: "edit", toolCallId, input,
+    content: textBlocks("ok"), isError: false,
+  });
+  const note = (res?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join(" ");
+  return note ? `edit ok; note: ${note.slice(0, 100)}` : "edit ok";
 }
 
 // 1. file-level mode: path read (lines 1-5 only) + edit far outside the read
@@ -72,15 +80,15 @@ check("partial read ok", (await piread(f, 1, 5)) === "read ok");
 const r1 = await edit(f, [{ oldText: "line 30", newText: "LINE30" }]);
 check("AG2 off: edit outside the read window passes (file-level)", r1 === "edit ok", r1);
 
-// 2. blind-edit protection survives the rung: never-read file still blocks
+// 2. blind-edit protection survives the rung: never-read file warns (AG warn tier)
 const g = join(dir, "blind.ts");
 writeFileSync(g, lineText(60));
 const r2 = await edit(g, [{ oldText: "line 30", newText: "LINE30" }]);
-check("AG2 off: never-read file still blocks", r2.startsWith("BLOCKED: Anchor Guard (Unread)"), r2);
+check("AG2 off: never-read file carries an Unread note", r2.startsWith("edit ok") && r2.includes("Anchor Guard (Unread)"), r2);
 
-// 3. exact-anchor validation itself still runs (bogus oldText rejected)
+// 3. exact-anchor validation itself still runs (bogus oldText warns; the pipeline rejects)
 const r3 = await edit(f, [{ oldText: "no such line anywhere", newText: "x" }]);
-check("AG2 off: not-found anchor still blocks", r3.startsWith("BLOCKED: Anchor Guard"), r3);
+check("AG2 off: not-found anchor carries an AG note", r3.startsWith("edit ok") && r3.includes("Anchor Guard:"), r3);
 
 console.log(failed === 0 ? `\n3/3 PASS` : `\n${failed}/3 FAILED`);
 process.exit(failed === 0 ? 0 : 1);

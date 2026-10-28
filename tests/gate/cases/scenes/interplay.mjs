@@ -6,7 +6,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { gate, textBlocks, read, edit, bash, runBash, runSearch, nestedBash, write, approveUi, denyUi, compact, tmp, fileA, fileInj, spanFile, hitRoot, hitApi, hugeFile, canary, stopCanary, canaryIntact, HARD_NET, gatedExec, canaryBlocked, nextId } from "../../harness/helpers.mjs";
+import { gate, textBlocks, read, edit, runEdit, noteOf, bash, runBash, runSearch, nestedBash, write, approveUi, denyUi, compact, tmp, fileA, fileInj, spanFile, hitRoot, hitApi, hugeFile, canary, stopCanary, canaryIntact, HARD_NET, gatedExec, canaryBlocked, nextId } from "../../harness/helpers.mjs";
 
 export const cases = [
   [
@@ -256,18 +256,22 @@ export const cases = [
   ],
   [
     "anchor guard: a path-only search result certifies nothing (file named, not shown)",
-    "blocked",
+    "pass",
     async (pi) => {
       const dir = mkdtempSync(join(tmpdir(), "ag-search-l-"));
       const f = join(dir, "mod.jsx");
       writeFileSync(f, "import { httpClient } from '../../utils/httpClient'\n");
       await runSearch(pi, `rg -l httpClient ${f}`, `${f}\n`);
-      return edit(pi, f, [
+      const r = await runEdit(pi, f, [
         {
           oldText: "import { httpClient } from '../../utils/httpClient'",
           newText: "import { httpClient } from '../../utils/httpClient'\nimport { y } from 'y'",
         },
       ]);
+      const note = noteOf(r);
+      return !r.blocked && note.includes("Anchor Guard (Unread):")
+        ? { blocked: false }
+        : { blocked: true, reason: `note: ${note || "(none)"}` };
     },
   ],
   [

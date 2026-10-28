@@ -116,6 +116,12 @@ export async function validateEditAnchors(
       delta?: number;
       preStat?: { mtimeMs: number; size: number };
       fuzzy?: boolean;
+      /** Relaxation A (2026-10-29): the file drifted since the certified
+       * read (stat or hash), but every anchor matched the CURRENT content
+       * exactly — the edit passes with this note and M2 skipped (the exact
+       * match is the binding evidence; stale spans are the wrong coordinate
+       * system for a region check). */
+      staleNote?: string;
     }
   | undefined
 > {
@@ -140,20 +146,30 @@ export async function validateEditAnchors(
   // content this session certified into context; if the file drifted since
   // (external writer: bash, git, watcher), the anchors were built against
   // old bytes — one that still matches SOMEWHERE in the drifted file lands
-  // silently in the wrong place. Block before matching; the fix is one
-  // targeted re-read. Missing entry/stat fails open like the existing
-  // freshness posture (spec §5.1); M2 owns the never-read case.
-  if (
+  // silently in the wrong place. Missing entry/stat fails open like the
+  // existing freshness posture (spec §5.1); M2 owns the never-read case.
+  // Relaxation A (2026-10-29): drift alone no longer blocks — record it and
+  // let matching decide. Every anchor exact in the CURRENT content is
+  // binding evidence (the edit lands on exactly those bytes); any miss,
+  // fuzzy match or duplicate reverts to the Stale block below (one targeted
+  // re-read).
+  const staleBlock = (drift: string) => {
+    const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
+    return {
+      block: true as const,
+      stale: true as const,
+      reason:
+        `Anchor Guard (Stale): '${shown}' ${drift} — re-read the region with the piread tool (path/offset/limit), then re-send the edit.`,
+    };
+  };
+  const staleDrift =
     cov?.stat &&
     preStat &&
     (cov.stat.mtimeMs !== preStat.mtimeMs || cov.stat.size !== preStat.size)
-  ) {
-    const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
-    return {
-      block: true,
-      reason: `Anchor Guard (Stale): '${shown}' changed on disk since your last read (mtime/size) — re-read the region with the piread tool (path/offset/limit), then re-send the edit.`,
-    };
-  }
+      ? "changed on disk since your last read (mtime/size)"
+      : cov?.hash && cov.hash !== hashText(content)
+        ? "changed without mtime/size change (fast write / restored mtime)"
+        : undefined;
 
   // S5 M3 (2026-10-16): content-hash chain — closes the same-stat tail M1
   // cannot see (sub-ms same-size writes, deliberate utimes/touch -r
@@ -163,15 +179,6 @@ export async function validateEditAnchors(
   // drift→edit tail stays stat-only (residual R2). A block carries
   // stale: true so the caller drops the (now disproven) coverage entry —
   // otherwise R1 would block the corrective re-read as a dup-read.
-  if (cov?.hash && cov.hash !== hashText(content)) {
-    const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
-    return {
-      block: true,
-      stale: true,
-      reason: `Anchor Guard (Stale): '${shown}' changed without mtime/size change (fast write / restored mtime) — re-read with the piread tool before editing.`,
-    };
-  }
-
   const fuzzyContent = normalizeForFuzzyMatch(content);
   // verified exact-match spans, for the intra-call overlap check
   const spans: { i: number; start: number; end: number }[] = [];
@@ -186,6 +193,11 @@ export async function validateEditAnchors(
 
     const exact = content.indexOf(oldText);
     const fuzzy = exact === -1 ? normalizeForFuzzyMatch(oldText) : "";
+
+    // stale + any non-exact anchor (miss OR fuzzy): the anchor references
+    // bytes the drift disproved — the Stale remedy (one re-read) beats
+    // fixing the anchor against content the model never certified
+    if (staleDrift && exact === -1) return staleBlock(staleDrift);
 
     if (exact === -1 && fuzzyContent.indexOf(fuzzy) === -1) {
       const frag = findClosestFragment(fuzzyContent, oldText);
@@ -276,8 +288,11 @@ export async function validateEditAnchors(
   // — existence of coverage suffices for them (residual R3). Coordinate
   // spaces align: M1/M3 just proved the file identical to the latest
   // certification, and spans truncated at firstEditedLine kept only
-  // unshifted lines (spec §5.2 alignment argument).
-  {
+  // unshifted lines (spec §5.2 alignment argument). Under drift
+  // (Relaxation A) that proof is gone — the spans describe DISPROVEN bytes,
+  // the wrong coordinate system for a region check — so M2 is skipped
+  // there: the exact match against current content is the binding evidence.
+  if (!staleDrift) {
     const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
     // fuzzy anchors carry no original span (normalized space) — no line can be
     // matched against a printed row, so they stay on the read requirement
@@ -376,5 +391,10 @@ export async function validateEditAnchors(
     preStat,
     fuzzy: fuzzyUsed || undefined,
     delta: edited.length ? delta : undefined,
-  }; // all anchors verified: let the edit proceed
+    staleNote: staleDrift
+      ? `Anchor Guard (Stale-relaxed): '${
+          display.length > 57 ? `…${display.slice(-56)}` : display
+        }' ${staleDrift}, but every anchor matched the current file exactly — edit allowed; surrounding context may differ from your last read.`
+      : undefined,
+  }; // all anchors verified: let the edit proceed (possibly Stale-relaxed)
 }
