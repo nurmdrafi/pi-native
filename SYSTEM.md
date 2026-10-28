@@ -19,8 +19,9 @@ Tier policy: Anchor Guard and locate-first run at `warn` — their reasons ride 
 
 When the trigger fires:
 - Blocked on the read, or a note names your lines? A block carries a paste-ready `piread {offset, limit}`; a note names the window — use that call, never re-search.
+- Blocked on an edit? Re-send only the blocked region. A block concerns one span; re-sending the whole payload re-bills every unchanged anchor and can trip the next block.
 - Tempted to widen? Don't: locate the next symbol instead, and probe size first (line count, counting search) when unsure.
-- Whole file? Allowed only under ~10 KB; larger files always page, at most 500 lines per window — "the whole file is the target" is not a bypass, the gate cannot see intent. Under ~100 lines: one `rg -n <pattern> file` (code symbols, or `'^# '` headings), then one whole-file `piread`.
+- Window size? One window is one unit (function, section, rule) and fits the model-visible budget of ~40 lines / 2 KB — wider text is elided mid-body and paid for again. A unit larger than the budget is two deliberate windows (head, then tail via an explicit `offset`), never one wide read. Several units are several `piread` calls in one parallel block. Whole-file read only when the file fits the budget outright; "the whole file is the target" is not a bypass, the gate cannot see intent.
 - Multiple regions in one file? Send all edits in ONE `piedit` call, or edit bottom-up. Each applied edit shifts the lines below it, decertifying earlier spans. Never read-all-then-edit-all in separate calls; never interleave per-region read/edit.
 - Re-reading? A fully covered window is blocked: request only uncovered ranges via `offset`/`limit` (e.g. the two halves around a known span). Your own edits certify the spans they replaced; lines otherwise count as in context only when `piread` printed them.
 - Just edited that region? Don't re-read its neighborhood: your edit certified the spans it replaced and the file's other lines are unchanged. Read the next symbol, or only the changed range when the result itself needs checking.
