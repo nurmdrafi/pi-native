@@ -58,7 +58,7 @@ Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE
 | `models-store.json`       | Provider model catalog (regenerable cache)                                        |
 | `sessions/`               | Session history, keyed by absolute project paths → per-machine                    |
 | `audit-reports/`, `handoff/` | Dated audit artifacts and handoff drafts; reports name private projects        |
-| `*.log`, `logs/`          | Debug logs and gate telemetry                                                     |
+| `*.log`, `logs/`          | Debug logs only — no gate telemetry writer (that store was removed)               |
 
 Everything else — `AGENTS.md`, `docs/`, `settings.json`, `models.json`, `skills/`, `extensions/`, `agents/`, `prompts/`, `tests/`, `rust-tools/` (workspace + lockfile), `.github/workflows/`, `package.json`, `CHANGELOG.md`, `LICENSE`, `.nvmrc` — is tracked in git and portable across OSes.
 

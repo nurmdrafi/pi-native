@@ -9,6 +9,8 @@ Four Rust crates in `rust-tools/` register as their own first-class tools, so th
 | `pibash` | built-in `bash`                | bash-kind in permission-gate, so the H1 cap, R10 re-run guard, and destructive analysis apply unchanged |
 | `pidx`   | Node session-log parser        | compact per-session extracts, incremental via a (size, mtime) cache |
 
+`pidx` reports replace the ad-hoc session scripts: `--report usage` (model, turns, tokens, cache share, cost) and `--report lifecycle [--session ID]` (per-turn ledger plus `dupCall` / `resendAfterBlock` / `probeRepeat` / `proseOnly` waste detectors), with `--max N` and `--session ID` bounding the slice. A session modified in the last five minutes is excluded from discovery (`ACTIVE_SESSION_MS`), so an audit run mid-session covers only completed sessions: pass `--session <id>` for a specific older one, and never read a report as live coverage.
+
 Built-in `bash` is blocked while `pibash` is registered (permission-gate "Pibash-first"), so shell work runs through the native pipeline — `pibash` runs the same schema and rules and falls back itself, so the block never strands the agent.
 
 **Tool versions** (source of truth: each crate's `Cargo.toml`): `piread` 0.2.0 · `piedit` 0.2.0 · `pibash` 0.1.0 · `pidx` 0.1.0.

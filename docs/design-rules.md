@@ -49,3 +49,21 @@ Goal: one self-contained config that works on any macOS or Linux machine by repl
 7. **Never move permanent behavioral rules** out of AGENTS.md into skills.
 
 **Known constraints.** Core behavioral rules live in AGENTS.md (intentional) — edit rarely, each edit changes every session's prefix. Skills are real files, not a plugin cache, so upstream updates do not auto-propagate.
+
+## Scoped rule sets
+
+**Always-on content test.** A line belongs in the always-on pair only if it changes
+behaviour on the next action: a rule, an obligation, or a tool-calling instruction.
+Inventories, pointers ("lives in X"), purpose statements, rationale and cross-
+references do not qualify; they live in a scoped doc and are read on demand. A
+conditional load instruction ("before X, apply Y") does qualify: it changes the
+next action, and its doc path is the trigger.
+
+Loaded on demand, never always-on (the links used to sit in AGENTS.md, where they
+cost every project's prefix for rules only this harness needs):
+
+- `docs/change-discipline.md` — change ladder, root cause, deployment.
+- `docs/portability.md` — macOS+Linux shell subset, dynamic paths.
+- `docs/rust-tools-optimization.md` — safe path for optimizing a native tool: model
+the cost, freeze the old binary, pin the seam, swap, verification ladder, honest
+measurement.
