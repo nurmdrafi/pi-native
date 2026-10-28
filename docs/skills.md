@@ -19,7 +19,7 @@ All skills are **manual** — invoke with `/skill:<name>`; none auto-load. Bodie
 | github-actions       | Author/harden CI workflows: SHA-pinned actions, actionlint          | `/skill:github-actions`       |
 | grill-me             | One-question-at-a-time stress-testing of a plan                    | `/skill:grill-me`             |
 | harness-engineer     | Meta: audit/improve this harness                                   | `/skill:harness-engineer`     |
-| map-integration      | maplibre/mapbox-gl, deck.gl, turf, draw; Barikoi stack             | `/skill:map-integration`      |
+| map-integration      | maplibre/mapbox-gl, deck.gl, turf, draw; GL map stack        | `/skill:map-integration`      |
 | pidoc                | Harness setup health check; `--fix` rebuilds tools                 | `/skill:pidoc`                |
 | playwright-tester    | e2e specs, stress runs, untested-critical-path coverage             | `/skill:playwright-tester`    |
 | refactoring-ui       | Audit/fix existing UI: hierarchy, spacing, color, depth            | `/skill:refactoring-ui`       |

@@ -470,11 +470,11 @@ writeFileSync(
   Array.from({ length: 120 }, (_, i) => `s${i + 1}`).join("\n") + "\n",
 );
 // R1c/C4 (2026-10-26 session replay): the incident's file, named only in rg
-// OUTPUT (`__tests__/…/orderApi.test.ts:158:`), never in argv — the wide read
+// OUTPUT (`__tests__/…/hitApi.test.ts:158:`), never in argv — the wide read
 // that followed was blocked. Same shape, sandboxed.
-const hitRoot = join(tmp, "hit-merchant");
-mkdirSync(join(hitRoot, "__tests__/redux/features/order"), { recursive: true });
-const hitApi = join(hitRoot, "__tests__/redux/features/order/orderApi.test.ts");
+const hitRoot = join(tmp, "hit-root");
+mkdirSync(join(hitRoot, "__tests__/src/api/query"), { recursive: true });
+const hitApi = join(hitRoot, "__tests__/src/api/query/hitApi.test.ts");
 writeFileSync(hitApi, Array.from({ length: 600 }, (_, i) => `h${i + 1}`).join("\n") + "\n");
 const hugeFile = join(tmp, "extension-huge.ts"); // 2026-10-10: R1b big-read gate (audit: 44KB/51KB whole-file reads rode two sessions' prefixes)
 const midFile = join(tmp, "extension-mid.tsx"); // 2026-10-18: elision blind-spot fixture (~13KB / 330 lines)
@@ -482,7 +482,7 @@ writeFileSync(
   hugeFile,
   Array.from({ length: 900 }, () => "x".repeat(59)).join("\n") + "\n",
 ); // ~54 KB / 900 lines
-// 2026-10-18 session (dropx-admin AddUser.jsx): a ~14KB whole read passed the
+// 2026-10-18 session: a ~14KB whole read passed the
 // 24KB floor, then piread compacted it — model saw 11.5KB of elided middle
 // and treated it as read. Anything over piread's 2KB model budget elides, so
 // the gate floor must sit under the compaction threshold, not over it.

@@ -21,7 +21,7 @@
  *
  * C4 hit-anchored seeding (2026-10-26 session audit, research/gate-locate-
  * first-seed.md): `searchedPathsFrom` read command argv only, so a file rg's
- * OUTPUT named nine times (`__tests__/…/orderApi.test.ts:158:`) never entered
+ * OUTPUT named nine times (`__tests__/…/hitApi.test.ts:158:`) never entered
  * the set and the compliant 140-line read was blocked. searchHitsFrom parses
  * rg-family result text into path → hit lines; hitAnchorsWindow allows a wide
  * read iff it covers a reported hit line (path-only results: any window).
@@ -218,7 +218,7 @@ test("hitAnchorsWindow: overlap allows, empty set allows all, miss blocks", () =
   assert.ok(!hitAnchorsWindow(hits, rp("src/utils/keep.ts"), { start: 1, end: 140 }));
 });
 
-// ---- wc enumeration + single-file attribution (2026-10-27 dropx-admin) ----
+// ---- wc enumeration + single-file attribution (2026-10-27) ----
 
 test("wc -l count-first lines seed path-only", () => {
   const out = searchHitsFrom(

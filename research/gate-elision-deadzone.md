@@ -16,7 +16,7 @@ Scope: one design flaw in the permission-gate — the gap between what a
 compacted `piread` result puts in context and what the Anchor Guard (AG) accepts as an edit anchor.
 Research only; no code, SYSTEM.md, or tests were changed. All paths are relative to `/Users/nur/.pi/agent`
 unless absolute. Session cites are 1-based JSONL line numbers in
-`sessions/--Users-nur-Barikoi-dropx-merchant--/2026-10-26T12-26-36-935Z_01a1782d-4c07-7786-a229-257cb772f87a.jsonl`.
+`sessions/<project>/<2026-10-26 session>.jsonl`.
 
 ## 1. The flaw, as verified in the evidence session
 
@@ -27,7 +27,7 @@ rule. Timeline (line numbers re-verified against the JSONL; the task brief's 97/
 
 | Session line | Event |
 |---|---|
-| 94 | Assistant calls `piread {offset:140, limit:40}` (window 140–179) and `{offset:95, limit:30}` on `__tests__/redux/features/order/orderApi.test.ts` (280 lines). |
+| 94 | Assistant calls `piread {offset:140, limit:40}` (window 140–179) and `{offset:95, limit:30}` on `__tests__/src/api/query/hitApi.test.ts` (280 lines). |
 | 96 | Result of 140–179, head-tail compacted by piread: printed 140–163, marker `[... omitted 153 chars / 5 lines ...]` (**file lines 164–168 never entered the transcript**), printed 169–179, tail notice `[100 more lines ... offset 180]`. |
 | 211 | Six parallel `piedit` calls; one `edits[2].oldText` = `} catch (error: any) {`, which lives on line 164. |
 | 212 | Block: `Anchor Guard (Unread): ... edits[2] targets lines 164–164, not in certified context — read lines 164–164 with the piread tool (piread {offset:164, limit:1}) first.` |

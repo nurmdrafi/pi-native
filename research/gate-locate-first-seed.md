@@ -6,22 +6,22 @@ output in the same session named repeatedly. No code changed.
 
 ## 1. The incident (verified session evidence)
 
-Session: `sessions/--Users-nur-Barikoi-dropx-merchant--/2026-10-26T12-26-36-935Z_01a1782d-4c07-7786-a229-257cb772f87a.jsonl`
+Session: `sessions/<project>/<2026-10-26 session>.jsonl`
 (one JSON message per line; `.type == "message"` carries both assistant content and toolResults;
 toolResults are `.message.role == "toolResult"` with `.message.toolName` and `.message.content[0].text`).
 
 - Lines 10–45: nine `toolResult` lines (`toolName: "pibash"`) whose text contains the relative
-  path `__tests__/redux/features/order/orderApi.test.ts:` in rg's `path:line:content` output
+  path `__tests__/src/api/query/hitApi.test.ts:` in rg's `path:line:content` output
   format (the task brief's seven rg outputs, plus two more that repeat it). The producing
   commands, from assistant `toolCall` blocks in the same range, were directory-scoped searches:
-  - `cd /Users/nur/Barikoi/dropx-merchant && rg -n --no-heading '\bany\b' __tests__ --stats -g '!node_modules' | tail -5`
-  - `cd /Users/nur/Barikoi/dropx-merchant && rg -c --no-heading '\bany\b' __tests__ -g '*.ts*' | sort -t: -k2 -rn`
+  - `cd <project-root> && rg -n --no-heading '\bany\b' __tests__ --stats -g '!node_modules' | tail -5`
+  - `cd <project-root> && rg -c --no-heading '\bany\b' __tests__ -g '*.ts*' | sort -t: -k2 -rn`
   - …and four more variants scoping `__tests__` (never the file itself as an operand).
 - Line 87: one assistant message with four `piread` toolCalls. The first:
-  `{path: "/Users/nur/Barikoi/dropx-merchant/__tests__/redux/features/order/orderApi.test.ts", offset: 85, limit: 140}`.
+  `{path: "<project-root>/__tests__/src/api/query/hitApi.test.ts", offset: 85, limit: 140}`.
   The other three (40/45/80-line windows on sibling test files) passed — under the 100-line
   threshold, so only the seeding of the 140-line read is in question.
-- Line 88: result blocked — `Locate-first: 140-line window on '…merchant/__tests__/redux/features/order/orderApi.test.ts', which no search has named this session. rg -n <term> orderApi.test.ts, then read the hit's range.`
+- Line 88: result blocked — `Locate-first: 140-line window on '<project-root>/__tests__/src/api/query/hitApi.test.ts', which no search has named this session. rg -n <term> hitApi.test.ts, then read the hit's range.`
 - Path-form fact: zero lines before 87 contain the absolute form of the path; every mention is
   the relative `__tests__/…` form inside toolResult text.
 - Cascade (lines 88–212): the block forced narrower windows; one subsequent piread result was
@@ -146,11 +146,11 @@ allow-condition is literally the rule text — "read the hit's range".
    than rg, and the rule should say which.
 4. **Validation plan** — extend `tests/search-guard-locate.test.mjs` (it already pins the
    2026-10-18 glob fix; same file, same style, `node --test`):
-   - rg output naming `__tests__/…/orderApi.test.ts:158:` → 140-line window covering line
+   - rg output naming `__tests__/…/hitApi.test.ts:158:` → 140-line window covering line
      158 **allowed** (the exact incident, replayed from the session log fixture).
    - Same file, window covering lines 400–540 (no hit) → **blocked** (C4's tightness).
    - Never-named path → blocked (guard's purpose intact).
-   - Basename-only mention in output (`orderApi.test.ts:158:` with no directory) → not
+   - Basename-only mention in output (`hitApi.test.ts:158:` with no directory) → not
      seeded unless it resolves under cwd (no accidental seeds).
    - Relative rg output + absolute piread path → allowed (normalization).
    - `rg -l` result (path, no line) → any window on that path allowed.

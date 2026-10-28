@@ -328,7 +328,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`piedit`/Anchor Guard: new AG2 rung (`editRegionGuard`) dials the region check to Claude-Code parity.** Research (2026-10-25): Claude Code's Edit enforces read-file + exact-match + uniqueness with no per-region check, and its own tracker shows the same false-block class we fixed in §8 (`issues/anthropics/claude-code#53525`). Default behavior is unchanged (region check on); `PGATE_EDIT_REGION_GUARD=0` or `rules.editRegionGuard: "off"` in `extensions/permission-gate/config.json` keeps blind-edit protection (never-read still blocks) while letting edits land on any read path. Session-audit backing: 24/43 Unread blocks today were false (all §8, fixed); 8 were genuine blind edits the rule correctly stopped. New suite `tests/pgate-region-off.test.mjs` (3/3).
 - **`piread`/R1: an elided read no longer certifies its omitted middle (backlog §9).** The permission-gate read-result handler now parses the head-tail compaction marker piread already emits (`renderedSpansFromBlocks`, `extensions/permission-gate/read-coverage.ts`) and certifies only the rendered head/tail runs whenever `details.compaction` reports elision — the omitted middle stayed R1-blocked as already-in-context while its bytes were never rendered. Pure gate-side change (no Rust, no protocol); zero new work on non-elided reads, suite timings flat. read-coverage 9/9, gate 278/279 (one pre-existing non-piedit failure), bench-suite 38/38.
 - **Benchmark: `candidate` placeholder arm replaced with `piedit-native`.** `benchmark/arms.json` now carries the S8 adoption-pair arm (permission-gate + `PI_NATIVE_EDIT` verification steps), so the next bench cycle can produce the deferred baseline↔native pair; task QA re-verified 6/6.
-- **`piedit`/Anchor Guard: an edit no longer decertifies whole-file coverage (backlog §8).** `shiftSpansForEdit` (`extensions/permission-gate/read-coverage.ts`) now rebases prior certified spans by the per-edit deltas of the regions above each span and splits straddling spans into unchanged head + shifted tail instead of dropping them — the wholesale drop wiped a write's `[1,∞]` on the first edit and false-blocked the next edits on lines already in context (three consecutive blocks in the 2026-10-18 dropx-admin session). Two legacy R1 cases flipped expectation: redundant re-reads of still-certified content now correctly block. Gate suite 276/277 (the one failure is pre-existing and non-piedit), read-coverage 6/6, parity 58/58, micro-bench unchanged (1 MiB p50 4.27 ms).
+- **`piedit`/Anchor Guard: an edit no longer decertifies whole-file coverage (backlog §8).** `shiftSpansForEdit` (`extensions/permission-gate/read-coverage.ts`) now rebases prior certified spans by the per-edit deltas of the regions above each span and splits straddling spans into unchanged head + shifted tail instead of dropping them — the wholesale drop wiped a write's `[1,∞]` on the first edit and false-blocked the next edits on lines already in context (three consecutive blocks in the 2026-10-18 <project-a> session). Two legacy R1 cases flipped expectation: redundant re-reads of still-certified content now correctly block. Gate suite 276/277 (the one failure is pre-existing and non-piedit), read-coverage 6/6, parity 58/58, micro-bench unchanged (1 MiB p50 4.27 ms).
 - **`subagents`: sandboxed children are no longer toolless.** `getToolExtensionPath` in `extensions/subagents/index.ts` now hardcodes the four first-party `-e` paths (piread, piedit, pibash, pidx); alphabetical extension load order had made runtime `registerToolExtension` a silent no-op. Regression test pins path resolution (suite 156/156). Effective for orchestrator sessions started after the edit; verified by a post-restart probe (native tools executed in-child, model `zai/glm-5.3`).
 - **Tests: `daemon-exit` child fixture root is now a CLI arg.** Drops the hardcoded `/Users/nur/...` machine path; suite green on this Linux host.
 
@@ -718,14 +718,14 @@ Measured: skill validator PASS (harness-engineer 130 lines, desc 415 chars); mdc
 
 - **Gate narrowed per the 2026-10-07 block-impact audit** (`extensions/permission-gate.ts`, report `audit-reports/harness/2026-10-07T110500Z-block-impact-permission-gate.md`, research: Claude Code PreToolUse deny+reason pattern, Hermes-agent #18076 identical-args dedup):
   - **R10 rekeyed to full-command identity** (fd-merges `2>&1` stripped, whitespace collapsed; `firstUnquotedPipeOrRedirect` deleted). The pipe-truncated base collided every command sharing a preamble — `source nvm.sh && nvm use X` keyed four different test runs, `KEY=$(…)` keyed different curl targets, `cat > f <<EOF` truncated to base `cat` — compliance 0.06, mean net −1.83, and the only escape was token-level mutation. A different downstream filter is now a legitimate re-view, not a dup.
-  - **R2 narrowed + widened**: `sed -n "s/…/…/p"` substitution-print exempt (extraction, prints matches only — false-fired 5 blocks in one dropx-admin session); `do … done` bodies no longer split (the suggested fix, read, cannot loop); standalone `head`/`tail` viewers joined the block set with `tail -f` exempt (evasion was cheaper than compliance: er 0.24 via `head -40 file`/`awk NR`); reason now warns that a re-read of in-context lines hits R1 (cascade fix).
+  - **R2 narrowed + widened**: `sed -n "s/…/…/p"` substitution-print exempt (extraction, prints matches only — false-fired 5 blocks in one <project-a> session); `do … done` bodies no longer split (the suggested fix, read, cannot loop); standalone `head`/`tail` viewers joined the block set with `tail -f` exempt (evasion was cheaper than compliance: er 0.24 via `head -40 file`/`awk NR`); reason now warns that a re-read of in-context lines hits R1 (cascade fix).
   - **`isCapped` counts stdout redirects to files** (`> /tmp/x`, incl. `/dev/null`; `2> err` alone does not) — `npx tsc --noEmit > /tmp/tsc.out 2>&1` was false-flagged though the bytes never land in context.
   - **R5 accepts `git log -<N>`** short form (lookbehind-guarded) — `git log -1 --format=%ci` false-fired. Measured: `node tests/permission-gate.test.mjs` 63/63 PASS (was 54; +9 fixtures: nvm-preamble non-collision, whitespace-variation still blocked, watcher-word exemption, head/tail viewing blocked, `tail -f` exempt, s///p pass, loop-body pass, redirect-caps-runner, `git log -1`); `tsc -p tsconfig.json` clean; `tests/block-recovery-audit.mjs` 98% one-shot recovery (gate ≥ 85%).
 - **pi imports migrated to the `@earendil-works` scope** (`extensions/subagents/*`, `tests/subagents/*`): all `@mariozechner/*@0.65` imports replaced — subagents code had been executing pre-1.0 modules inside the 1.0.4 host (1.x API like `defaultActive` silently no-oped). Root devDeps: `typescript` + `@types/node` in, stale `@mariozechner/*` out.
 
 ### Fixed
 
-- **`/ship` prompt: broken gate resolution + minimized** (`prompts/ship.md`): the prompt claimed "this command is the only thing that enables" pre-push-review, but nothing in the runtime enables a `disable-model-invocation` skill — agents in project repos hunted for the missing harness (`ls .husky`, `rg package.json`, `ls scripts/ .pi/`, one wasted call + reasoning per code session; observed in akg-frontend and dropx-merchant 10-07 sessions). Gate now resolves deterministically: body already in context → use it; else one read of `~/.pi/agent/skills/pre-push-review/SKILL.md`; never search the repo. Added ban on preemptive `.husky/`/`commitlint.config.*`/`lint-staged` reads (hooks run on their own; adapt only on rejection). Body compressed 430→230 words with all rules intact. Same treatment for `prompts/update-changelog.md` (290→175): URLs, header-placement prose, and new-file boilerplate cut — behavior across its 3 invocations (read → porcelain/date → edit → one-line report, no waste) unchanged by construction.
+- **`/ship` prompt: broken gate resolution + minimized** (`prompts/ship.md`): the prompt claimed "this command is the only thing that enables" pre-push-review, but nothing in the runtime enables a `disable-model-invocation` skill — agents in project repos hunted for the missing harness (`ls .husky`, `rg package.json`, `ls scripts/ .pi/`, one wasted call + reasoning per code session; observed in akg-frontend and <project-b> 10-07 sessions). Gate now resolves deterministically: body already in context → use it; else one read of `~/.pi/agent/skills/pre-push-review/SKILL.md`; never search the repo. Added ban on preemptive `.husky/`/`commitlint.config.*`/`lint-staged` reads (hooks run on their own; adapt only on rejection). Body compressed 430→230 words with all rules intact. Same treatment for `prompts/update-changelog.md` (290→175): URLs, header-placement prose, and new-file boilerplate cut — behavior across its 3 invocations (read → porcelain/date → edit → one-line report, no waste) unchanged by construction.
 - **15 strict-mode type errors** in `extensions/subagents/`: `launchSubagent` name-required guard and `getSessionFile(): string | undefined` (ExtensionToolContext match), `ImageContent | TextContent` discriminant checks on `.text`, required `invalidate()` on the three message renderers, narrowed `activityFile` copy for the hoisted `flushNow` closure.
 - **Gate re-read block reasons could exceed the 220c diet cap** on long paths (`extensions/permission-gate.ts`) — displayed path clamped to `…` + last 58 chars, worst-case reason ≈218c for any path length.
 - **Test-suite env leakage** (`tests/subagents/test-env.ts`, imported first by `test.ts`): strips `PI_SUBAGENT_NAME`/`_AGENT`/`PI_SUBAGENTS`/`_ALLOWED` before the extension module evaluates — module-scope gating reads had flipped tool activation, discovery, and error paths when the suite ran inside a spawned subagent.
@@ -814,7 +814,7 @@ Measured: fixtures 43 → **51/51 PASS** (+4 unquoted-backslash, +4 hydration: p
 
 ### Changed
 
-- **Leading-word triggers added to 9 descriptions** (phrasings LLMs route on, drawn verbatim from today's issue titles): `auth` +'session outlives backend token', 'jwt sliding session', 'signOut on every 401', 'random sign-outs', 'signed out while browsing'; `systematic-debugging`, `map-integration` +'api key in client bundle', 'hardcoded barikoi key' + checklist #9 (no key literals in bundled config, `NEXT_PUBLIC_*` = public, server-side via proxy — issue #5); `playwright-tester` +'untested critical paths'/'no e2e coverage' (issue #53); `refactoring-ui` +small UI defects (issue #46); `browser-tools` +'verify UI fixes in the running app' (today's UI fixes shipped on typecheck alone); `pre-push-review` +'review my diff', 'pre-push check'; `ponytail` +dead code shipped/duplicated logic (issues #48/#50/#51).
+- **Leading-word triggers added to 9 descriptions** (phrasings LLMs route on, drawn verbatim from today's issue titles): `auth` +'session outlives backend token', 'jwt sliding session', 'signOut on every 401', 'random sign-outs', 'signed out while browsing'; `systematic-debugging`, `map-integration` +'api key in client bundle', 'hardcoded <vendor> key' + checklist #9 (no key literals in bundled config, `NEXT_PUBLIC_*` = public, server-side via proxy — issue #5); `playwright-tester` +'untested critical paths'/'no e2e coverage' (issue #53); `refactoring-ui` +small UI defects (issue #46); `browser-tools` +'verify UI fixes in the running app' (today's UI fixes shipped on typecheck alone); `pre-push-review` +'review my diff', 'pre-push check'; `ponytail` +dead code shipped/duplicated logic (issues #48/#50/#51).
 - **Body lessons**: `auth` — 401-ladder bullet + checklist now mandate single-flight signOut (never per-request listeners; one expired token → N parallel 401s → N sign-outs — issue #44) and a typed session-user accessor (issue #42).
 - **`ponytail` + `ponytail-review` merged** (ponytail-review removed): description covers both trigger sets; body gains **Review mode** — `L12:tag` format (`delete:`/`stdlib:`/`native:`/`yagni:`/`shrink:`), examples, `net: -N lines` scoring, `Lean already. Ship.`, review scope; `stop ponytail-review` still honored.
 - **Explicit `disable-model-invocation` on all 23 skills** (user directive), then same-day trim: initially 11 × `false` (auto), final **4 × `false`** — `web-search`, `systematic-debugging`, `ponytail`, `pre-push-review`; user directive returned `auth`, `github-actions`, `documentation-writer`, `grilling`, `research`, `prototype`, `domain-modeling` to manual (`true`). Invocation state now visible per file instead of inferred from absence.
@@ -830,7 +830,7 @@ Measured: fixtures 43 → **51/51 PASS** (+4 unquoted-backslash, +4 hydration: p
 
 ### Added
 
-- **R10 identical re-run guard (`extensions/permission-gate.ts`)**. From the 2026-10-06T121014Z session audit (`~/.pi/agent/audit-reports/`, outside this repo): `gh run list` double-poll 31 s apart (session 01a11091…, dropx-merchant) and identical `npx vitest run` re-runs between one-line edits (3856d2a7…, 186/186 single-tool turns); 15 bash dups across 8 sessions that day. Blocks a bash call whose base command (command up to the first pipe/redirect, `2>&1` stripped) already ran ≤10 min ago with **no intervening edit/write** — the output is already in context. Exempts watchers (`watch`, `tail -f`, `sleep`, `--watch`) and retries of failed runs; the run is recorded on `tool_result`, cleared on `session_compact`; every successful edit/write bumps a mutation counter, making verify re-runs legitimate. Block reason carries the fix (`gh run watch <id> --exit-status` for CI waits). 6 new black-box cases (19 total).
+- **R10 identical re-run guard (`extensions/permission-gate.ts`)**. From the 2026-10-06T121014Z session audit (`~/.pi/agent/audit-reports/`, outside this repo): `gh run list` double-poll 31 s apart (session 01a11091…, <project-b>) and identical `npx vitest run` re-runs between one-line edits (3856d2a7…, 186/186 single-tool turns); 15 bash dups across 8 sessions that day. Blocks a bash call whose base command (command up to the first pipe/redirect, `2>&1` stripped) already ran ≤10 min ago with **no intervening edit/write** — the output is already in context. Exempts watchers (`watch`, `tail -f`, `sleep`, `--watch`) and retries of failed runs; the run is recorded on `tool_result`, cleared on `session_compact`; every successful edit/write bumps a mutation counter, making verify re-runs legitimate. Block reason carries the fix (`gh run watch <id> --exit-status` for CI waits). 6 new black-box cases (19 total).
 
 ### Changed
 
@@ -1063,7 +1063,7 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 
 ### Added
 
-- **`extensions/edit-anchor-guard.ts`** — mechanically kills the recurring `Could not find edits[N] ... oldText must match exactly` edit failure. Root cause (2026-09-24 dropx-merchant session): the model built `oldText` anchors from lines it never read — a windowed read (`offset: 128`) cut mid-object at `}`, and the two lines above were pattern-inferred (`LANGUAGE: 'language',\n} as const`) instead of actually being `enabledTransports: ['ws', 'wss'],\n  },\n}`. The edit tool's fuzzy matching only tolerates cosmetic drift (trailing whitespace, smart quotes/dashes/spaces) and cannot recover nonexistent text. The guard intercepts every `edit` tool_call, reads the file, and validates each `edits[i].oldText` (exact, then the same fuzzy normalization the tool uses) before execution:
+- **`extensions/edit-anchor-guard.ts`** — mechanically kills the recurring `Could not find edits[N] ... oldText must match exactly` edit failure. Root cause (2026-09-24 <project-b> session): the model built `oldText` anchors from lines it never read — a windowed read (`offset: 128`) cut mid-object at `}`, and the two lines above were pattern-inferred (`LANGUAGE: 'language',\n} as const`) instead of actually being `enabledTransports: ['ws', 'wss'],\n  },\n}`. The edit tool's fuzzy matching only tolerates cosmetic drift (trailing whitespace, smart quotes/dashes/spaces) and cannot recover nonexistent text. The guard intercepts every `edit` tool_call, reads the file, and validates each `edits[i].oldText` (exact, then the same fuzzy normalization the tool uses) before execution:
   - **Miss with partial overlap** → blocks and pastes the *actual* file content (with line numbers) around the longest fragment of the anchor that does exist — the model corrects the anchor in one retry instead of fail → re-read → retry.
   - **Duplicate anchor** → blocks with occurrence line numbers (prevents the `Found N occurrences` sibling error).
   - **No overlap** → instructs a windowed read of the target region.
@@ -1158,9 +1158,9 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 ### Added
 
 - **2026-09-23 — pre-push-review skill: local mirror of the CI push-review bot** (from 7-day session + `ollama-review` issue audit):
-  - Evidence: 11 issues / 17 findings (all MEDIUM) filed 2026-09-16..22 by `barikoi/code-review@v1` across barikoi-admin-nextjs, bkoi-gl-js, dhaka-express-admin, dropx-admin. ~60% async/stale-state lifecycle; 7/17 were regressions introduced by pushed fixes to earlier findings (dhaka-express-admin edit-polygon block: 5 consecutive fix pushes). All 27 Barikoi sessions committed+pushed directly — review fired only post-push.
+  - Evidence: 11 issues / 17 findings (all MEDIUM) filed 2026-09-16..22 by `<org>/code-review@v1` across <project-c>, <project-e>, <project-d>, <project-a>. ~60% async/stale-state lifecycle; 7/17 were regressions introduced by pushed fixes to earlier findings (<project-d> edit-polygon block: 5 consecutive fix pushes). All 27 <vendor> sessions committed+pushed directly — review fired only post-push.
   - `skills/pre-push-review/SKILL.md`: manual invocation only (`/skill:pre-push-review`, user preference), checklist ordered by observed bot-hit frequency, CI-parity severity + finding format, mandatory fix-loop re-review of fix diffs.
-  - **Auto-sync with the bot (same day):** skill §0 fetches live criteria from `barikoi/code-review` on every invocation (local clone → `gh api` raw fallback → offline proceeds on embedded checklist). Fetched prompt is authoritative; org-side rule changes apply without a skill edit.
+  - **Auto-sync with the bot (same day):** skill §0 fetches live criteria from `<org>/code-review` on every invocation (local clone → `gh api` raw fallback → offline proceeds on embedded checklist). Fetched prompt is authoritative; org-side rule changes apply without a skill edit.
   - **Audit lessons pushed into dev skills (body-only, descriptions untouched → prefix byte-stable):** `systematic-debugging` Phase 4 adjacent-path check (7/17 findings were fix-induced); `refactoring-ui` §0b logic-in-UI hard rules (staleness/.catch, reset completeness, pre-fill-vs-fallback, lazy-tab prefill, default polarity); `frontend-design` logic guards for mutating UIs (permission gating day one + same set); `map-integration` §5.5–5.6 draw/polygon sync upsert + geometry load guards (10/17 findings were this domain). `playwright-tester` already covered CI/headless — no edit.
   - `Measured:` AGENTS.md 4,916 B unchanged; skills 17→18; model-visible desc catalog unchanged (manual skill = zero prefix bytes); portability quick-check 0 hits before and after.
 
@@ -1169,7 +1169,7 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 ### Changed
 
 - **2026-09-19 — ask-don't-assume, enforced at both layers** (from discoverthreejs mis-targeted audit):
-  - `AGENTS.md` Behavioral Core line 1 rewritten: "If unclear, ask once then move" → "Do not assume: if anything is unclear or a named target/reference is not found, **ask and wait for the answer** — never substitute a closest match or proceed on a guess. Ask once, then act on the reply." Root cause: the old wording licensed proceeding without the answer; agent substituted react-bkoi-gl for the user-named discoverthreejs and spent a full audit pass on the wrong target.
+  - `AGENTS.md` Behavioral Core line 1 rewritten: "If unclear, ask once then move" → "Do not assume: if anything is unclear or a named target/reference is not found, **ask and wait for the answer** — never substitute a closest match or proceed on a guess. Ask once, then act on the reply." Root cause: the old wording licensed proceeding without the answer; agent substituted <project-f> for the user-named discoverthreejs and spent a full audit pass on the wrong target.
   - `skills/session-audit/SKILL.md` Phase 1: new hard rule — if a user-named target (project/path/session) is absent from the digest (including active-excluded), stop and ask; never audit a closest match or unilaterally choose fetch-inspection. Note: skill dir is the live copy; port the line to the skill source repo on next install.
   - `audit-reports/2026-09-19T151000Z.md`: directory digest (84 sessions, 1,347K/$0.94 floor) + fetch-only inspection of the still-open discoverthreejs session; marathon-session pattern confirmed there too (pasted book chapters + growing README re-reads).
 
@@ -1177,14 +1177,14 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 
 ### Added
 
-- **2026-09-16 — AGENTS.md Turns: session-length hard stop + no skill-body injection** (from 09-16 react-bkoi-gl session audit):
+- **2026-09-16 — AGENTS.md Turns: session-length hard stop + no skill-body injection** (from 09-16 <project-f> session audit):
   - Hard stop at ~200 assistant turns → propose fresh session (cost-tail driver: 300+ turn sessions at $10–14 each; glm-5.3 reasoning share hit 53%). Never paste a skill's full body into a prompt — bodies ride every subsequent turn (measured 7,952-tok first turn vs ~3k baseline).
   - `Measured:` AGENTS.md 4,704→4,743 B (+39 B, ~+10 tok); audit also found 126 tool-call violations across the two sessions (cat-for-viewing 86, speculative 30, minified-uncapped 7, pollution 2, rerun 1) — behavior unchanged since 09-14, rules already present.
   - **Enforcement:** `extensions/token-economy-guard.ts` — `tool_call` hook blocks bash cat/sed-for-viewing, uncapped `git log`, and uncapped verbose runners (npm test/build, vitest, jest, playwright, tsc) with the corrective rule text. Verified: `pi -p` cat attempt blocked, model recovered via `read`. Zero prefix cost (extension, not prompt).
 
 - **2026-09-15 — occluded-window freeze guidance ported to browser skills**:
-  - `skills/browser-tools/SKILL.md` (Debugging failing e2e §) + `skills/playwright-tester/SKILL.md` (Headed review runs §): a headed run that "shows nothing" → suspect Chromium rAF/compositing freeze for occluded/backgrounded windows; verify (front/screenshot/headless) before rerunning. Body-only edits — zero prefix cost. Source: 09-15 react-bkoi-gl session audit (~45 min of blind reruns).
-  - `audit-reports/2026-09-15T063200Z.md` + `2026-09-15T090800Z.md` (react-bkoi-gl session audits, habit fixes ranked); `harness-audit-report.md` rewritten for 09-15 (health 75/100, portability PASS).
+  - `skills/browser-tools/SKILL.md` (Debugging failing e2e §) + `skills/playwright-tester/SKILL.md` (Headed review runs §): a headed run that "shows nothing" → suspect Chromium rAF/compositing freeze for occluded/backgrounded windows; verify (front/screenshot/headless) before rerunning. Body-only edits — zero prefix cost. Source: 09-15 <project-f> session audit (~45 min of blind reruns).
+  - `audit-reports/2026-09-15T063200Z.md` + `2026-09-15T090800Z.md` (<project-f> session audits, habit fixes ranked); `harness-audit-report.md` rewritten for 09-15 (health 75/100, portability PASS).
 
 - **2026-09-16 — map-integration: per-framework deep docs** — `docs/frameworks/<name>.md` (e.g. `cra.md`) added to the docs-split contract in the docs-split bullet. Body-only edit, zero prefix cost.
 - **2026-09-16 — tavily: gitignore `tavily/config.json`** — file holds live OAuth tokens from `tavily auth`; excluded from the repo. `tavily/session.json` (hash-only session state) stays tracked.
@@ -1248,9 +1248,9 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 
 ### Changed
 
-- **2026-09-09 — cross-session audit (pickaboo-frontend, react-bkoi-gl) tightens Token-Economy rules**:
-  - Audited last sessions: pickaboo-frontend (Sep 9, 122 turns, $1.13, 96% cache-read, 78 bash/18 edit/6 read) and react-bkoi-gl (Sep 6, 18 turns, $0.10, 11 bash/3 edit/1 write).
-  - Only recurring issue in both: uncapped `rg` (e.g. `rg '"version"' package.json`). react-bkoi-gl additionally catted 4 workflow yamls whole + `head -8 CHANGELOG.md` (rule-letter loophole).
+- **2026-09-09 — cross-session audit (<project-g>, <project-f>) tightens Token-Economy rules**:
+  - Audited last sessions: <project-g> (Sep 9, 122 turns, $1.13, 96% cache-read, 78 bash/18 edit/6 read) and <project-f> (Sep 6, 18 turns, $0.10, 11 bash/3 edit/1 write).
+  - Only recurring issue in both: uncapped `rg` (e.g. `rg '"version"' package.json`). <project-f> additionally catted 4 workflow yamls whole + `head -8 CHANGELOG.md` (rule-letter loophole).
   - Rules updated in AGENTS.md: (1) every match-printing `rg` now requires a cap (`-m`/`| head`/`-l -q -c`); JSON fields → `jq`. (2) `cat x | head` and `head -N file` explicitly count as whole-file-read violations; lone `sed -n` windows → `read`. (3) Prefer byte caps (`head -c 4000`) for possibly long-line output. (4) New turn-batching heuristic: batch search-then-act when target ~80% identified (cache-read cost scales with turns).
   - Not added: hard turn/token budgets and bash-vs-read quotas — tool mix varies legitimately by task.
 
@@ -1276,9 +1276,9 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 
 ### Added
 
-- **2026-09-06 12:21Z — audit-driven output-cap rules + bkoi-gl-js session audit**:
+- **2026-09-06 12:21Z — audit-driven output-cap rules + <project-e> session audit**:
   - Added: AGENTS.md Token Economy — minified/dist grep capping (`rg -o` or `| cut -c1-200`; `head -N` bounds lines, not bytes, and minified lines are megabytes); playwright-tester SKILL.md (Reconnaissance-then-action) — cap recon output (`JSON.stringify(x).slice(0, 500)` for `page.evaluate` dumps, `| tail -20` on test-run output, `-o`/`cut` for dist greps).
-  - Measured: audit of the last 2 bkoi-gl-js sessions (624 turns, 643K tok ≈ $0.90 waste floor): BIG_TOOL_OUTPUT 3×45–51KB from uncapped dist greps/probes = 57% of waste; rules target exactly that class. Target next audit: BIG_TOOL_OUTPUT → 0, DUP-read waste 238K → <50K.
+  - Measured: audit of the last 2 <project-e> sessions (624 turns, 643K tok ≈ $0.90 waste floor): BIG_TOOL_OUTPUT 3×45–51KB from uncapped dist greps/probes = 57% of waste; rules target exactly that class. Target next audit: BIG_TOOL_OUTPUT → 0, DUP-read waste 238K → <50K.
   - Docs: audit-reports/2026-09-06T114525Z.md (full report; notes the installed session-audit bundle ships src/ without bin/audit.mjs — audit ran via a workdir-local orchestrator over the bundle's own modules).
   - Risk: none — advisory text only.
 
@@ -1304,7 +1304,7 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 
 - **2026-09-06 12:21Z — `sg` directive → portable ast-grep rule**:
   - Changed: AGENTS.md Token Economy — canonical invocation is now `ast-grep run -p` with a narrow construct-shape trigger (imports, call sites of a specific API, `new X(`, `function|class|const X` definitions, JSX structure in first-party TS/TSX/JS src) plus an explicit rg-is-correct list (symbol/text presence, pipe-filtering command output, configs/JSON/CSS/MD, dist/node_modules). The `sg` alias is banned: on Linux it collides with shadow-utils' setgid `sg`. Install hint added (`npm i -g @ast-grep/cli`, prebuilt darwin/linux binaries).
-  - Why: three audited sessions across two projects invoked sg 0× despite it being installed before both bkoi-gl-js sessions (04:48 UTC via `npm i -g`); advisory + fuzzy "structural code search" phrasing did not survive glm-5.3. Narrow imperative trigger + rg whitelist is unambiguous, and `ast-grep` avoids the per-call deprecation banner `sg` prints.
+  - Why: three audited sessions across two projects invoked sg 0× despite it being installed before both <project-e> sessions (04:48 UTC via `npm i -g`); advisory + fuzzy "structural code search" phrasing did not survive glm-5.3. Narrow imperative trigger + rg whitelist is unambiguous, and `ast-grep` avoids the per-call deprecation banner `sg` prints.
   - Measured: AGENTS.md +~340 B permanent prefix (~+85 tok); `ast-grep run -p` verified functional on this machine (exit 0, banner-free).
   - Risk: low — Linux machines need a one-time `npm i -g @ast-grep/cli` (npm globals do not ride dotfile sync).
 
@@ -1319,7 +1319,7 @@ Measured: always-on floor unchanged — AGENTS.md 5,718 c, skill descriptions 1,
 
 - **2026-09-05 06:09Z — AGENTS.md output-cap rule (permission → imperative)**:
   - Changed: `AGENTS.md` Token-Economy line 16 — "Filtering command output through a pipe (`cmd | grep x`) is fine." → "Filtering command output through a pipe is fine — cap verbose output (`cmd | tail -40`, `npm view x | head -30`) before it lands in context."
-  - Why: session-audit 2026-09-05 (reports 054940Z, 060421Z) — BIG_TOOL_OUTPUT is the #1 rule by dollars directory-wide: 16 findings / 11 sessions / 2038K tokens = $1.19 (51KB vite/e2e dumps in react-bkoi-gl; 46-51KB npm-research dumps in agent project, recurring through 09-03). Permission wasn't triggering truncation; imperative with copy-able syntax should.
+  - Why: session-audit 2026-09-05 (reports 054940Z, 060421Z) — BIG_TOOL_OUTPUT is the #1 rule by dollars directory-wide: 16 findings / 11 sessions / 2038K tokens = $1.19 (51KB vite/e2e dumps in <project-f>; 46-51KB npm-research dumps in agent project, recurring through 09-03). Permission wasn't triggering truncation; imperative with copy-able syntax should.
   - Measured: AGENTS.md 2348 → 2425 bytes (~587 → ~606 tok, +19 tok permanent); skills 17 / desc 1682 B / prompts 1 unchanged
   - Risk: low — tail window may hide earlier errors; mitigated by wider re-run when diagnosing. Rollback = restore old line.
   - Verification: next session-audit target BIG_TOOL_OUTPUT 2038K → <800K; delete the clause if unmoved.
@@ -1450,8 +1450,8 @@ Entry format:
   - Measured: AGENTS.md 2,008→1,460 bytes (502→365 tok); catalog descs 3,977→3,919 chars (~994→~980 tok); permanent floor ~1,496→~1,345 tok (−151). All 3 edited skills validate-skill.mjs PASS. Portability: 0 hits.
   - Risk: low — ladder wording compressed but all rungs preserved; skill routing relies on descriptions (unchanged behavior). Prefix changed → fresh session required.
 
-- **2026-08-31 — session-learnings folded into 3 skills (react-bkoi-gl v3 sessions)**:
-  - Changed: body-only edits from the last 2 react-bkoi-gl sessions (08-26 already absorbed by playwright/browser skills; 08-30 gaps closed now). `map-integration` +new "Developing react-bkoi-gl itself (v3)" section (zero-config worker contract, engine-utils re-export, exports surface, framework-suite invariants, TerrainControl/Marker guards, docs split, checklist item 6; sections renumbered). `sdk-development` +framework-matrix consumer-testing bullet (repro apps × bundler majors, tarball-never-link, runtime-render assertions, sha-keyed prepare) +dead-script/file sweep in release step 5. `playwright-tester` +one-HUD-across-headed-suites +instant-case-transitions bullets.
+- **2026-08-31 — session-learnings folded into 3 skills (<project-f> v3 sessions)**:
+  - Changed: body-only edits from the last 2 <project-f> sessions (08-26 already absorbed by playwright/browser skills; 08-30 gaps closed now). `map-integration` +new "Developing <project-f> itself (v3)" section (zero-config worker contract, engine-utils re-export, exports surface, framework-suite invariants, TerrainControl/Marker guards, docs split, checklist item 6; sections renumbered). `sdk-development` +framework-matrix consumer-testing bullet (repro apps × bundler majors, tarball-never-link, runtime-render assertions, sha-keyed prepare) +dead-script/file sweep in release step 5. `playwright-tester` +one-HUD-across-headed-suites +instant-case-transitions bullets.
   - Why: focus — mistakes/feedback from those sessions (silent v6 render breakage, "visual UI does not match", "after 10s timer window taking time", "does all scripts required? remove dead") become portable guards.
   - Measured: map-integration body 6,155→8,803 B (+2,648, desc 320 chars unchanged); sdk-development +~0.7 KB body; playwright-tester +~0.6 KB body; all 3 validate-skill.mjs PASS; skill count 16; descriptions untouched → prefix byte-stable, no fresh session required.
   - Risk: low — bodies load on demand.
@@ -1735,23 +1735,23 @@ the skill mechanics. Refreshed HARNESS-ARCHITECTURE.md token figures.
 - **2026-08-12 — Global AGENTS.md de-projectified; CLAUDE.md test-line fixed**:
 
 **Directive:** "global AGENT.md should not contain project/stack-specific
-content." The global file loads in EVERY session (incl. non-Barikoi: `~/.pi`,
-`Downloads`, the `pi` repo) — stack/Barikoi-architecture content was waste there
+content." The global file loads in EVERY session (incl. non-<vendor>: `~/.pi`,
+`Downloads`, the `pi` repo) — stack/<vendor>-architecture content was waste there
 and a DRY duplicate of per-project CLAUDE.md.
 
 **Removed from `AGENTS.md`:**
   - **`## My stack` section entirely** (React 18, Ant Design 4, Redux Toolkit,
-  Barikoi GL Maps, Axios, Socket.io, Node ^18, JS/JSX, Vite/Next.js). All of it
-  lives in each project's CLAUDE.md (verified: dropx-admin/CLAUDE.md covers all).
+  <vendor> GL Maps, Axios, Socket.io, Node ^18, JS/JSX, Vite/Next.js). All of it
+  lives in each project's CLAUDE.md (verified: <project-a>/CLAUDE.md covers all).
   - **Project-architecture bullet** (App.config.js centralization, Redux slices,
   permission dot-notation, `user_type === 1`, NEXT_PUBLIC_AUTH_URL example) —
-  dropx-specific; already in its CLAUDE.md verbatim.
+  <project-a>-specific; already in its CLAUDE.md verbatim.
   - **Preserved (relocated):** the general "audit third-party code → flag, don't
   silently fix" clause moved into the Think-before-coding bullet (it's a general
   work-principle, not project-specific).
 
 **Also (approved prior turn, now the content's correct home):**
-  - `dropx-admin/CLAUDE.md`: removed bogus `npm test # Jest via react-scripts` —
+  - `<project-a>/CLAUDE.md`: removed bogus `npm test # Jest via react-scripts` —
   package.json has NO test script and NO test runner installed (not react-scripts,
   not vitest, not jest). Project docs outrank global per pi precedence, so a stale
   project line could have re-fired the bug the global strip closed.
@@ -1771,7 +1771,7 @@ ambiguity fixes. Prefix back to ≈ 2.0 K tok (7876 B), matching the original
 architecture estimate. Skill count 9, skill descriptions 2908 B (unchanged).
 Portability quick-check: **0** hits.
 **Risk:** low — global file is now project-agnostic by design; per-project
-specifics rely on each repo's CLAUDE.md being accurate (dropx-admin verified;
+specifics rely on each repo's CLAUDE.md being accurate (<project-a> verified;
 merchant/laboni-express CLAUDE.md accuracy not audited this pass — flag for
 user). Refreshed HARNESS-ARCHITECTURE.md token figures.
 **Prefix changed → recommend a fresh session** for cache.
@@ -1824,8 +1824,8 @@ history + per-repo `package.json`), not opinion. 3 of 9 suggestions REJECTED
 (see below) to protect prefix budget.
 
 **Accepted (evidence-backed):**
-  - **Stack line (Vite/react-scripts contradiction)** — dropx-admin is Vite
-  (`vite`/`vite build`, NO `react-scripts` dep); dropx-merchant is Next.js +
+  - **Stack line (Vite/react-scripts contradiction)** — <project-a> is Vite
+  (`vite`/`vite build`, NO `react-scripts` dep); <project-b> is Next.js +
   vitest. Old line `Tests via Jest / react-scripts` was wrong for every active
   Vite/Next repo. Now: "Build/router/test **vary by repo** (Vite+React Router,
   or Next.js; Jest via react-scripts or vitest) — check `package.json` scripts +
@@ -1833,7 +1833,7 @@ history + per-repo `package.json`), not opinion. 3 of 9 suggestions REJECTED
   in one line.
   - **"stop ponytail"/"normal mode" scope** — 56 session hits, 0 definition. Now
   explicit: suspends engineering ladder ONLY; Token-economy + Safety stay on.
-  - **Audit-role scoping** — API/permission conventions tagged "my own Barikoi
+  - **Audit-role scoping** — API/permission conventions tagged "my own <vendor>
   projects"; added "when auditing third-party code with different patterns,
   flag them; don't silently 'fix'."
   - **Karpathy always-on tag** — heading now "(ALWAYS ON — workflow cadence)";
@@ -1856,7 +1856,7 @@ Skill count 9 (unchanged). Skill descriptions 2908 B (unchanged). Lines 41
 Caveat: this is the largest single AGENTS.md bump; each fix pays for itself by
 preventing a recurring wrong-guess cycle (a bad `npm test` ≈ 1–3K tok/miss).
 **Prefix changed → recommend a fresh session** for cache. NOTE (separate,
-not auto-fixed): dropx-admin's project `CLAUDE.md` still says "Jest via
+not auto-fixed): <project-a>'s project `CLAUDE.md` still says "Jest via
 react-scripts" — also wrong for its Vite setup; flagged for user to fix.
 Also refreshed stale token figures in HARNESS-ARCHITECTURE.md (was 4713 B;
 now 5922 B / ~2.2K tok prefix).
@@ -1905,7 +1905,7 @@ the changelog entry itself to reflect this (not required for prefix cache).
   never a whole-file `read` just to reach one block (biggest single
   context-bloat source)."
 
-**Why:** Evidence from dropx-admin session `2026-08-12T15-46-35` (glm-5.2, 9
+**Why:** Evidence from <project-a> session `2026-08-12T15-46-35` (glm-5.2, 9
 turns, ~82.7K tokens). The model *knew* it needed the `.catch` block but still
 did a whole-file `read` of `AddMerchant.jsx` (11,593 B ≈ ~3K tok) on the first
 move — the single largest chunk in the session. The existing ladder already
@@ -2210,7 +2210,7 @@ fully portable. Driven by `pi-harness-engineer.md` + the office `skills-audit.md
   `skills-audit.md`, `skills-archive.tar.gz`, `zen-provider.template.json`.
   Kept existing `browser-tools` + `youtube-transcript` (merged, not replaced).
   - **settings.json**: `defaultThinkingLevel` max → **medium** (token efficiency; office's curated default).
-  - **AGENTS.md**: dropped hardcoded `~/Barikoi/` (path-agnostic); skill list generalized
+  - **AGENTS.md**: dropped hardcoded `~/<projects>/` (path-agnostic); skill list generalized
   (no hardcoded count) + added the two tool skills.
   - **Neutralized** stale `~/.agents/skills` (7 legacy skills pi auto-scans) → renamed
   `~/.agents/skills.disabled.<ts>`. Matches office audit end-state; removes always-on
@@ -2223,7 +2223,7 @@ fully portable. Driven by `pi-harness-engineer.md` + the office `skills-audit.md
   - **Why**: one `.pi` config, identical on every Linux/macOS box, replace-only sync,
   no env vars, minimal always-on tokens, cache-stable prefix.
   - **Risk**: low. All changes reversible; full backup at `~/.pi-backups/pi-agent.pre-portable.<ts>.tar.gz`.
-  - **Portability**: fixed (was: macOS-only binary in `bin/`, hardcoded `~/Barikoi/`,
+  - **Portability**: fixed (was: macOS-only binary in `bin/`, hardcoded `~/<projects>/`,
   `.agents` leakage). Now clean.
 
 **Always-on token cost (post-change):** AGENTS.md ~960 tok + 8 skill descriptions

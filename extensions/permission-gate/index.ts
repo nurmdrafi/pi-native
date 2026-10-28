@@ -6,7 +6,7 @@
  * CURRENT rules (IDs are stable; family = block-reason prefix):
  * | ID  | Family / mechanism            | Enforces |
  * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27 dropx-admin), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
+ * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27) |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
  * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; the block lists those hit lines and the piread call that covers them |
@@ -122,8 +122,8 @@ import {
  * sessions' prefixes; the read tool's own 2000-line/50KB truncation is too
  * generous to be the only brake). 2026-10-18: floor lowered 24KB→10KB —
  * piread compacts any read past its 2KB model budget, so a ~14KB whole read
- * came back with 11.5KB elided and still counted as "read" (dropx-admin
- * AddUser.jsx session). The gate must fire before compaction does. */
+ * came back with 11.5KB elided and still counted as "read" (2026-10-18
+ * whole-read session). The gate must fire before compaction does. */
 const BIG_READ_BYTES = 10_000;
 /** a requested window at least this wide counts as whole-file-ish */
 const BIG_READ_WIN = 500;
@@ -928,12 +928,17 @@ export default function (pi: ExtensionAPI) {
         const targets = search
           ? searchedPathsFrom(normSegs, ctx?.cwd, normPath, existsSync)
           : [];
+        // 2026-10-28: a compound (`echo hdr; rg A <f>; echo hdr;
+        // rg B <f>`) lists the SAME file once per search segment — without the
+        // dedupe the length-2 list defeated singleFile and the bare NN: lines
+        // rg printed certified nothing. Two searches of one file name one file.
+        const sole = [...new Set(targets)];
         const soleFile =
-          targets.length === 1 &&
-          statSync(targets[0], { throwIfNoEntry: false })?.isFile() === true;
+          sole.length === 1 &&
+          statSync(sole[0], { throwIfNoEntry: false })?.isFile() === true;
         pendingSearchCalls.set(event.toolCallId, {
           cwd: effectiveCwd(normSegs, ctx?.cwd, normPath),
-          singleFile: soleFile ? targets[0] : undefined,
+          singleFile: soleFile ? sole[0] : undefined,
         });
       }
     }

@@ -94,8 +94,8 @@ export async function validateEditAnchors(
    * Claude-Code parity — the path having been read this session suffices;
    * the per-anchor region-intersect is skipped. Never-read still blocks. */
   regionGuard = true,
-  /** Lines this session's own search PRINTED for this path (2026-10-27
-   * dropx-admin). Printed rows are content in context, like a read span: a
+  /** Lines this session's own search PRINTED for this path (2026-10-27).
+   * Printed rows are content in context, like a read span: a
    * bulk edit anchored on a line rg just showed must not pay a piread for
    * text already on screen. Path-only seeds (`rg -l`, `wc -l`) carry no lines
    * and certify nothing. */

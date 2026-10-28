@@ -106,7 +106,7 @@ export const cases = [
       await runSearch(
         pi,
         `cd ${hitRoot} && rg -n --no-heading '\bany\b' __tests__ -g '!node_modules'`,
-        "__tests__/redux/features/order/orderApi.test.ts:158:  const x: any = f();\n",
+        "__tests__/src/api/query/hitApi.test.ts:158:  const x: any = f();\n",
       );
       return read(pi, hitApi, { offset: 85, limit: 140 }, { outputLines: 140 });
     },
@@ -166,7 +166,7 @@ export const cases = [
     "anchor guard: a line a search printed certifies the edit (no re-read)",
     "pass",
     async (pi) => {
-      // dropx-admin 2026-10-27: bulk mechanical edits re-read a head line the
+      // 2026-10-27: bulk mechanical edits re-read a head line the
       // agent's own rg had just printed — a search's printed lines are content
       // in context and must certify like a read.
       const dir = mkdtempSync(join(tmpdir(), "ag-search-obs-"));
@@ -184,6 +184,72 @@ export const cases = [
         {
           oldText: "import { httpClient } from '../../utils/httpClient'",
           newText: "import { httpClient } from '../../utils/httpClient'\nimport { y } from 'y'",
+        },
+      ]);
+    },
+  ],
+  [
+    "anchor guard: compound searches on one file still seed its bare NN: hits",
+    "pass",
+    async (pi) => {
+      // 2026-10-28: `echo hdr; rg -n A <f>; echo hdr; rg -n B <f>`
+      // pushed the same path twice — targets.length === 2 killed singleFile,
+      // so the 107: match line rg printed certified nothing and the edit
+      // blocked. Two searches of the SAME file name one file; dedupe targets.
+      const dir = mkdtempSync(join(tmpdir(), "ag-search-dup-"));
+      const f = join(dir, "api.ts");
+      writeFileSync(
+        f,
+        "export const api = {\n" +
+          "  getItems: builder.query({\n" +
+          "    query: ({ page }) => `/items?page=${page}`,\n" +
+          "  }),\n" +
+          "};\n",
+      );
+      await runSearch(
+        pi,
+        `echo "=== WT ItemsFilter ==="; rg -n -A3 'interface Filter' ${f}; echo "=== WT getItems ==="; rg -n 'getItems' ${f}`,
+        "=== WT ItemsFilter ===\n=== WT getItems ===\n2:  getItems: builder.query({\n",
+      );
+      return edit(pi, f, [
+        {
+          oldText:
+            "  getItems: builder.query({\n    query: ({ page }) => `/items?page=${page}`,\n  }),",
+          newText:
+            "  getItems: builder.query({\n    query: ({ page }) => `/items?page=${page}&limit=50`,\n  }),",
+        },
+      ]);
+    },
+  ],
+  [
+    "anchor guard: one printed line certifies a multi-line oldText span",
+    "pass",
+    async (pi) => {
+      // 2026-10-28 (span 107-112): the span rule is
+      // lenient by design — ANY printed line inside the span certifies it,
+      // because the exact+fuzzy existence check still runs against the file.
+      const dir = mkdtempSync(join(tmpdir(), "ag-search-span-"));
+      const f = join(dir, "mod.jsx");
+      writeFileSync(
+        f,
+        "import a from 'a'\n" +
+          "export const q = {\n" +
+          "  getItems: builder.query({\n" +
+          "    query: ({ page }) => `?page=${page}`,\n" +
+          "  }),\n" +
+          "};\n",
+      );
+      await runSearch(
+        pi,
+        `rg -n getItems ${f}`,
+        "3:  getItems: builder.query({\n",
+      );
+      return edit(pi, f, [
+        {
+          oldText:
+            "  getItems: builder.query({\n    query: ({ page }) => `?page=${page}`,\n  }),",
+          newText:
+            "  getItems: builder.query({\n    query: ({ page }) => `?page=${page}&limit=50`,\n  }),",
         },
       ]);
     },
@@ -211,7 +277,7 @@ export const cases = [
       await runSearch(
         pi,
         `cd ${hitRoot} && rg -l any __tests__`,
-        "__tests__/redux/features/order/orderApi.test.ts\n",
+        "__tests__/src/api/query/hitApi.test.ts\n",
       );
       return read(pi, hitApi, { offset: 300, limit: 120 }, { outputLines: 120 });
     },

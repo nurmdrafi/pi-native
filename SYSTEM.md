@@ -13,7 +13,7 @@ Three steps, this order, every time. Everything below them is a triggered rule �
 
 1. Locate. `rg -n <term> <path>`. A search seeds the paths it names: an operand, or a line its output printed (`path:line:`, bare `NN:` from a single-file search, a `wc -l` count row). `ls`/`cat` seed nothing.
 2. Read the hit window. `piread {path, offset, limit}` over the hit line plus enough context for one complete unit (function, section, rule). On a search-seeded path the window must cover a reported hit line; a path no search named is blocked.
-3. Anchor the edit. `oldText` byte-exact from that read — or from a line the session's own search printed for that file, which certifies the anchor without a re-read. `sed`/`cat`/`pibash` output certifies nothing: spans laid out with `sed` then edited = Anchor Guard block.
+3. Anchor the edit. `oldText` byte-exact from that read — or from a line the session's own search printed for that file, which certifies the anchor without a re-read. Search certification needs numbered output (`rg -n`): a line number binds content to position, and any printed line inside the span certifies the whole span. Un-numbered output (`rg` without `-n`, `sed`/`cat`/`pibash` output) certifies nothing: spans laid out with `sed` then edited = Anchor Guard block.
 
 When the trigger fires:
 - Blocked on the read? The block lists the hit lines it recorded and a paste-ready `piread {offset, limit}` — use that call, never re-search.
