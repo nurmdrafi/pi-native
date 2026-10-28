@@ -420,6 +420,281 @@ fn report_usage(
 }
 
 /// Parse one transcript into an extract Value. Tolerant: any line may fail.
+// ---- lifecycle report (P8) ------------------------------------------------
+//
+// Per-turn ledger: what one turn paid, then what the next turn paid, so the
+// redundancy BETWEEN turns is visible instead of inferred. Waste model, stated
+// in the output so nothing is overclaimed: an avoidable round re-bills the whole
+// prefix, so its cost is the session's mean prefix; prose output is counted at
+// face value, because a tool-free essay is output nobody acts on. Per-turn
+// `cacheRead` gives the observed floor, not an exact attribution.
+
+/// A prose turn is output-heavy and tool-free — the essay tail this prices.
+const PROSE_MIN_OUTPUT: i64 = 1_000;
+/// Flagged rows printed per session.
+const LIFECYCLE_ROWS: usize = 10;
+
+#[derive(Default, Debug)]
+struct TurnRow {
+    idx: usize,
+    ts: Option<String>,
+    input: i64,
+    cache_read: i64,
+    cache_write: i64,
+    output: i64,
+    calls: u32,
+    dups: u32,
+    result_bytes: u64,
+    prose: bool,
+}
+
+impl TurnRow {
+    fn flags(&self) -> String {
+        let mut f: Vec<&str> = Vec::new();
+        if self.prose {
+            f.push("prose");
+        }
+        if self.dups > 0 {
+            f.push("dupCall");
+        }
+        f.join(",")
+    }
+}
+
+#[derive(Default, Debug)]
+struct Lifecycle {
+    rows: Vec<TurnRow>,
+    dup_calls: u32,
+    resends: u32,
+    probe_repeats: u32,
+    prose_out: i64,
+}
+
+impl Lifecycle {
+    fn mean_prefix(&self) -> i64 {
+        if self.rows.is_empty() {
+            return 0;
+        }
+        let total: i64 = self
+            .rows
+            .iter()
+            .map(|r| r.input + r.cache_read + r.cache_write)
+            .sum();
+        total / self.rows.len() as i64
+    }
+    fn rounds(&self) -> u32 {
+        self.dup_calls
+    }
+    fn est_tokens(&self) -> i64 {
+        self.rounds() as i64 * self.mean_prefix() + self.prose_out
+    }
+    fn prose_turns(&self) -> u32 {
+        self.rows.iter().filter(|r| r.prose).count() as u32
+    }
+}
+
+fn is_edit_call(name: &str) -> bool {
+    matches!(name, "piedit" | "edit")
+}
+
+fn ts_clock(ts: &Option<String>) -> String {
+    match ts.as_deref() {
+        Some(s) if s.len() >= 16 => s[11..16].to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Pure detector core: one extract in, one priced ledger out. Kept free of I/O
+/// so the case corpus can pin the waste model without a session directory.
+fn lifecycle_of(v: &Value) -> Lifecycle {
+    let mut lc = Lifecycle::default();
+    let turns = match v.get("turns").and_then(Value::as_array) {
+        Some(t) => t,
+        None => return lc,
+    };
+
+    let mut result_bytes: HashMap<String, u64> = HashMap::new();
+    let mut result_blocked: HashMap<String, bool> = HashMap::new();
+    if let Some(rs) = v.get("results").and_then(Value::as_array) {
+        for r in rs {
+            let Some(id) = r.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(b) = r.get("bytes").and_then(Value::as_u64) {
+                *result_bytes.entry(id.to_string()).or_insert(0) += b;
+            }
+            let blocked = r.get("blk").and_then(Value::as_bool).unwrap_or(false)
+                || r.get("err").map(|e| !e.is_null()).unwrap_or(false);
+            result_blocked.insert(id.to_string(), blocked);
+        }
+    }
+
+    let mut by_rid: HashMap<String, usize> = HashMap::new();
+    for (i, t) in turns.iter().enumerate() {
+        let u = t.get("usage");
+        let n = |k: &str| {
+            u.and_then(|u| u.get(k))
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+        };
+        if let Some(rid) = t.get("rid").and_then(Value::as_str) {
+            by_rid.insert(rid.to_string(), i);
+        }
+        lc.rows.push(TurnRow {
+            idx: i,
+            ts: t.get("ts").and_then(Value::as_str).map(String::from),
+            input: n("input"),
+            cache_read: n("cacheRead"),
+            cache_write: n("cacheWrite"),
+            output: n("output"),
+            calls: 0,
+            dups: 0,
+            result_bytes: 0,
+            prose: false,
+        });
+    }
+
+    let mut seen: HashMap<(String, String), ()> = HashMap::new();
+    let mut last_call: HashMap<(String, String), String> = HashMap::new();
+    let mut probes: HashMap<(String, String), std::collections::HashSet<usize>> = HashMap::new();
+    if let Some(calls) = v.get("calls").and_then(Value::as_array) {
+        for c in calls {
+            let name = c.get("name").and_then(Value::as_str).unwrap_or("");
+            let ph = c.get("ph").and_then(Value::as_str).unwrap_or("");
+            let rid = c.get("rid").and_then(Value::as_str).unwrap_or("");
+            let target = c
+                .get("path")
+                .and_then(Value::as_str)
+                .or_else(|| c.get("cmd").and_then(Value::as_str))
+                .unwrap_or("");
+            let slot = by_rid.get(rid).copied();
+            let duplicate = seen
+                .insert((name.to_string(), ph.to_string()), ())
+                .is_some();
+            let call_id = c.get("id").and_then(Value::as_str).unwrap_or("");
+            let prior_id = last_call.insert((name.to_string(), ph.to_string()), call_id.to_string());
+            if duplicate {
+                lc.dup_calls += 1;
+                // A resend is a duplicate edit whose earlier attempt was blocked:
+                // only then is the second payload a re-bill of the same work.
+                if is_edit_call(name)
+                    && prior_id
+                        .and_then(|id| result_blocked.get(&id).copied())
+                        .unwrap_or(false)
+                {
+                    lc.resends += 1;
+                }
+            }
+            if let Some(i) = slot {
+                if !name.is_empty() && !target.is_empty() {
+                    let set = probes
+                        .entry((name.to_string(), target.to_string()))
+                        .or_default();
+                    if set.insert(i) && set.len() == 3 {
+                        lc.probe_repeats += 1;
+                    }
+                }
+                let extra = c
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| result_bytes.get(id).copied())
+                    .unwrap_or(0);
+                let row = &mut lc.rows[i];
+                row.calls += 1;
+                row.result_bytes += extra;
+                if duplicate {
+                    row.dups += 1;
+                }
+            }
+        }
+    }
+
+    for row in &mut lc.rows {
+        if row.calls == 0 && row.output >= PROSE_MIN_OUTPUT {
+            row.prose = true;
+            lc.prose_out += row.output;
+        }
+    }
+    lc
+}
+
+fn report_lifecycle(
+    found: &[(PathBuf, String, u128)],
+    parsed: &HashMap<String, (FileId, Value)>,
+    store: &Store,
+    only: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    let mut grand_rounds = 0u32;
+    let mut grand_tokens = 0i64;
+    let mut sessions = 0usize;
+    for (path, _, _) in found {
+        let key = path.to_string_lossy().to_string();
+        let extract: Option<Value> = match parsed.get(&key) {
+            Some((_, v)) => Some(v.clone()),
+            None => store
+                .files
+                .get(&key)
+                .and_then(|e| serde_json::from_slice::<Value>(store.extract(e)).ok()),
+        };
+        let Some(v) = extract else { continue };
+        let id = v.get("sessionId").and_then(Value::as_str).unwrap_or("");
+        if let Some(want) = only {
+            if !id.contains(want) {
+                continue;
+            }
+        }
+        let lc = lifecycle_of(&v);
+        if lc.rows.is_empty() {
+            continue;
+        }
+        sessions += 1;
+        println!(
+            "lifecycle: {id}  turns={}  mean_prefix={}  est={} tok",
+            lc.rows.len(),
+            lc.mean_prefix(),
+            lc.est_tokens()
+        );
+        println!(
+            "{:<4}{:<7}{:>7}{:>7}{:>7}{:>6}{:>7}  flags",
+            "turn", "at", "in/t", "cacheR", "out/t", "calls", "rbytes"
+        );
+        let mut shown = 0usize;
+        for r in lc.rows.iter().filter(|r| r.prose || r.dups > 0) {
+            if shown >= LIFECYCLE_ROWS {
+                break;
+            }
+            shown += 1;
+            println!(
+                "{:<4}{:<7}{:>7}{:>7}{:>7}{:>6}{:>7}  {}",
+                r.idx,
+                ts_clock(&r.ts),
+                r.input,
+                r.cache_read,
+                r.output,
+                r.calls,
+                r.result_bytes,
+                r.flags()
+            );
+        }
+        println!(
+            "  waste: dupCall={} resendAfterBlock={} probeRepeat={} proseOnly={} | rounds={} est={} tok",
+            lc.dup_calls,
+            lc.resends,
+            lc.probe_repeats,
+            lc.prose_turns(),
+            lc.rounds(),
+            lc.est_tokens()
+        );
+        grand_rounds += lc.rounds();
+        grand_tokens += lc.est_tokens();
+    }
+    println!("total: sessions={sessions} rounds={grand_rounds} est={grand_tokens} tok");
+    println!(
+        "model: an avoidable round re-bills the mean prefix; prose output counted at face value; per-turn cacheRead is the observed floor, not an attribution"
+    );
+    Ok(())
+}
+
 fn extract_file(path: &Path, project_fallback: &str) -> Value {
     let f = match fs::File::open(path) {
         Ok(f) => f,
@@ -818,6 +1093,31 @@ fn discover(sessions_dir: &Path, now_ms: u128) -> (Vec<(PathBuf, String, u128)>,
 /// Append one record to the extract stream, when a stream is open. A warm
 /// no-op run emits exactly what the store already holds, so the caller may keep
 /// the existing file untouched instead of rewriting it.
+/// P6 (2026-11-01): `--max` truncates by recency, but a session written seconds
+/// ago can still fall out of the slice when a burst of siblings shares a
+/// timestamp — an audit then analyses the previous session and reports on it as
+/// if it were the live one. A dropped session inside the live window is folded
+/// back in, so the slice is `max` plus at most a handful of live ones.
+const LIVE_WINDOW_MS: u128 = 600_000;
+
+fn select_sessions(
+    found: Vec<(PathBuf, String, u128)>,
+    max: usize,
+    now_ms: u128,
+) -> Vec<(PathBuf, String, u128)> {
+    if found.len() <= max {
+        return found;
+    }
+    let mut kept: Vec<(PathBuf, String, u128)> = found.clone();
+    kept.truncate(max);
+    for s in found.into_iter().skip(max) {
+        if now_ms.saturating_sub(s.2) <= LIVE_WINDOW_MS {
+            kept.push(s);
+        }
+    }
+    kept
+}
+
 fn emit_line(w: &mut Option<Box<dyn Write>>, bytes: &[u8]) -> io::Result<()> {
     if let Some(w) = w.as_mut() {
         w.write_all(bytes)?;
@@ -834,6 +1134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut max: usize = usize::MAX;
     let mut force = false;
     let mut report: Option<String> = None;
+    let mut session: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--sessions-dir" => sessions_dir = PathBuf::from(args.next().ok_err("--sessions-dir needs a value")?),
@@ -842,8 +1143,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--max" => max = args.next().ok_err("--max needs a value")?.parse()?,
             "--force" => force = true,
             "--report" => report = Some(args.next().ok_err("--report needs a value")?),
+            "--session" => session = Some(args.next().ok_err("--session needs a value")?),
             "--help" | "-h" => {
-                println!("usage: pidx [--sessions-dir DIR] [--state PATH] [--out PATH] [--max N] [--force] [--report usage]");
+                println!("usage: pidx [--sessions-dir DIR] [--state PATH] [--out PATH] [--max N] [--session ID] [--force] [--report usage|lifecycle]");
                 return Ok(());
             }
             other => return Err(format!("unknown arg: {other}").into()),
@@ -861,7 +1163,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let store = load_store(&state_path);
 
     let (found, excluded) = discover(&sessions_dir, now_ms);
-    let found: Vec<(PathBuf, String, u128)> = found.into_iter().take(max).collect();
+    let found: Vec<(PathBuf, String, u128)> = select_sessions(found, max, now_ms);
 
     // classify: reuse (fresh cache range) vs parse
     let mut to_parse: Vec<(String, PathBuf, String, FileId)> = Vec::new();
@@ -914,6 +1216,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(which) = report {
         match which.as_str() {
             "usage" => report_usage(&found, &parsed_map, &store)?,
+            "lifecycle" => report_lifecycle(&found, &parsed_map, &store, session.as_deref())?,
             other => return Err(format!("unknown report: {other}").into()),
         }
         return Ok(());
@@ -1031,4 +1334,108 @@ fn dirs_state_default() -> PathBuf {
     }
     let home = env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home).join(".pi").join("agent").join(".cache").join("pidx-state.json")
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Three tool turns, a duplicate piread, a duplicate piedit, three windows of
+    /// one target, and one tool-free essay turn.
+    fn extract() -> Value {
+        json!({
+            "sessionId": "s1",
+            "turns": [
+                {"rid":"r1","ts":"2026-01-01T10:00:00Z","usage":{"input":10,"cacheRead":100,"cacheWrite":0,"output":50}},
+                {"rid":"r2","ts":"2026-01-01T10:01:00Z","usage":{"input":10,"cacheRead":100,"cacheWrite":0,"output":80}},
+                {"rid":"r3","ts":"2026-01-01T10:02:00Z","usage":{"input":10,"cacheRead":100,"cacheWrite":0,"output":90}},
+                {"rid":"r4","ts":"2026-01-01T10:03:00Z","usage":{"input":10,"cacheRead":100,"cacheWrite":0,"output":5000}}
+            ],
+            "calls": [
+                {"id":"c1","name":"piread","ts":"a","rid":"r1","ph":"h1","path":"a.ts","cmd":null},
+                {"id":"c2","name":"piread","ts":"b","rid":"r2","ph":"h1","path":"a.ts","cmd":null},
+                {"id":"c3","name":"piedit","ts":"c","rid":"r2","ph":"h9","path":"a.ts","cmd":null},
+                {"id":"c4","name":"piedit","ts":"d","rid":"r3","ph":"h9","path":"a.ts","cmd":null},
+                {"id":"c5","name":"rg","ts":"e","rid":"r1","ph":"h2","path":null,"cmd":"rg x b.ts"},
+                {"id":"c6","name":"rg","ts":"f","rid":"r2","ph":"h3","path":null,"cmd":"rg x b.ts"},
+                {"id":"c7","name":"rg","ts":"g","rid":"r3","ph":"h4","path":null,"cmd":"rg x b.ts"}
+            ],
+            "results": [
+                {"id":"c1","bytes":500}, {"id":"c2","bytes":500},
+                {"id":"c3","bytes":80,"blk":true}, {"id":"c4","bytes":80}
+            ]
+        })
+    }
+
+    #[test]
+    fn prices_duplicate_calls_as_prefix_rounds() {
+        let lc = lifecycle_of(&extract());
+        assert_eq!(lc.rows.len(), 4);
+        assert_eq!(lc.dup_calls, 2, "one repeated piread, one repeated piedit");
+        assert_eq!(lc.resends, 1, "the repeated edit is a resend");
+        assert_eq!(lc.mean_prefix(), 110);
+    }
+
+    #[test]
+    fn counts_a_tool_free_essay_turn_as_prose() {
+        let lc = lifecycle_of(&extract());
+        assert_eq!(lc.prose_turns(), 1);
+        assert_eq!(lc.prose_out, 5000);
+        assert!(lc.rows[3].prose, "the 5000-token turn is the essay");
+    }
+
+    #[test]
+    fn prices_waste_as_rounds_times_prefix_plus_prose() {
+        let lc = lifecycle_of(&extract());
+        assert_eq!(lc.est_tokens(), 2 * 110 + 5000);
+    }
+
+    #[test]
+    fn flags_three_windows_of_one_target_once() {
+        let lc = lifecycle_of(&extract());
+        assert_eq!(lc.probe_repeats, 1, "rg on b.ts in three turns");
+    }
+
+    #[test]
+    fn a_duplicate_edit_after_success_is_not_a_resend() {
+        let v = json!({
+            "turns": [{"rid":"r1","ts":"2026-01-01T10:00:00Z","usage":{"input":1,"cacheRead":1,"cacheWrite":0,"output":1}}],
+            "calls": [
+                {"id":"c1","name":"piedit","ts":"a","rid":"r1","ph":"h1","path":"a.ts","cmd":null},
+                {"id":"c2","name":"piedit","ts":"b","rid":"r1","ph":"h1","path":"a.ts","cmd":null}
+            ],
+            "results": [{"id":"c1","bytes":10}]
+        });
+        let lc = lifecycle_of(&v);
+        assert_eq!(lc.dup_calls, 1);
+        assert_eq!(lc.resends, 0, "the earlier attempt was not blocked");
+    }
+
+    #[test]
+    fn empty_extract_is_not_an_error() {
+        let lc = lifecycle_of(&json!({}));
+        assert!(lc.rows.is_empty());
+        assert_eq!(lc.est_tokens(), 0);
+    }
+
+    #[test]
+    fn select_sessions_folds_a_live_session_back_in() {
+        let found = vec![
+            (PathBuf::from("a"), "p".to_string(), 9_000u128),
+            (PathBuf::from("b"), "p".to_string(), 8_000u128),
+            (PathBuf::from("live"), "p".to_string(), 9_900u128),
+        ];
+        assert_eq!(select_sessions(found, 2, 10_000).len(), 3);
+    }
+
+    #[test]
+    fn select_sessions_drops_old_sessions_beyond_max() {
+        let found = vec![
+            (PathBuf::from("a"), "p".to_string(), 1_000u128),
+            (PathBuf::from("b"), "p".to_string(), 900u128),
+            (PathBuf::from("c"), "p".to_string(), 800u128),
+        ];
+        assert_eq!(select_sessions(found, 2, 10_000_000).len(), 2);
+    }
 }
