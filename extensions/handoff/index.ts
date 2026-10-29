@@ -22,6 +22,14 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 
+import {
+  countTurns,
+  handoffCommandText,
+  resolveTurnLimit,
+  shouldPromptForHandoff,
+  suggestGoal,
+} from "./turn-limit.ts";
+
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
 1. Summarizes relevant context from the conversation (decisions made, approaches taken, key findings)
@@ -87,6 +95,33 @@ function getHandoffMessages(branch: SessionEntry[]) {
 }
 
 export default function (pi: ExtensionAPI) {
+  // Offer a handoff once per session when the turn limit is reached. The flag
+  // is module state, reset on session_start so a fresh session gets a fresh offer.
+  let handoffOffered = false;
+
+  pi.on("session_start", () => {
+    handoffOffered = false;
+  });
+
+  pi.on("agent_settled", async (event, ctx) => {
+    if (event.aborted || ctx.mode !== "tui" || !ctx.hasUI) return;
+
+    const entries = ctx.sessionManager.getBranch();
+    const turns = countTurns(entries);
+    const limit = resolveTurnLimit(process.env);
+    if (!shouldPromptForHandoff(turns, limit, handoffOffered)) return;
+
+    handoffOffered = true;
+    const proceed = await ctx.ui.confirm(
+      "Turn limit reached",
+      `This session reached ${turns} turns (limit ${limit}). Hand off to a new session?`,
+    );
+    if (!proceed) return;
+
+    ctx.ui.setEditorText(handoffCommandText(suggestGoal(entries)));
+    ctx.ui.notify("Submit to draft the handoff prompt.", "info");
+  });
+
   pi.registerCommand("handoff", {
     description: "Transfer context to a new focused session",
     handler: async (args, ctx) => {
