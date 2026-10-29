@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "54a9965b-ef12-4d01-b5dd-5a09d1420461",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
+  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+  "specification": {
+    "sha256": "687eaa19c68e48629509a16eb6ea58f2dbd53c8d15077970845c53c627c86a25",
+    "bytes": 3013
+  },
+  "artifact": {
+    "sha256": "71d160d994f7cb7c2ff49b5ad774ef84da37c792dfda3ee842593bffd01b8f87",
+    "bytes": 849576
+  }
+}

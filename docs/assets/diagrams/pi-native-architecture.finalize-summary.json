@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
+    "sha256": "687eaa19c68e48629509a16eb6ea58f2dbd53c8d15077970845c53c627c86a25",
+    "bytes": 3013
+  },
+  "artifact": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+    "sha256": "71d160d994f7cb7c2ff49b5ad774ef84da37c792dfda3ee842593bffd01b8f87",
+    "bytes": 849576
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.finalize.json",
+    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.finalize-summary.json",
+    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 6725,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
+    "sha256": "ed28d1fdc73eff23d75bb918c5461ef7eb2226bb0e1b90428483ecf0e0ac8f1b",
+    "bytes": 1790
+  },
+  "artifact": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+    "sha256": "27890b47f9e9b357acad82635cf5f3397d524fb5130a7486db91fe38a24b7ae3",
+    "bytes": 833815
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.finalize.json",
+    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 6375,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

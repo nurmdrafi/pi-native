@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "standard",
+  "specification": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
+    "sha256": "097d2ca83d769ad66d981609e4a46aa553d78f13ef8284a27f3304b79429c551",
+    "bytes": 3541
+  },
+  "artifact": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+    "sha256": "ab4783af9aff79be3b307227b8a3695b116c01b46d108abe4e9f80d5b650ca89",
+    "bytes": 848061
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.finalize.json",
+    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 6595,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

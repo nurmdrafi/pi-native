@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "piedit — native edit pipeline",
+    "subtitle": "Re-entrancy queue, normalize + fuzzy match, diff, envelope",
+    "output": "piedit-pipeline.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "ext", "label": "extensions/piedit/index.ts" },
+    { "id": "core", "label": "rust-tools/piedit/src" },
+    { "id": "model", "label": "Result" }
+  ],
+  "nodes": [
+    { "id": "queue", "lane": "ext", "col": 0, "type": "frontend", "label": "withFileMutationQueue", "sublabel": "re-entrancy guard", "width": 176 },
+    { "id": "d", "lane": "ext", "col": 1, "type": "security", "label": "Daemon alive?", "sublabel": "transport check" },
+    { "id": "da", "lane": "ext", "col": 2, "type": "backend", "label": "Rung 1, daemon", "sublabel": "bin/piedit --serve" },
+    { "id": "os", "lane": "ext", "col": 3, "type": "backend", "label": "Rung 2, one-shot", "sublabel": "bin/piedit per call" },
+    { "id": "bf", "lane": "ext", "col": 4, "type": "database", "label": "Rung 3, oracle", "sublabel": "built-in edit, fail-open" },
+    { "id": "diffts", "lane": "ext", "col": 5, "type": "frontend", "label": "Render diff", "sublabel": "generateDiffString / generateUnifiedPatch" },
+    { "id": "climain", "lane": "core", "col": 1, "type": "backend", "label": "cli.rs -> main.rs", "sublabel": "--path/--edits/--serve" },
+    { "id": "pipe", "lane": "core", "col": 2, "type": "backend", "label": "pipeline.rs", "sublabel": "normalize + NFKC match, apply, write" },
+    { "id": "diff", "lane": "core", "col": 3, "type": "backend", "label": "diff.rs", "sublabel": "jsdiff port, byte-identical" },
+    { "id": "env", "lane": "core", "col": 4, "type": "backend", "label": "envelope.rs", "sublabel": "diff/patch/firstChangedLine" },
+    { "id": "out", "lane": "model", "col": 4, "type": "backend", "label": "Envelope to model" }
+  ],
+  "edges": [
+    { "id": "p1", "from": "queue", "to": "d" },
+    { "id": "p2", "from": "d", "to": "climain", "label": "yes", "variant": "emphasis" },
+    { "id": "p3", "from": "d", "to": "os", "label": "no / transport fails", "variant": "dashed" },
+    { "id": "p4", "from": "os", "to": "bf", "label": "spawn / parse failure", "variant": "dashed" },
+    { "id": "p5", "from": "da", "to": "os", "label": "spawn / timeout parity failure", "variant": "dashed" },
+    { "id": "p6", "from": "climain", "to": "pipe", "variant": "emphasis" },
+    { "id": "p8", "from": "pipe", "to": "env", "label": "exact/fuzzy match fails", "variant": "dashed" },
+    { "id": "p9", "from": "pipe", "to": "diff", "variant": "emphasis" },
+    { "id": "p10", "from": "diff", "to": "env", "label": "diff + unified patch" },
+    { "id": "p11", "from": "env", "to": "out", "label": "envelope JSON", "variant": "emphasis" },
+    { "id": "p12", "from": "os", "to": "out", "variant": "dashed" },
+    { "id": "p13", "from": "bf", "to": "out", "variant": "dashed" },
+    { "id": "p14", "from": "out", "to": "diffts", "label": "legacy baseContent/newContent", "variant": "dashed" }
+  ],
+  "mainPath": ["queue", "d", "climain", "pipe", "diff", "env", "out"]
+}

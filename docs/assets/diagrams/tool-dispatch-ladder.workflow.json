@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Tool dispatch ladder",
+    "subtitle": "Every native tool: extension dispatch, three rungs, one envelope",
+    "output": "tool-dispatch-ladder.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ext", "label": "Extension dispatch" },
+    { "id": "native", "label": "Native rungs" },
+    { "id": "model", "label": "Result" }
+  ],
+  "nodes": [
+    { "id": "m", "lane": "ext", "col": 0, "type": "external", "label": "Model / core", "sublabel": "calls tool" },
+    { "id": "e", "lane": "ext", "col": 1, "type": "frontend", "label": "Extension index.ts", "sublabel": "individual registration" },
+    { "id": "d", "lane": "ext", "col": 2, "type": "security", "label": "Daemon alive?", "sublabel": "transport check" },
+    { "id": "r1", "lane": "native", "col": 2, "type": "backend", "label": "Rung 1, daemon", "sublabel": "bin/X --serve, NDJSON over stdio", "tag": "id-matched, lazy restart" },
+    { "id": "r2", "lane": "native", "col": 3, "type": "backend", "label": "Rung 2, one-shot", "sublabel": "bin/X per call" },
+    { "id": "r3", "lane": "native", "col": 4, "type": "database", "label": "Rung 3, oracle", "sublabel": "built-in TypeScript tool, always correct" },
+    { "id": "out", "lane": "model", "col": 5, "type": "backend", "label": "Envelope result", "sublabel": "to model" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "m", "to": "e", "label": "tool call" },
+    { "id": "e2", "from": "e", "to": "d", "label": "dispatch" },
+    { "id": "e3", "from": "d", "to": "r1", "label": "yes", "variant": "emphasis" },
+    { "id": "e4", "from": "d", "to": "r2", "label": "no / transport fails", "variant": "dashed" },
+    { "id": "e5", "from": "r1", "to": "r2", "label": "spawn / timeout parity failure", "variant": "dashed" },
+    { "id": "e6", "from": "r2", "to": "r3", "label": "spawn / parse failure", "variant": "dashed" },
+    { "id": "e7", "from": "r1", "to": "out", "label": "served" },
+    { "id": "e8", "from": "r2", "to": "out", "label": "served" },
+    { "id": "e9", "from": "r3", "to": "out", "label": "served" }
+  ],
+  "mainPath": ["m", "e", "d", "r1", "out"]
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "pidx — incremental session indexer",
+    "subtitle": "Byte-offset cache: parse changed files, replay cached extracts; summary to stderr",
+    "output": "pidx-pipeline.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "ext", "label": "extensions/pidx/index.ts" },
+    { "id": "core", "label": "rust-tools/pidx/src/main.rs" },
+    { "id": "out", "label": "Output" }
+  ],
+  "nodes": [
+    { "id": "reg", "lane": "ext", "col": 0, "type": "frontend", "label": "pidx tool", "sublabel": "first-class registration" },
+    { "id": "scan", "lane": "core", "col": 1, "type": "backend", "label": "Scan sessions-dir", "sublabel": "key files by size + mtime_ns" },
+    { "id": "parse", "lane": "core", "col": 2, "type": "backend", "label": "Parse JSONL", "sublabel": "turns, calls, results, compactions, skills" },
+    { "id": "store", "lane": "core", "col": 3, "type": "database", "label": "State store", "sublabel": "byte-range header + raw extract bytes" },
+    { "id": "emit", "lane": "out", "col": 4, "type": "backend", "label": "Write extracts", "sublabel": "JSONL per session, newest first" }
+  ],
+  "edges": [
+    { "id": "n1", "from": "reg", "to": "scan", "variant": "emphasis" },
+    { "id": "n2", "from": "scan", "to": "parse", "label": "file changed", "variant": "emphasis" },
+    { "id": "n3", "from": "scan", "to": "store", "label": "unchanged", "variant": "dashed" },
+    { "id": "n4", "from": "parse", "to": "store", "variant": "emphasis" },
+    { "id": "n5", "from": "store", "to": "emit", "label": "replay cached extract", "variant": "dashed" },
+    { "id": "n6", "from": "parse", "to": "emit", "variant": "emphasis" }
+  ],
+  "mainPath": ["reg", "scan", "parse", "store", "emit"]
+}

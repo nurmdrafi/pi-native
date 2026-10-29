@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "93f5b986-2a0a-429c-a587-02857b2159b7",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
+  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+  "specification": {
+    "sha256": "ce2ddb364852d1e2ed708d644b22461a3fee2635819d66fe5728742871bc0221",
+    "bytes": 3127
+  },
+  "artifact": {
+    "sha256": "f56c848a3f7a961a3ae01c9a9aa350bf89ec29b860837b9d94e628f389e25657",
+    "bytes": 845426
+  }
+}

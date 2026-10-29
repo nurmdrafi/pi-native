@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "88e55adc-95fe-420c-a7ad-98029b96d221",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.workflow.json",
+  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+  "specification": {
+    "sha256": "87fffa8d1a2abb035f37acca0b309f3c6e007273f2be54fe0d4bfec6f21a26db",
+    "bytes": 3133
+  },
+  "artifact": {
+    "sha256": "e1ecf4217399612599fb7bb770a02123fa54bb77ffa41a484834dd88d6d84908",
+    "bytes": 845509
+  }
+}

@@ -98,54 +98,14 @@ Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    M(["🧠 agent turn"]) --> PG{"🛡️ permission-gate<br/>23 rules · fail-closed"}
-    PG ==>|"⛔ blocked"| BX["✏️ Block + targeted fix —<br/>the model gets the fix, not the failure"]
-    PG ==>|"✅ approved"| TC["⚙️ Native tool call<br/>piread · piedit · pibash · pidx"]
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/pi-native-architecture-dark.png" />
+    <img src="docs/assets/diagrams/pi-native-architecture-light.png" alt="pi-native architecture" width="960" />
+  </picture>
+</p>
 
-    subgraph LADDER["🪜 Fail-open ladder — every rung byte-pinned by parity tests"]
-        direction TB
-        D1[("🚀 Rung 1 · daemon<br/>bin/tool --serve · persistent NDJSON")]
-        D2["📦 Rung 2 · one-shot spawn<br/>bin/tool · same schema"]
-        D3["🧭 Rung 3 · built-in oracle<br/>TypeScript tool"]
-    end
-
-    TC --> D1
-    D1 ==>|"served ⚡ 0.03–0.18 ms faster"| V1(["via = daemon"])
-    D1 -.->|"any failure"| D2
-    D2 -->|"served"| V2(["via = cli"])
-    D2 -.->|"any failure"| D3
-    D3 -->|"always answers"| V3(["via = oracle<br/>session never breaks"])
-
-    V1 --> CS["📐 Context shaping<br/>head-tail compaction · ≤ ~2 KB · −94%<br/>keeps the tail, the errors, the notice"]
-    V2 --> CS
-    V3 --> CS
-    CS ==>|"shaped answer"| M
-
-    M -.- SK["📚 Skills — validator-enforced<br/>manual /skill:name · zero tokens until invoked"]
-    M -.- SA["🤖 Subagents — tmux sandbox<br/>gated off by default · gate re-enabled inside"]
-
-    classDef turn fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    classDef gate fill:#1f6feb,stroke:#58a6ff,color:#ffffff
-    classDef blocked fill:#b62324,stroke:#f85149,color:#ffffff
-    classDef tools fill:#161b22,stroke:#8b949e,color:#f0f6fc
-    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
-    classDef oracle fill:#9e6a03,stroke:#d29922,color:#ffffff
-    classDef served fill:#0d1117,stroke:#30363d,color:#58a6ff
-    classDef shape fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    classDef side fill:#0d1117,stroke:#30363d,color:#8b949e
-    class M turn
-    class PG gate
-    class BX blocked
-    class TC tools
-    class D1,D2 rung
-    class D3 oracle
-    class V1,V2,V3 served
-    class CS shape
-    class SK,SA side
-    style LADDER fill:#0d1117,stroke:#238636,color:#f0f6fc
-```
+Interactive version: [pi-native architecture](docs/assets/diagrams/pi-native-architecture.html) (source: [JSON](docs/assets/diagrams/pi-native-architecture.json))
 
 Every rung byte-matches the one below it (parity-pinned by tests); `details.via` records which rung served the call. Deep dive: [docs/rust-tools-architecture.md](docs/rust-tools-architecture.md).
 

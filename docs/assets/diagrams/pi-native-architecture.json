@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "pi-native harness",
+    "subtitle": "Tool-call path: permission gate, three-rung fail-open ladder, context shaping",
+    "output": "pi-native-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1240, 620]
+  },
+  "components": [
+    { "id": "user", "type": "external", "label": "User", "sublabel": "prompt", "pos": [40, 90], "size": [150, 70] },
+    { "id": "turn", "type": "frontend", "label": "Agent turn", "sublabel": "plan, then tool calls", "pos": [300, 80], "size": [180, 90], "tag": "agent core" },
+    { "id": "skills", "type": "external", "label": "Skills", "sublabel": "validator-enforced, zero prompt tokens", "pos": [620, 190], "size": [210, 90] },
+    { "id": "subagents", "type": "external", "label": "Subagents", "sublabel": "tmux sandbox, gated off", "pos": [970, 80], "size": [200, 90] },
+    { "id": "gate", "type": "security", "label": "Permission gate", "sublabel": "23 rules, fail-closed", "pos": [300, 250], "size": [180, 80], "tag": "tool-call level" },
+    { "id": "blocked", "type": "security", "label": "Block + targeted fix", "sublabel": "model gets the fix, not the failure", "pos": [40, 250], "size": [180, 80] },
+    { "id": "shape", "type": "backend", "label": "Context shaping", "sublabel": "head-tail, 40 lines / 2 KB, -94%", "pos": [970, 250], "size": [200, 90] },
+    { "id": "rung1", "type": "backend", "label": "Rung 1, daemon", "sublabel": "persistent NDJSON, fastest", "pos": [300, 430], "size": [200, 90], "tag": "via = daemon" },
+    { "id": "rung2", "type": "backend", "label": "Rung 2, one-shot", "sublabel": "same schema", "pos": [600, 430], "size": [200, 90], "tag": "via = cli" },
+    { "id": "rung3", "type": "database", "label": "Rung 3, oracle", "sublabel": "TypeScript, always answers", "pos": [900, 430], "size": [200, 90], "tag": "via = oracle" }
+  ],
+  "connections": [
+    { "id": "c-prompt", "from": "user", "to": "turn", "label": "prompt" },
+    { "id": "c-call", "from": "turn", "to": "gate", "label": "tool call", "variant": "emphasis" },
+    { "id": "c-blocked", "from": "gate", "to": "blocked", "label": "blocked", "variant": "security" },
+    { "id": "c-approved", "from": "gate", "to": "rung1", "label": "approved" },
+    { "id": "c-f1", "from": "rung1", "to": "rung2", "label": "any failure", "variant": "dashed" },
+    { "id": "c-f2", "from": "rung2", "to": "rung3", "label": "any failure", "variant": "dashed" },
+    { "id": "c-s1", "from": "rung1", "to": "shape", "label": "served" },
+    { "id": "c-s2", "from": "rung2", "to": "shape", "label": "served" },
+    { "id": "c-s3", "from": "rung3", "to": "shape", "label": "served" },
+    { "id": "c-back", "from": "shape", "to": "turn", "label": "shaped answer", "variant": "emphasis" },
+    { "id": "c-skill", "from": "turn", "to": "skills", "label": "manual /skill", "variant": "dashed" },
+    { "id": "c-sub", "from": "turn", "to": "subagents", "label": "delegate", "variant": "dashed" }
+  ]
+}

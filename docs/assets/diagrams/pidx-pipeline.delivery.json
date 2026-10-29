@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "e80409a7-26dd-455a-88ef-f67dbdb458ab",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
+  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+  "specification": {
+    "sha256": "ed28d1fdc73eff23d75bb918c5461ef7eb2226bb0e1b90428483ecf0e0ac8f1b",
+    "bytes": 1790
+  },
+  "artifact": {
+    "sha256": "27890b47f9e9b357acad82635cf5f3397d524fb5130a7486db91fe38a24b7ae3",
+    "bytes": 833815
+  }
+}

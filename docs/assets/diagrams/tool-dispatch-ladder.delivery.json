@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b7cc33af-529e-4865-af7c-f68980a0bec5",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
+  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+  "specification": {
+    "sha256": "9022d541d170878f6556cea492af4b335ebc2ded0a11035599f5f0216cf8a7e6",
+    "bytes": 2175
+  },
+  "artifact": {
+    "sha256": "58782e14ba3ceb2fe50d96b39d21715971657b86c78700af1094df9ec461b106",
+    "bytes": 840284
+  }
+}

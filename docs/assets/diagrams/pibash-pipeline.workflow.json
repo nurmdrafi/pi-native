@@ -1,0 +1,46 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "pibash — native shell-output pipeline",
+    "subtitle": "Spawn, stream, cap, spill, compress, envelope",
+    "output": "pibash-pipeline.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "ext", "label": "extensions/pibash/index.ts" },
+    { "id": "core", "label": "rust-tools/pibash/src" },
+    { "id": "model", "label": "Result" }
+  ],
+  "nodes": [
+    { "id": "envv", "lane": "ext", "col": 0, "type": "frontend", "label": "Inject env", "sublabel": "PI_* vars, resolve cwd, cancellation" },
+    { "id": "d", "lane": "ext", "col": 1, "type": "security", "label": "Daemon alive?", "sublabel": "transport check" },
+    { "id": "da", "lane": "ext", "col": 2, "type": "backend", "label": "Rung 1, daemon", "sublabel": "bin/pibash --serve" },
+    { "id": "os", "lane": "ext", "col": 3, "type": "backend", "label": "Rung 2, one-shot", "sublabel": "bin/pibash per call" },
+    { "id": "bf", "lane": "ext", "col": 4, "type": "database", "label": "Rung 3, oracle", "sublabel": "built-in bash, fail-open" },
+    { "id": "tuiget", "lane": "ext", "col": 5, "type": "frontend", "label": "TUI live render", "sublabel": "+ cancel" },
+    { "id": "climain", "lane": "core", "col": 1, "type": "backend", "label": "cli.rs -> main.rs", "sublabel": "execute / execute_with / execute_observed" },
+    { "id": "runner", "lane": "core", "col": 2, "type": "backend", "label": "runner.rs", "sublabel": "spawn child, stream" },
+    { "id": "acc", "lane": "core", "col": 3, "type": "backend", "label": "accumulator.rs", "sublabel": "2000-line / 50 KB spill cap" },
+    { "id": "compress", "lane": "core", "col": 4, "type": "backend", "label": "compress.rs", "sublabel": "Tier-1 shadow pre-pass" },
+    { "id": "truncenv", "lane": "core", "col": 5, "type": "backend", "label": "truncate -> render -> envelope", "sublabel": "truncation object; Success / Failure JSON" },
+    { "id": "out", "lane": "model", "col": 5, "type": "backend", "label": "Envelope to model", "sublabel": "resolve rung; via = daemon / cli" }
+  ],
+  "edges": [
+    { "id": "x1", "from": "envv", "to": "d" },
+    { "id": "x2", "from": "d", "to": "climain", "label": "yes", "variant": "emphasis" },
+    { "id": "x3", "from": "d", "to": "os", "label": "no / transport fails", "variant": "dashed" },
+    { "id": "x4", "from": "os", "to": "bf", "label": "spawn / parse failure", "variant": "dashed" },
+    { "id": "x5", "from": "da", "to": "os", "label": "spawn / timeout parity failure", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "x6", "from": "climain", "to": "runner", "variant": "emphasis" },
+    { "id": "x7", "from": "runner", "to": "acc", "variant": "emphasis" },
+    { "id": "x8", "from": "acc", "to": "compress", "label": "into_full_text / spill read", "variant": "emphasis" },
+    { "id": "x9", "from": "compress", "to": "truncenv", "label": "pruned to 40 lines / 2 KB", "variant": "emphasis" },
+    { "id": "x10", "from": "truncenv", "to": "out", "label": "envelope JSON", "variant": "emphasis" },
+    { "id": "x11", "from": "acc", "to": "truncenv", "label": "fullOutputPath spill ref", "variant": "dashed" },
+    { "id": "x12", "from": "runner", "to": "tuiget", "label": "pid + throttled partials", "variant": "dashed" },
+    { "id": "x13", "from": "os", "to": "out", "variant": "dashed" },
+    { "id": "x14", "from": "bf", "to": "out", "variant": "dashed" }
+  ],
+  "mainPath": ["envv", "d", "climain", "runner", "acc", "compress", "truncenv", "out"]
+}
