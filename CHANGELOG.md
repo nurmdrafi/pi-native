@@ -7,6 +7,17 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.67.0] - 29-10-2026
+
+### Added
+
+- **Subagent budgets.** Every subagent now runs under finite ceilings — wall-clock seconds, assistant
+  turns, cumulative USD cost — with a clean stop and a `budget_exceeded` result when breached.
+  Ceilings resolve from agent `budget:` frontmatter, `budgetDefaults` config, or builtin defaults;
+  spawn-time overrides may only lower them.
+- **Budget persistence on resume.** A resumed subagent inherits its spawn-time budget: the wall
+  clock restarts while turns and cost re-meter from the preserved session file.
+
 ## [1.66.0] - 29-10-2026
 
 ### Added

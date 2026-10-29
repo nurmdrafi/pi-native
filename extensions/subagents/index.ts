@@ -22,6 +22,7 @@ import {
   sendLongCommand,
   pollForExit,
   closeSurface,
+  sendInterrupt,
   shellEscape,
   readScreen,
 } from "./tmux.ts";
@@ -54,6 +55,18 @@ import {
   observeStatus,
   loadStatusConfig,
 } from "./status.ts";
+import {
+  BUDGET_BUILTIN_DEFAULTS,
+  BUDGET_GRACE_MS,
+  checkBudgetExceeded,
+  createBudgetStopper,
+  createSessionBudgetMeter,
+  resolveBudget,
+  parseBudgetFrontmatter,
+  type BudgetBreach,
+  type BudgetDims,
+  type ResolvedBudget,
+} from "./budget.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -115,6 +128,19 @@ const SubagentParams = Type.Object({
         "Working directory for the sub-agent. The agent starts in this folder and picks up its local .pi/ config, CLAUDE.md, skills, and extensions. Use for role-specific subfolders.",
     }),
   ),
+  budget: Type.Optional(
+    Type.Object(
+      {
+        wallClockSec: Type.Optional(Type.Number({ description: "Ceiling in seconds." })),
+        turns: Type.Optional(Type.Number({ description: "Ceiling on assistant turns." })),
+        costUsd: Type.Optional(Type.Number({ description: "Ceiling on cumulative USD cost." })),
+      },
+      {
+        description:
+          "Optional budget override. Values may only LOWER the effective ceiling (role budget, else config/builtin default) — never raise it. On breach the child is interrupted, then killed after a grace period; the result reports budget_exceeded.",
+      },
+    ),
+  ),
 });
 
 type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
@@ -134,6 +160,8 @@ interface AgentDefaults {
   autoExit?: boolean;
   interactive?: boolean;
   systemPromptMode?: "append" | "replace";
+  /** Per-role budget ceilings; undeclared dimensions fall back to config/builtin defaults. */
+  budget?: BudgetDims;
   sessionMode?: SubagentSessionMode;
   cwd?: string;
   cli?: string;
@@ -312,6 +340,7 @@ function parseAgentDefinition(content: string, fallbackName: string): AgentDefin
     subagentAgents: parseCommaList(getFrontmatterValue(frontmatter, "subagent_agents")),
     autoExit: parseOptionalBoolean(getFrontmatterValue(frontmatter, "auto-exit")),
     interactive: parseOptionalBoolean(getFrontmatterValue(frontmatter, "interactive")),
+    budget: parseBudgetFrontmatter(frontmatter),
     sessionMode: parseSessionMode(getFrontmatterValue(frontmatter, "session-mode")),
     cwd: getFrontmatterValue(frontmatter, "cwd"),
     cli: getFrontmatterValue(frontmatter, "cli"),
@@ -566,13 +595,27 @@ function formatWidgetRightLabel(snapshot: StatusSnapshot): string {
 function resolveResultPresentation(
   result: Pick<
     SubagentResult,
-    "exitCode" | "elapsed" | "summary" | "sessionFile" | "sessionId" | "errorMessage"
+    "exitCode" | "elapsed" | "summary" | "sessionFile" | "sessionId" | "errorMessage" | "error"
   >,
   name: string,
 ): string {
   // Name is the persistent handle: the same name steers a running subagent or
   // resumes a finished one, so follow-ups always reference it.
   const sessionRef = `\n\nFollow up with subagent_message({ name: "${name}", message: "…" })`;
+
+  if (result.error === "budget_exceeded") {
+    // Budget stop: the child was interrupted (killed after the grace period).
+    // The session file is intact, so resume or a narrower re-spawn are both
+    // viable; spawn overrides may only lower ceilings, so raising one needs a
+    // role/config change.
+    return (
+      `Sub-agent "${name}" was stopped after ${formatElapsed(result.elapsed)} — budget exceeded.\n\n` +
+      `${result.errorMessage}\n\n` +
+      `The run was cut short; its session is preserved. Resume it with subagent_message ` +
+      `(wall clock restarts; cost re-meters from the session file) or re-spawn with a narrower task.` +
+      sessionRef
+    );
+  }
 
   if (result.errorMessage) {
     // Auto-retry exhausted or other agent-loop error. The subagent did not
@@ -634,6 +677,12 @@ interface RunningSubagent {
     error?: string;
   };
   abortController?: AbortController;
+  /** Resolved budget ceilings (always finite once attached). */
+  budget?: ResolvedBudget;
+  /** Incremental meter over the child's session file. */
+  budgetMeter?: ReturnType<typeof createSessionBudgetMeter>;
+  /** Interrupt → grace → kill state machine for budget breaches. */
+  budgetStopper?: ReturnType<typeof createBudgetStopper>;
   cli?: string;
   sentinelFile?: string;
   statusState: SubagentStatusState;
@@ -1222,6 +1271,7 @@ async function launchSubagent(
   const effectiveSkills = agentDefs?.skills;
   const effectiveThinking = agentDefs?.thinking;
   const effectiveInteractive = resolveEffectiveInteractive(params, agentDefs);
+  const budget = resolveBudget(agentDefs?.budget, params.budget, statusConfig.budgetDefaults);
 
   const sessionFile = ctx.sessionManager.getSessionFile();
   if (!sessionFile) throw new Error("No session file");
@@ -1346,6 +1396,7 @@ async function launchSubagent(
       cli: "claude",
       sentinelFile,
       interactive: effectiveInteractive,
+      ...budgetRuntimeFields(budget, surface, subagentSessionFile),
       statusState: createStatusState({
         source: "claude",
         startTimeMs: startTime,
@@ -1391,6 +1442,7 @@ async function launchSubagent(
     identity: identityInSystemPrompt ? identity : null,
     spawnable: agentDefs?.subagentAgents ?? null,
     autoExit: agentDefs?.autoExit ?? false,
+    budget,
     cwd: effectiveCwd ?? null,
     agentDir: resolvedAgentDir,
   };
@@ -1488,6 +1540,7 @@ async function launchSubagent(
     launchScriptFile,
     activityFile,
     interactive: effectiveInteractive,
+    ...budgetRuntimeFields(budget, surface, subagentSessionFile),
     statusState: createStatusState({
       source: "pi",
       startTimeMs: startTime,
@@ -1566,6 +1619,56 @@ function deliverPendingQuestion(running: RunningSubagent): void {
   );
 }
 
+/** Budget-runtime fields shared by every RunningSubagent literal: the resolved
+ * ceiling, an incremental session meter, and the interrupt→grace→kill stopper. */
+function budgetRuntimeFields(
+  budget: ResolvedBudget,
+  surface: string,
+  sessionFile: string,
+): Pick<RunningSubagent, "budget" | "budgetMeter" | "budgetStopper"> {
+  return {
+    budget,
+    budgetMeter: createSessionBudgetMeter(sessionFile),
+    budgetStopper: createBudgetStopper({
+      interrupt: () => {
+        try {
+          sendInterrupt(surface);
+        } catch {}
+      },
+      kill: () => {
+        try {
+          closeSurface(surface);
+        } catch {}
+      },
+      graceMs: BUDGET_GRACE_MS,
+      now: () => Date.now(),
+    }),
+  };
+}
+
+function budgetBreachSummary(breach: BudgetBreach): string {
+  const unit =
+    breach.dimension === "costUsd"
+      ? "USD"
+      : breach.dimension === "turns"
+        ? "assistant turns"
+        : "wall-clock seconds";
+  return `Budget exceeded: ${breach.dimension} ${breach.value}/${breach.limit} (${unit}).`;
+}
+
+/** Poll-tick budget enforcement: meter the session file, then either raise the
+ * breach (interrupting the child) or advance an existing breach toward kill. */
+function enforceBudget(running: RunningSubagent): void {
+  const { budget, budgetMeter, budgetStopper, startTime } = running;
+  if (!budget || !budgetMeter || !budgetStopper) return;
+  if (budgetStopper.breached()) {
+    budgetStopper.onTick();
+    return;
+  }
+  const breach = checkBudgetExceeded(budget, budgetMeter.update(), Date.now() - startTime);
+  if (breach) budgetStopper.onBreach(breach);
+}
+
 async function watchSubagent(
   running: RunningSubagent,
   signal: AbortSignal,
@@ -1580,11 +1683,13 @@ async function watchSubagent(
       onTick() {
         observeRunningSubagent(running);
         deliverPendingQuestion(running);
+        enforceBudget(running);
       },
     });
 
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
+    running.budgetStopper?.onExit();
     if (running.cli === "claude") {
       // Claude Code result extraction
       let summary = "";
@@ -1646,15 +1751,20 @@ async function watchSubagent(
     closeSurface(surface);
     runningSubagents.delete(running.id);
 
+    const budgetBreach = running.budgetStopper?.breached() ?? null;
     return {
       name,
       task,
-      summary,
+      summary: budgetBreach ? budgetBreachSummary(budgetBreach) : summary,
       sessionFile,
       ...(subagentSessionId ? { sessionId: subagentSessionId } : {}),
       exitCode: result.exitCode,
       elapsed,
-      ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+      ...(budgetBreach
+        ? { error: "budget_exceeded", errorMessage: budgetBreachSummary(budgetBreach) }
+        : result.errorMessage
+          ? { errorMessage: result.errorMessage }
+          : {}),
       ...(stats ? { stats } : {}),
     };
   } catch (err: any) {
@@ -2334,6 +2444,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           launchScriptFile,
           activityFile,
           interactive,
+          ...budgetRuntimeFields(
+            loadout?.budget ?? BUDGET_BUILTIN_DEFAULTS,
+            surface,
+            sessionPath,
+          ),
           statusState: createStatusState({
             source: "pi",
             startTimeMs: startTime,

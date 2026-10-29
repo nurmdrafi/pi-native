@@ -12,6 +12,8 @@ Owned first-party code at `extensions/subagents/` (`subagent` / `subagent_messag
 
 Sandboxed spawns re-enable the permission-gate extension inside the child via `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated override).
 
+**Budgets** — every subagent runs under finite ceilings: wall-clock seconds, assistant turns, and cumulative provider-reported USD cost. Resolution per dimension: role frontmatter `budget:` block → `budgetDefaults` in `extensions/subagents/config.json` → builtin defaults (1800 s / 60 turns / $3). A spawn `budget` override may only lower a ceiling, never raise it. On breach the child is interrupted (Ctrl-C), killed after a 30 s grace, and the result reports `budget_exceeded`; the session file is preserved for resume (wall clock restarts, cost re-meters from the file). Detached subagents are not budgeted once the parent session ends.
+
 Setup, headless/print-mode behavior, and triage: [`extensions/subagents/README.md`](../extensions/subagents/README.md).
 
 Agent definitions live in `agents/` — plain files, inert while the spawn tools are gated; discovery is project > global. No `model` pin: subagents inherit the harness default.

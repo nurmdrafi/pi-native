@@ -1,5 +1,10 @@
 {
   "status": {
     "enabled": true
+  },
+  "budgetDefaults": {
+    "wallClockSec": 1800,
+    "turns": 60,
+    "costUsd": 3
   }
 }

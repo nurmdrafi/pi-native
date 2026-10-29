@@ -707,6 +707,7 @@ describe("status.ts", () => {
     assert.deepEqual(config, {
       enabled: true,
       lineLimit: 4,
+      budgetDefaults: { wallClockSec: 1800, turns: 60, costUsd: 3 },
     });
   });
 
@@ -1976,8 +1977,8 @@ describe("tool registration", () => {
     const props = subagentTool.parameters.properties;
     assert.deepEqual(
       Object.keys(props).sort(),
-      ["agent", "cwd", "model", "name", "task"],
-      "only agent/task/name/model/cwd should remain",
+      ["agent", "budget", "cwd", "model", "name", "task"],
+      "only agent/task/name/model/cwd/budget should remain",
     );
     assert.deepEqual(
       [...(subagentTool.parameters.required ?? [])].sort(),

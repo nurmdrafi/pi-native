@@ -322,6 +322,15 @@ export function closeSurface(surface: string): void {
   rebalanceSurfaces();
 }
 
+/**
+ * Send an interrupt (Ctrl-C) to a pane without typing into it — used by the
+ * budget stop path to ask a runaway child to exit cleanly before kill-pane.
+ */
+export function sendInterrupt(surface: string): void {
+  requireTmux();
+  execFileSync("tmux", ["send-keys", "-t", surface, "C-c"], { encoding: "utf8" });
+}
+
 // ── Exit polling ──
 
 export interface PollResult {

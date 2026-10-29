@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { BudgetDims } from "./budget.ts";
 
 export const SNAPSHOT_STALLED_AFTER_MS = 60_000;
 export const DEFAULT_STATUS_LINE_LIMIT = 4;
@@ -20,6 +21,8 @@ export type StatusActivityPhase = "starting" | "active" | "waiting" | "done";
 export interface StatusConfig {
   enabled: boolean;
   lineLimit: number;
+  /** Global budget defaults for subagents (optional per-dimension ceilings). */
+  budgetDefaults?: BudgetDims;
 }
 
 export type StatusObservation =
@@ -143,10 +146,39 @@ export function parseStatusConfig(rawConfig: unknown, source = "config.json"): S
   rejectUnsupportedKeys(status, ["enabled"], source, "status");
   const enabled = requireBoolean(status.enabled, source, "status.enabled");
 
-  return {
+  const parsed: StatusConfig = {
     enabled,
     lineLimit: DEFAULT_STATUS_LINE_LIMIT,
   };
+
+  if (config.budgetDefaults !== undefined) {
+    const budgetDefaults = requireObject(config.budgetDefaults, source, "budgetDefaults");
+    rejectUnsupportedKeys(
+      budgetDefaults,
+      ["wallClockSec", "turns", "costUsd"],
+      source,
+      "budgetDefaults",
+    );
+    const dims: BudgetDims = {};
+    for (const key of ["wallClockSec", "turns", "costUsd"] as const) {
+      const raw = budgetDefaults[key];
+      if (raw === undefined) continue;
+      if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+        throw new Error(
+          key === "turns"
+            ? `budgetDefaults.${key} must be a positive integer`
+            : `budgetDefaults.${key} must be a positive number`,
+        );
+      }
+      if (key === "turns" && !Number.isInteger(raw)) {
+        throw new Error(`budgetDefaults.turns must be a positive integer`);
+      }
+      dims[key] = raw;
+    }
+    parsed.budgetDefaults = dims;
+  }
+
+  return parsed;
 }
 
 function readStatusConfigFile(configPath: string, examplePath: string): { sourcePath: string; rawConfig: string } {

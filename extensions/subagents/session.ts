@@ -12,6 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import type { ResolvedBudget } from "./budget.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -114,6 +115,8 @@ export interface SubagentLoadout {
   cwd: string | null;
   /** PI_CODING_AGENT_DIR the subagent resolved config/extensions from, or null. */
   agentDir: string | null;
+  /** Fully resolved budget at spawn time; absent in pre-budget snapshots. */
+  budget?: ResolvedBudget | null;
 }
 
 /** Path of the loadout sidecar written next to a subagent session file. */
