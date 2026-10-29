@@ -346,6 +346,23 @@ export const cases = [
     },
   ],
   [
+    "S5 M2: two uncovered anchors — one block names both regions",
+    "blocked",
+    async (pi) => {
+      const f = join(tmp, "s5-m2-two-misses.ts");
+      writeFileSync(f, Array.from({ length: 60 }, (_, i) => `n${String(i + 1).padStart(2, "0")}`).join("\n") + "\n");
+      await read(pi, f, { offset: 1, limit: 5 }, { outputLines: 5 }); // 1–5
+      const r = await edit(pi, f, [
+        { oldText: "n02", newText: "x" }, // covered
+        { oldText: "n30", newText: "y" }, // not covered
+        { oldText: "n50", newText: "z" }, // not covered
+      ]);
+      return r.blocked && r.reason.includes("edits[1]") && r.reason.includes("lines 30") && r.reason.includes("edits[2]") && r.reason.includes("lines 50") && !r.reason.includes("edits[0]")
+        ? r
+        : { blocked: false, reason: `both-regions: ${r.reason ?? "(pass)"}` };
+    },
+  ],
+  [
     "S5 M2: ENOENT path passes through to the tool",
     "pass",
     async (pi) =>

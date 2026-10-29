@@ -389,35 +389,44 @@ export async function validateEditAnchors(
         };
       }
     }
-    if (regionGuard)
+    if (regionGuard) {
+      // C2: when a target sits in a recorded compaction gap, say so — the
+      // remedy read is sanctioned (R1 blocks only fully covered windows), so
+      // the gap marker must not read as a "never re-read" instruction
+      // (SYSTEM.md Re-reads). Collect EVERY uncovered region first: a batch
+      // with N uncertified regions must cost one retry, not N — read them
+      // all, then resend the batch once.
+      const inGap = (s: { start: number; end: number }) =>
+        cov?.gaps?.some((g) => g.start <= s.end && s.start <= g.end) ?? false;
+      const misses: { i: number; start: number; end: number }[] = [];
       for (const os of origSpans) {
         const covered =
           (cov?.spans.some(
             (cs) => cs.start <= os.end && os.start <= cs.end,
           ) ??
             false) || shownHit(os.start, os.end);
-        if (!covered) {
-          // C2: when the target sits in a recorded compaction gap, say so —
-          // the remedy read is sanctioned (R1 blocks only fully covered
-          // windows), so the gap marker must not read as a "never re-read"
-          // instruction (SYSTEM.md Re-reads).
-          const inGap = cov?.gaps?.some(
-            (g) => g.start <= os.end && os.start <= g.end,
-          );
-          return {
-            block: true,
-            rule: "editRegionGuard",
-            reason:
-              `Anchor Guard (Unread): '${shown}' edits[${os.i}] targets lines ` +
-              `${os.start}–${os.end}, not in certified context — read lines ` +
-              `${os.start}–${os.end} with the piread tool ` +
-              `(piread {path:'${String(input.path)}', offset:${os.start}, limit:${os.end - os.start + 1}}) first.` +
-              (inGap
-                ? " The target falls in a compaction gap — this sub-window read is permitted (uncertified lines are never re-reads)."
-                : ""),
-          };
-        }
+        if (!covered) misses.push({ i: os.i, start: os.start, end: os.end });
       }
+      if (misses.length > 0) {
+        const per = misses.map(
+          (m) =>
+            `edits[${m.i}] targets lines ${m.start}–${m.end}, not in certified context — read lines ` +
+            `${m.start}–${m.end} with the piread tool ` +
+            `(piread {path:'${String(input.path)}', offset:${m.start}, limit:${m.end - m.start + 1}}) first.` +
+            (inGap(m)
+              ? " The target falls in a compaction gap — this sub-window read is permitted (uncertified lines are never re-reads)."
+              : ""),
+        );
+        return {
+          block: true,
+          rule: "editRegionGuard",
+          reason:
+            misses.length === 1
+              ? `Anchor Guard (Unread): '${shown}' ${per[0]}`
+              : `Anchor Guard (Unread): '${shown}' ${misses.length} uncertified target regions in this batch — read every listed region, then resend the batch once. ${per.join(" ")}`,
+        };
+      }
+    }
   }
 
   return {
