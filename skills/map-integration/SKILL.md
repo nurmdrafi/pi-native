@@ -73,7 +73,7 @@ Twelve numbered guards in `references/known-pitfalls.md` — cited as `known-pit
 
 ## 7. Real-time plotting (MQTT / WebSocket)
 
-Established pattern in `references/realtime-plotting.md`: buffer + batch, LRU-cap markers, subscription guards, auth-teardown flush, one config source for broker opts.
+Established pattern in `references/realtime-plotting.md`: buffer + batch, LRU-cap markers, subscription guards, auth-teardown flush, one config source for broker opts — reference now carries working code shapes (connection hook, batch buffer, store merge, deck overlay).
 
 ## 8. GPX / route utilities (reuse, don't rewrite)
 
