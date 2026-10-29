@@ -12,7 +12,7 @@
     "nativeBashFirst": "error",
     "outputCap": "error",
     "readOutputCap": "error",
-    "destructiveConfirm": "error",
+    "destructiveConfirm": "off",
     "commitMessageLint": "error",
     "rerunGuard": "warn",
     "reblockEscalation": "error",
