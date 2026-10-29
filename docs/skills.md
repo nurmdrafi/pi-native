@@ -8,6 +8,7 @@ All skills are **manual** — invoke with `/skill:<name>`; none auto-load. Bodie
 | web-search           | Web search + URL extraction via Tavily CLI                         | `/skill:web-search`           |
 | systematic-debugging | Phased root-cause debugging before proposing any fix               | `/skill:systematic-debugging` |
 | code-reviewer         | CI-parity correctness review of the diff before commit/push        | `/skill:code-reviewer`         |
+| archify              | Interactive validated diagrams (architecture, workflow, ERD, …) as standalone HTML; vendored upstream, Apache-2.0 | `/skill:archify`              |
 | auth                 | NextAuth v4 credentials auth for Next.js App Router                | `/skill:auth`                 |
 | brainstorming        | Explore genuinely-unclear feature direction                        | `/skill:brainstorming`        |
 | browser-tools        | Live DOM via CDP `:9222` — Playwright/e2e                          | `/skill:browser-tools`        |

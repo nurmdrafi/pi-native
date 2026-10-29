@@ -59,6 +59,12 @@ Hybrid: how-to for local dev (clone → install → build → test → lint) + r
 4. Structure: README order + CONTRIBUTING coverage per DX ARTIFACTS.
 5. **Report only — no rewrite unless asked.** One line per finding: `path:line [BLOCKER|WARN|NIT] issue (expected: ...)`. End: `X blockers, Y warnings, Z nits`.
 
+## DIAGRAMS
+
+- Build every diagram a document needs (architecture, workflow, sequence, data-flow, lifecycle, ERD, class, tree, timeline, waterfall) with the archify skill (`/skill:archify`), not hand-written Mermaid or ASCII art: author the diagram JSON from facts already verified for the doc, then gate it with `node ~/.pi/agent/skills/archify/bin/archify.mjs finalize <type> <input.json> <output.html>` until every gate passes.
+- Ship the standalone HTML next to the doc and link it; keep the JSON beside the HTML as the editable source. GitHub strips scripts, so also embed a static view: render dual-theme snapshots with `node ~/.pi/agent/scripts/render-diagram-pngs.mjs` and embed them via a `<picture>` block (dark source + light fallback, centered).
+- Mermaid blocks already in a document stay untouched unless the task changes that diagram; convert per archify's Mermaid-to-type mapping when it does.
+
 ## WORKFLOW
 
 1. Acknowledge + clarify; determine before proceeding:
