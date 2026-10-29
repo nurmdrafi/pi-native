@@ -22,7 +22,8 @@
     "bench:piedit": "node tests/tools/bench/piedit.mjs",
     "check": "npm run typecheck && npm run lint:agents && npm run doc:check && npm test",
     "audit:session": "node tests/tools/audit/session-blocks.mjs",
-    "audit:bin-diff": "node tests/tools/audit/bin-diff.mjs"
+    "audit:bin-diff": "node tests/tools/audit/bin-diff.mjs",
+    "dashboard": "node scripts/dashboard.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",

@@ -20,6 +20,8 @@
  * result), turns[].usage the billed tokens.
  */
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -33,7 +35,8 @@ const AS_JSON = argv.includes('--json');
 const MUTATING = new Set(['piedit', 'edit', 'write', 'pieditMulti']);
 const pct = (n, d) => (d === 0 ? 0 : Math.round((n / d) * 1000) / 10);
 
-export function metrics(lines) {
+export function metrics(lines, project = PROJECT) {
+  const includeAll = project === undefined;
   const agg = {
     sessions: 0,
     calls: 0,
@@ -49,7 +52,7 @@ export function metrics(lines) {
   };
 
   for (const s of lines) {
-    if (!s || s.project !== PROJECT) continue;
+    if (!s || (!includeAll && s.project !== project)) continue;
     const results = new Map((s.results ?? []).map((r) => [r.id, r]));
     const chain = (s.calls ?? [])
       .map((c) => {
@@ -95,6 +98,10 @@ export function metrics(lines) {
   return agg;
 }
 
+// CLI entry — guarded so importing `metrics` stays side-effect free.
+const __isDirect = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (__isDirect) {
+
 const lines = readFileSync(IN, 'utf8')
   .split('\n')
   .filter(Boolean)
@@ -133,4 +140,6 @@ if (AS_JSON) {
     if (k === 'by_family') console.log(`${k}: ${JSON.stringify(v)}`);
     else console.log(`${k}: ${v}`);
   }
+}
+
 }
