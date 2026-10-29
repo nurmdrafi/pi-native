@@ -1945,6 +1945,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           };
         }
 
+        // Deny-by-default tool declaration: a definition without a `tools:`
+        // line would launch with the full default toolset — the unrestricted
+        // path reserved for top-level fork clones that inherit the caller's
+        // already-trusted toolset. Role agents must declare their tools; the
+        // fix is one frontmatter line in the definition file.
+        const declaredDefs = params.agent ? loadAgentDefaults(params.agent) : null;
+        if (declaredDefs && !declaredDefs.tools) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Error: agent '${params.agent}' declares no tools and would launch ` +
+                  `unrestricted (deny-by-default). Add a 'tools:' line to its definition ` +
+                  `listing exactly what it needs, e.g. 'tools: read, piread, pibash'.`,
+              },
+            ],
+            details: { error: "agent undeclared tools" },
+          };
+        }
+
         // Validate prerequisites (need mux + a session file to derive the
         // artifact dir that hosts this session's name registry).
         if (!isMuxAvailable()) {

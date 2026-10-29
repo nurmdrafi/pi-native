@@ -1967,6 +1967,56 @@ describe("tool registration", () => {
     assert.match(result.content[0].text, /not a known agent/i);
   });
 
+  it("rejects an agent whose definition declares no tools (deny-by-default)", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "openagent",
+        "name: openagent\ndescription: declares no tool restriction",
+      );
+      const { api, registeredTools } = createMockExtensionApi();
+      (subagentsModule as any).default(api);
+      const subagentTool = registeredTools.find((tool) => tool.name === "subagent");
+
+      const result = await subagentTool.execute("call-1", {
+        name: "x",
+        task: "do it",
+        agent: "openagent",
+      });
+
+      assert.equal(result.details?.error, "agent undeclared tools");
+      assert.match(result.content[0].text, /declares no tools/i);
+      assert.match(result.content[0].text, /tools:/i, "fix must name the frontmatter key");
+    });
+  });
+
+  it("lets a tools-declaring agent past the declaration gate", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "scopedagent",
+        "name: scopedagent\ndescription: declares tools\ntools: read, piread, pibash",
+      );
+      const { api, registeredTools } = createMockExtensionApi();
+      (subagentsModule as any).default(api);
+      const subagentTool = registeredTools.find((tool) => tool.name === "subagent");
+
+      const result = await subagentTool.execute(
+        "call-1",
+        {
+          name: "x",
+          task: "do it",
+          agent: "scopedagent",
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionFile: () => undefined } },
+      );
+
+      assert.equal(result.details?.error, "no session file");
+    });
+  });
+
   it("exposes a debloated schema: agent+task required, name/model/cwd optional, no override knobs", () => {
     const { api, registeredTools } = createMockExtensionApi();
     (subagentsModule as any).default(api);
