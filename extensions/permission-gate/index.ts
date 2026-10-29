@@ -33,6 +33,7 @@
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { config, ruleBlocks, ruleEnabled, ruleSeverity } from "./loader.ts";
+import { CADENCE_CTX_TOKENS, CADENCE_TURNS } from "./cadence.ts";
 
 /** Bash-kind predicate: `bash` plus the native `pibash` tool (2026-10-18
  * pibash adoption). Both share the bash schema and both must run the full
@@ -149,18 +150,6 @@ const LOCATE_MIN_WIN = 100;
  * (2026-10-15 audit: the last session read 69 text files via built-in `read`
  * while piread existed). */
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"];
-/** cadence nudge thresholds, counted like AGENTS.md Token Economy does:
- * user turns (~120) or estimated context tokens (~150K) before proposing a
- * compaction/fresh-session hop (2026-10-10: 354/303-turn marathons re-billed
- * ~100M cacheRead each with zero compactions; 2026-10-29 pidx audit: the
- * 281/177-turn permission-gate sessions paid 85–94% of spend in cacheRead —
- * rounds × prefix turns quadratic, and it is sunk well before 200). The
- * nudge is NON-blocking (2026-10-11): appended to the next tool_result —
- * the blocking variant cost a re-issue turn and the model could not act on
- * it mid-call anyway. */
-const CADENCE_TURNS = 120;
-const CADENCE_CTX_TOKENS = 150_000;
-
 /** R10: re-running an unchanged base command inside this window re-sends output already in context */
 const RERUN_WINDOW_MS = 10 * 60_000;
 /** Re-block window: shorter than R10 — the verbatim re-send pattern is immediate (2026-10-08 audit: 3s and 2.5s gaps) */

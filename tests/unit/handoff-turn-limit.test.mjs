@@ -9,6 +9,7 @@ import {
   shouldPromptForHandoff,
   suggestGoal,
 } from "../../extensions/handoff/turn-limit.ts";
+import { CADENCE_TURNS } from "../../extensions/permission-gate/cadence.ts";
 
 const userEntry = (text) => ({
   type: "message",
@@ -22,7 +23,12 @@ const toolResultEntry = () => ({
   type: "message",
   message: { role: "toolResult", content: [{ type: "toolResult" }] },
 });
+const compactionEntry = () => ({ type: "compaction", firstKeptEntryId: null });
 const otherEntry = (type) => ({ type });
+
+test("the handoff limit defaults to the cadence definition", () => {
+  assert.equal(DEFAULT_TURN_LIMIT, CADENCE_TURNS);
+});
 
 test("countTurns counts user message entries", () => {
   const entries = [userEntry("first"), assistantEntry("hi"), userEntry("second")];
@@ -47,6 +53,34 @@ test("countTurns reads user content given as a plain string", () => {
 
 test("countTurns returns 0 for an empty branch", () => {
   assert.equal(countTurns([]), 0);
+});
+
+test("countTurns resets at the last compaction entry", () => {
+  const entries = [
+    userEntry("first"),
+    userEntry("second"),
+    compactionEntry(),
+    userEntry("third"),
+    assistantEntry("hi"),
+  ];
+  assert.equal(countTurns(entries), 1);
+});
+
+test("countTurns uses only entries after the newest of several compactions", () => {
+  const entries = [
+    userEntry("first"),
+    compactionEntry(),
+    userEntry("second"),
+    userEntry("third"),
+    compactionEntry(),
+    userEntry("fourth"),
+  ];
+  assert.equal(countTurns(entries), 1);
+});
+
+test("a trailing compaction leaves an empty budget", () => {
+  const entries = [userEntry("first"), userEntry("second"), compactionEntry()];
+  assert.equal(countTurns(entries), 0);
 });
 
 test("resolveTurnLimit returns the default when the env var is unset", () => {

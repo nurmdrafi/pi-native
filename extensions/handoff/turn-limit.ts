@@ -1,13 +1,17 @@
 /**
  * Turn-limit helpers for the handoff extension.
  *
- * A "turn" is one user message that started an agent run. Counting comes from
- * session entries, so the count survives restarts and compaction. When the
- * count reaches the limit, the extension offers a handoff and pre-fills the
- * input line with `/handoff <suggested goal>` (goal capped at five words).
+ * A "turn" is one user message that started an agent run, counted from session
+ * entries so the count survives restarts. Like the permission-gate cadence
+ * rule (AGENTS.md Token Economy), the budget resets at a compaction: only user
+ * messages after the last compaction entry count. When the count reaches the
+ * limit, the extension offers a handoff and pre-fills the input line with
+ * `/handoff <suggested goal>` (goal capped at five words).
  */
+import { CADENCE_TURNS } from "../permission-gate/cadence.ts";
 
-export const DEFAULT_TURN_LIMIT = 40;
+/** Default limit is the shared cadence definition — one budget, two consumers. */
+export const DEFAULT_TURN_LIMIT = CADENCE_TURNS;
 export const TURN_LIMIT_ENV = "HANDOFF_TURN_LIMIT";
 export const MAX_GOAL_WORDS = 5;
 /** Short replies like "yes" make poor goal suggestions; prefer meatier ones. */
@@ -34,9 +38,18 @@ function entryText(entry: TurnEntry): string {
     .join(" ");
 }
 
-/** Number of user-message entries in a session branch. */
+/** User-message entries after the last compaction — the current turn budget. */
 export function countTurns(entries: readonly TurnEntry[]): number {
-  return entries.filter((entry) => entry.type === "message" && entryText(entry).trim() !== "")
+  let start = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].type === "compaction") {
+      start = i + 1;
+      break;
+    }
+  }
+  return entries
+    .slice(start)
+    .filter((entry) => entry.type === "message" && entryText(entry).trim() !== "")
     .length;
 }
 
