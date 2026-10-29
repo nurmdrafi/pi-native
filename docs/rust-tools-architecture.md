@@ -39,6 +39,7 @@ safe path for changing one of these tools). Per-crate build logs live in
 - [piread — native read pipeline](#piread--native-read-pipeline)
 - [piedit — native edit pipeline](#piedit--native-edit-pipeline)
 - [pidx — incremental session-log indexer](#pidx--incremental-session-log-indexer)
+- [docheck — doc-consistency validator](#docheck--doc-consistency-validator)
 - [Shared techniques](#shared-techniques)
 - [Glossary](#glossary)
 
@@ -81,29 +82,14 @@ order, not alphabetical.
 
 ## Generic dispatch ladder
 
-```mermaid
-flowchart TB
-    M(["Model / core calls tool"]) --> E["Extension index.ts<br/>individual registration"]
-    E --> D{"Daemon alive?"}
-    D ==>|"yes"| DA["🚀 Rung 1 · bin/X --serve<br/>NDJSON over stdio<br/>id-matched, lazy restart"]
-    D -->|"no / transport fails"| OS["⚡ Rung 2 · one-shot spawn<br/>bin/X per call"]
-    DA -.->|"spawn / timeout parity failure"| OS
-    OS -.->|"spawn / parse failure"| BF["🧭 Rung 3 · built-in TypeScript tool<br/>final fallback — always correct"]
-    DA ==> RES(["Envelope result to model"])
-    OS --> RES
-    BF --> RES
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/tool-dispatch-ladder-dark.png" />
+    <img src="assets/diagrams/tool-dispatch-ladder-light.png" alt="tool dispatch ladder" width="960" />
+  </picture>
+</p>
 
-    classDef entry fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
-    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
-    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
-    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
-    class M,RES entry
-    class E ext
-    class DA rung
-    class OS oneshot
-    class BF oracle
-```
+Interactive version: [tool dispatch ladder](assets/diagrams/tool-dispatch-ladder.html) (source: [JSON](assets/diagrams/tool-dispatch-ladder.workflow.json))
 
 The ladder is **fail-open**: every rung's failure advances to the next, and the
 terminal rung is always the original TypeScript implementation. A missing
@@ -117,6 +103,90 @@ them: a bare `cp` invalidates the adhoc signature and the kernel SIGKILLs the
 copy, which is indistinguishable from a missing binary and shows up as
 fallback churn on stderr. Rung selection is recorded on `details.via` (`daemon` | `oneshot` | `builtin`),
 which never enters model-visible content.
+
+### Rung 0 — registration and entry conditions
+
+All three tool extensions register a **distinct tool name** (`pibash`,
+`piread`, `piedit`) alongside the built-in rather than shadowing it. The
+parameter schema is copied verbatim from `createBashToolDefinition` /
+`createReadToolDefinition` / `createEditToolDefinition` so input normalization
+and sampling behave identically; only name/label/description/promptGuidelines/
+execute/renderCall are native. Load guards default every tool on:
+`PI_NATIVE_BASH=0` / `PI_NATIVE_READ=0` / `PI_NATIVE_EDIT=0` /
+`PI_NATIVE_PIDX=0` opts out (`PI_BASH_BIN` / `PI_READ_BIN` / `PI_PIDX_BIN`
+override the binary path for parity tests).
+
+`announceNativeTool` (in each `extensions/<tool>/index.ts`) registers the tool
+name with the subagents extension's registry
+(`globalThis.__pi_interactive_subagents`), so an agent definition listing the
+native name gets `-e <extension-path>` on its sandboxed spawn. Built-in names
+resolve to no extension — an agent listing only `read`/`bash`/`edit` runs the
+built-in implementations. A `__resetDaemonForTest` export kills the daemon so
+suites can exercise the cold paths (missing binary, one-shot rung)
+mid-process.
+
+Entry conditions decided **before** the ladder runs:
+
+| Tool | Pre-ladder routing |
+| --- | --- |
+| `pibash` | empty command → built-in directly; a bad `timeout` is validated first and thrown once — it must not fall open and spawn twice |
+| `piread` | image extension on `path` → built-in `read` (the model needs the image bytes); non-integer / pathological `offset`/`limit` → built-in |
+| `piedit` | the whole ladder runs inside `withFileMutationQueue(absPath)`; a fallback returns a `{fallback}` sentinel and the built-in runs **after** the queue releases — re-entering the same queue deadlocks |
+| `pidx` | **no ladder** — one-shot `execFile` per call (indexing is infrequent; a daemon would never amortize); failures throw to the model |
+
+### Request framing per tool
+
+One JSON line per request; `id` is echoed verbatim (any JSON value), and the
+client keeps a `nextId` counter plus a `pending` map keyed by id:
+
+- `pibash`: `{id, command, cwd, timeout, env, stream}` — `env` is the **full
+  child environment rebuilt per call** (see below); `stream: true` is set when
+  an `AbortSignal` or `onUpdate` is present, enabling partial-output events.
+- `piread`: `{id, path, offset, limit, line_cap, cwd}` — `line_cap` caps one
+  line's chars; absent = no cap (byte parity with the built-in).
+- `piedit`: `{id, path, edits, renderDiff}` — `renderDiff: true` asks the
+  daemon to return the rendered `{diff, patch, firstChangedLine}` instead of
+  the content pair.
+
+Responses to unknown ids (late answers to aborted calls) are dropped
+silently. An unparseable response line kills the daemon: every pending call
+is rejected with `DaemonUnavailableError` and transparently retries on the
+one-shot rung.
+
+### Failure taxonomy
+
+| Failure | Class | Effect |
+| --- | --- | --- |
+| daemon spawn error / `exit` / stdin closed / unparseable response line / write failure | `DaemonUnavailableError` | advance to the one-shot rung |
+| one-shot spawn error, empty output, unparseable JSON | terminal | built-in rung + the one stderr fallback line |
+| envelope `error.kind` = `spawn` or `timeout` (`pibash`) | parity rethrow | rethrown in the built-in's thrown-error shape — a missing cwd or a timeout is a caller-visible error and must not fall open to a second spawn |
+| envelope `error.kind` = anything else (missing file, EISDIR, …) | tool-level | built-in rung produces the byte-identical error |
+| `binary: true` (`piread`) | tool-level | built-in `read` |
+| caller abort | parity rethrow | the built-in's bare "Command aborted" / "Operation aborted" |
+| malformed envelope (`piedit`) | terminal | `{fallback: "malformed envelope"}` |
+
+### Environment injection (`pibash`)
+
+The daemon is long-lived but the environment is per-call: `buildEnv(ctx)`
+rebuilds it for every request — copy `process.env`, drop the session-context
+keys, set `PI_SESSION_ID` / `PI_SESSION_FILE` (from `ctx.sessionManager`),
+`PI_PROVIDER` / `PI_MODEL` (from `ctx.model`), `PI_REASONING_LEVEL`, prepend
+the agent `bin/` dir to `PATH` (case-insensitive `path` key), and default
+`BASH_ENV` to the repo's `scripts/env.sh` when unset so an `nvm`-pinned node
+resolves without per-command bootstrap. Sending env per request is what lets
+one daemon serve a whole session without ever holding a stale environment.
+
+### Live output and cancellation (`pibash`)
+
+With `stream: true` the daemon emits `started` (the child pid) and throttled
+partial snapshots (`UPDATE_THROTTLE`, 100 ms). A partial's
+`truncation.content` is emptied on the wire — it is always a prefix of the
+display text — and the extension restores it client-side (split at the first
+`\n\n[`) so the rebuilt `details.truncation` stays byte-identical to the
+built-in's. On abort the extension `SIGKILL`s the child's whole process group
+(`process.kill(-pid)` — the runner spawns the child in its own group); a
+response arriving after the abort still triggers the kill and settles as the
+parity "Command aborted" error.
 
 ---
 
@@ -304,61 +374,29 @@ Owns spawn + streaming + capping + truncation + spill + envelope. The built-in
 bash tool (`dist/core/tools/bash.js`) stays the *oracle*; the extension owns env
 injection and TUI rendering.
 
-```mermaid
-flowchart TB
-    subgraph EXT["extensions/pibash/index.ts"]
-        direction TB
-        ENVV["Inject env + PI_* vars,<br/>resolve cwd, cancellation"]
-        TUIGET["TUI live render + cancel"]
-        OS["⚡ Rung 2 · one-shot spawn<br/>bin/pibash per call"]
-        BF["🧭 Rung 3 · built-in bash<br/>final fail-open rung"]
-        DA["🚀 Rung 1 · bin/pibash --serve<br/>NDJSON daemon"]
-    end
+### Module map
 
-    subgraph CORE["rust-tools/pibash/src"]
-        direction TB
-        CLI["cli.rs<br/>--command/--cwd/--timeout/--serve"]
-        RUNNER["runner.rs<br/>spawn child, stream,<br/>throttled RunObserver partials"]
-        ACC["accumulator.rs<br/>2000-line / 50KB spill cap<br/>pi-bash temp prefix"]
-        COMPRESS["compress.rs<br/>Tier-1 shadow pre-pass over FULL stream"]
-        TRUNC["truncate.rs<br/>oracle-shaped truncation object"]
-        RENDER["render.rs<br/>format_output + status append"]
-        ENV["envelope.rs<br/>Success / Failure JSON"]
-        SERVE["serve.rs<br/>NDJSON daemon, start/partial lines"]
-        MAIN["main.rs<br/>execute / execute_with / execute_observed"]
-    end
+| Module | Responsibility |
+| --- | --- |
+| `cli.rs` | hand-written arg parse → serve / one-shot `Request` modes |
+| `main.rs` | entry; `execute` / `execute_observed` orchestrate run → accumulate → compress → render → envelope |
+| `runner.rs` | shell resolution, detached spawn in own process group, pipe readers, reap thread, timeout kill tree |
+| `accumulator.rs` | `Utf8Stream` decoder, bounded tail window, spill file, snapshots |
+| `truncate.rs` | JS-parity byte/line primitives (`js_byte_length`, `split_lines`, `truncate_tail`) |
+| `compress.rs` | command classification + copy-on-write compaction tiers |
+| `render.rs` | display text + `structuredContent` shaping (`structured_limit`, `format_size`) |
+| `envelope.rs` | `Success` / `Failure` envelope structs |
+| `serve.rs` | daemon loop, per-id dispatch, `StreamObserver` |
+| `procgroup.rs` | `setpgid(0,0)` self-isolation for `--serve` |
 
-    ENVV --> D{"Daemon alive?"}
-    D ==>|"yes"| CLI
-    D -->|"no / transport fails"| OS
-    OS -.->|"spawn / parse failure"| BF
-    CLI ==> MAIN
-    MAIN ==> RUNNER ==> ACC
-    ACC -->|"into_full_text / spill read"| COMPRESS
-    COMPRESS -->|"pruned to 40 lines / 2 KB"| TRUNC
-    TRUNC ==> RENDER
-    RENDER ==> ENV
-    ENV -->|"envelope JSON"| LADDER["resolve rung"]
-    ACC -.->|"fullOutputPath spill ref"| ENV
-    RUNNER -.->|"pid + throttled partials"| TUIGET
-    DA -.->|"spawn / timeout parity failure"| OS
-    ENV --> LADDER_OUT["Envelope to model"]
-    OS --> LADDER_OUT
-    BF --> LADDER_OUT
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/pibash-pipeline-dark.png" />
+    <img src="assets/diagrams/pibash-pipeline-light.png" alt="pibash pipeline" width="960" />
+  </picture>
+</p>
 
-    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
-    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
-    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
-    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
-    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
-    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    class ENVV,TUIGET ext
-    class DA rung
-    class OS oneshot
-    class BF oracle
-    class CLI,RUNNER,ACC,COMPRESS,TRUNC,RENDER,ENV,SERVE,MAIN,LADDER core
-    class LADDER_OUT out
-```
+Interactive version: [pibash pipeline](assets/diagrams/pibash-pipeline.html) (source: [JSON](assets/diagrams/pibash-pipeline.workflow.json))
 
 ### Execution
 
@@ -379,6 +417,21 @@ read deadlocks as soon as a child fills the pipe it is not being read from.
 - **`RunObserver`**: the daemon implements it to stream `started` (child pid, for
   cancellation) and throttled `partial` updates (`UPDATE_THROTTLE`, 100 ms,
   matching the built-in).
+- **Concurrency model**: two reader threads (stdout, stderr) forward raw
+  chunks over one `mpsc` channel in arrival order; a dedicated thread blocks
+  in `wait()` and posts the exit status — this replaced a 2 ms `try_wait`
+  poll that added dead time to sub-millisecond commands.
+- **Cwd pre-check**: a missing working directory returns a `spawn_error`
+  outcome without spawning, which the extension rethrows as the built-in's
+  thrown error.
+- **Teardown escalation**: on the deadline, `kill_tree` TERM-s the group plus
+  individually-signalled escapees, waits up to 2 s for the reap, then
+  `kill_tree_hard` repeats with KILL.
+- **Escapee scan**: descendants that left the shell's process group
+  (`setsid`/`setpgid` children) are found by one `/proc` pass (ppid + pgrp
+  per pid; `comm` parsed after the last `)` because it may contain spaces and
+  parentheses) **before** the group signal — once the shell dies they reparent
+  to init and become unreachable by parent walk.
 
 ### Accumulation and spill
 
@@ -470,55 +523,26 @@ unchanged throughout — parity suites pin the envelope shape.
 One invocation runs open → slice → render → truncate → binary-detect, printing
 a single JSON envelope.
 
-```mermaid
-flowchart TB
-    subgraph EXT["extensions/piread/index.ts"]
-        direction TB
-        IMG["Image extensions → private built-in read"]
-        OS["⚡ Rung 2 · one-shot spawn<br/>bin/piread per call"]
-        BF["🧭 Rung 3 · built-in read<br/>final fail-open rung"]
-        DA["🚀 Rung 1 · bin/piread --serve<br/>NDJSON daemon"]
-    end
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/piread-pipeline-dark.png" />
+    <img src="assets/diagrams/piread-pipeline-light.png" alt="piread pipeline" width="960" />
+  </picture>
+</p>
 
-    subgraph CORE["rust-tools/piread/src"]
-        direction TB
-        CLI["cli.rs<br/>--path/--offset/--limit ≥ 1"]
-        ENV["envelope.rs<br/>Success/Failure + Node-style errors"]
-        PIPE["pipeline.rs<br/>streaming Segmenter + HeadTruncator"]
-        COMP["compress.rs<br/>head-tail to 40 lines / 2 KB"]
-        SERVE["serve.rs<br/>NDJSON daemon"]
-        MAIN["main.rs"]
-    end
+Interactive version: [piread pipeline](assets/diagrams/piread-pipeline.html) (source: [JSON](assets/diagrams/piread-pipeline.workflow.json))
 
-    IMG --> D{"Daemon alive?"}
-    D ==>|"yes"| CLI
-    D -->|"no / transport fails"| OS
-    OS -.->|"spawn / parse failure"| BF
-    CLI ==> MAIN ==> PIPE
-    PIPE -->|"File::open → ENOENT/EACCES/EISDIR"| ENV
-    PIPE -->|"NUL sniff first 8 KiB"| ENV
-    PIPE -->|"offset beyond EOF"| ENV
-    PIPE ==> COMP
-    COMP ==> ENV
-    ENV -->|"envelope JSON"| LADDER_OUT["Envelope to model"]
-    OS --> LADDER_OUT
-    BF --> LADDER_OUT
-    DA -.->|"spawn / timeout parity failure"| OS
-    IMG -.->|"non-image path continues"| D
+### Module map
 
-    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
-    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
-    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
-    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
-    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
-    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    class IMG ext
-    class DA rung
-    class OS oneshot
-    class BF oracle
-    class CLI,ENV,PIPE,COMP,SERVE,MAIN core
-    class LADDER_OUT out
-```
+| Module | Responsibility |
+| --- | --- |
+| `cli.rs` | arg parse into run/serve modes; count validation (`parse_count`) |
+| `main.rs` | entry; `ToolError` kinds carrying Node-parity messages |
+| `pipeline.rs` | `Segmenter` (with binary sniff), `HeadTruncator`, slicing, render, path resolve/normalize |
+| `compress.rs` | head-tail compaction (`COMPRESS_MAX_LINES` 40 / `COMPRESS_MAX_BYTES` 2048) + the `PI_READ_COMPRESS` switch |
+| `envelope.rs` | hand-rolled JSON writers incl. `write_success_with_id` |
+| `serve.rs` | daemon loop; always exits 0 |
+| `procgroup.rs` | same `setpgid` self-isolation as `pibash` |
 
 ### Streaming parser
 
@@ -557,6 +581,22 @@ Two details that matter:
 coverage from metadata (`countTextLines` is only the fallback) and windows are
 not under-certified.
 
+### Serve and envelope
+
+- The daemon answers each request into a reused buffer and flushes per
+  response; a stdout write failure means the parent is gone and ends the
+  loop. Exit code is always 0 — tool-level failures are `error` envelopes.
+- The `Segmenter` sniffs an initial window for NUL bytes; a hit flags the
+  file `binary` and the extension routes the call to the built-in `read`
+  (the image pipeline needs the model context).
+- `read_text_compacted` converts `compact()`'s window-relative cut lines to
+  **absolute file lines** (`window_start = offset − 1`) before attaching
+  `details.compaction.omissions` — only that call site knows where the
+  requested window began.
+- `open_error` reproduces Node's `fsPromises.access` messages byte for byte
+  (ENOENT / EACCES / …) so failure shapes match the built-in without a
+  round-trip.
+
 ---
 
 ## piedit — native edit pipeline
@@ -564,54 +604,26 @@ not under-certified.
 read → LF/BOM normalize → exact/fuzzy match → uniqueness/overlap validation →
 apply → write → native diff/patch render.
 
-```mermaid
-flowchart TB
-    subgraph EXT["extensions/piedit/index.ts"]
-        direction TB
-        QUEUE["withFileMutationQueue<br/>re-entrancy guard"]
-        OS["⚡ Rung 2 · one-shot spawn<br/>bin/piedit per call"]
-        BF["🧭 Rung 3 · built-in edit<br/>final fail-open rung"]
-        DA["🚀 Rung 1 · bin/piedit --serve<br/>NDJSON daemon"]
-        DIFFTS["render diff via<br/>generateDiffString / generateUnifiedPatch"]
-    end
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/piedit-pipeline-dark.png" />
+    <img src="assets/diagrams/piedit-pipeline-light.png" alt="piedit pipeline" width="960" />
+  </picture>
+</p>
 
-    subgraph CORE["rust-tools/piedit/src"]
-        direction TB
-        CLI["cli.rs<br/>--path/--edits/--serve"]
-        PIPE["pipeline.rs<br/>normalizeToLF, detectLineEnding,<br/>splitBom, NFKC fuzzy match,<br/>apply, write"]
-        DIFF["diff.rs<br/>jsdiff port, byte-identical"]
-        ENV["envelope.rs<br/>diff/patch/firstChangedLine"]
-        SERVE["serve.rs"]
-        MAIN["main.rs"]
-    end
+Interactive version: [piedit pipeline](assets/diagrams/piedit-pipeline.html) (source: [JSON](assets/diagrams/piedit-pipeline.workflow.json))
 
-    QUEUE --> D{"Daemon alive?"}
-    D ==>|"yes"| CLI
-    D -->|"no / transport fails"| OS
-    OS -.->|"spawn / parse failure"| BF
-    CLI ==> MAIN ==> PIPE
-    PIPE -->|"exact/fuzzy match fails"| ENV
-    PIPE ==> DIFF
-    DIFF -->|"diff + unified patch"| ENV
-    ENV -->|"envelope JSON"| LADDER_OUT["Envelope to model"]
-    OS --> LADDER_OUT
-    BF --> LADDER_OUT
-    DA -.->|"spawn / timeout parity failure"| OS
-    LADDER_OUT -.->|"legacy baseContent/newContent"| DIFFTS
+### Module map
 
-    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
-    classDef rung fill:#238636,stroke:#3fb950,color:#ffffff
-    classDef oneshot fill:#9e6a03,stroke:#d29922,color:#ffffff
-    classDef oracle fill:#b62324,stroke:#f85149,color:#ffffff
-    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
-    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    class QUEUE,DIFFTS ext
-    class DA rung
-    class OS oneshot
-    class BF oracle
-    class CLI,PIPE,DIFF,ENV,SERVE,MAIN core
-    class LADDER_OUT out
-```
+| Module | Responsibility |
+| --- | --- |
+| `cli.rs` | arg parse into run/serve modes |
+| `main.rs` | entry, request read, `ToolError` |
+| `pipeline.rs` | LF/BOM normalize, fuzzy view, match/validate/apply, write |
+| `diff.rs` | jsdiff port: line diff, unified patch, render details |
+| `envelope.rs` | `Request`/`Edit` shapes, `ErrorKind`, envelope writers |
+| `serve.rs` | daemon loop |
+| `procgroup.rs` | self-isolation |
 
 ### Why the queue matters
 
@@ -652,6 +664,16 @@ executor runs — otherwise re-entering the same queue deadlocks.
    `generateUnifiedPatch` output byte-identical to the TS helpers.
    `renderDiff: true` means the content pair never crosses the boundary — only
    the diff does, which is what keeps `piedit` bounded in context cost.
+8. **Legacy envelope rung** — when `renderDiff` is absent (an older binary),
+   the daemon returns the `{baseContent, newContent}` pair and the extension
+   renders the diff itself: mixed-version compatibility after a partial
+   upgrade.
+9. **Diff internals** — the jsdiff port stores components in an arena
+   (`Vec<Component>`) linked by indices instead of a pointer-linked list:
+   `extract_common` walks diagonals extending common runs, `add_to_path`
+   chains same-flag components, `build_values` reconstructs the token stream.
+   `generate_unified_patch` groups changes into `Hunk`s with `@@` headers,
+   and `firstChangedLine` rides `details` so the TUI can jump to the edit.
 
 ---
 
@@ -660,35 +682,26 @@ executor runs — otherwise re-entering the same queue deadlocks.
 Parses `<sessions-dir>/<project>/<ISO-ts>_<uuid>.jsonl` transcripts into compact
 per-session extracts consumed by session-audit's fast path.
 
-```mermaid
-flowchart TB
-    subgraph EXT["extensions/pidx/index.ts"]
-        direction TB
-        REG["First-class pidx tool registration"]
-    end
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/pidx-pipeline-dark.png" />
+    <img src="assets/diagrams/pidx-pipeline-light.png" alt="pidx pipeline" width="960" />
+  </picture>
+</p>
 
-    subgraph CORE["rust-tools/pidx/src/main.rs"]
-        direction TB
-        SCAN["Scan sessions-dir<br/>key files by size + mtime_ns"]
-        PARSE["Parse JSONL → extract<br/>turns, calls, results,<br/>compactions, skills"]
-        STORE["State store<br/>byte-range header + raw extract bytes"]
-        OUT["Write one JSON line per session<br/>newest first → --out; summary → stderr"]
-    end
+Interactive version: [pidx pipeline](assets/diagrams/pidx-pipeline.html) (source: [JSON](assets/diagrams/pidx-pipeline.workflow.json))
 
-    REG ==> SCAN
-    SCAN ==>|"file changed"| PARSE
-    SCAN -.->|"unchanged"| STORE
-    PARSE ==> STORE
-    STORE -.->|"replay cached extract"| OUT
-    PARSE ==> OUT
+### Module map (single `main.rs`)
 
-    classDef ext fill:#1f6feb,stroke:#58a6ff,color:#ffffff
-    classDef core fill:#161b22,stroke:#8b949e,color:#f0f6fc
-    classDef out fill:#8957e5,stroke:#bc8cff,color:#ffffff
-    class REG ext
-    class SCAN,PARSE,STORE core
-    class OUT out
-```
+| Function group | Responsibility |
+| --- | --- |
+| CLI parse | `--sessions-dir` / `--state` / `--out` / `--max` / `--session` / `--force` / `--report usage\|lifecycle` |
+| `discover` / `select_sessions` | scan `<project>/<file>.jsonl`; active-session (5 min) and live-window (10 min) handling |
+| `extract_file` | one pass over a JSONL → the extract object |
+| `param_hash` / `js_stringify` | JS-compatible param hashing so hashes match the Node parser |
+| `gate_family` / `content_bytes` | tool-kind classification (9 families) and size estimation (images ≈ 4 KB) |
+| `load_store` / `save_store` | the binary cache (`PIDXST02`) |
+| `report_usage` / `report_lifecycle` | spend and lifecycle aggregates |
 
 ### Incremental contract
 
@@ -696,6 +709,16 @@ Files are keyed by `(size, mtime_ns)`. An unchanged file **replays its cached
 extract bytes** — no JSON parse and no re-serialize — so warm runs are
 O(changes), not O(archive). A per-session extract is produced from the JSONL:
 turns, tool calls (with parameter hashes), results, compactions, skill loads.
+
+### Extract pass
+
+`extract_file` walks the JSONL once, accumulating: turns deduped by
+`responseId` with **last occurrence winning** (apiTurns parity; entries
+without one never dedupe), tool calls and results deduped by call id,
+compaction entries counted, skill loads counted per skill, and usage
+aggregated over **every** assistant message carrying usage — before the rid
+dedupe — because a session that retried or streamed twice paid for all of it
+even though `turns` keeps one entry per response id.
 
 ### State store format
 
@@ -731,6 +754,48 @@ The JSONL listing is **never dumped inline**. Extracts are written to a file and
 only a compact pointer line enters the model context, hard-capped at
 `PI_PIDX_MAX_INLINE` (default 2000 chars). This is the tool that already solved
 context cost — the model reads the shape of the corpus, then queries the file.
+
+### Extension boundary
+
+The extension (`extensions/pidx/index.ts`) is deliberately stricter than the
+binary:
+
+- **Fail closed on unknown params** — the accepted key list is a single
+  source of truth checked at runtime (schema `additionalProperties` is
+  advisory at this boundary); a malformed call must error, not silently
+  degrade to indexing everything into context.
+- **Path sandbox** — `out` / `state` / `sessionsDir` must resolve inside the
+  agent state dir or the current repo root (permission-gate audit X2);
+  anything else is refused rather than created.
+- **`force` is two-step** — `true` alone is refused; `"confirm"` proceeds,
+  so a re-index cannot happen by accident.
+- **Pointer-line discipline** — extracts default to a file beside the cache;
+  `stdout: true` opts into inline extracts hard-capped at
+  `PI_PIDX_MAX_INLINE` (default 2000 chars). `execFile` runs with a 64 MiB
+  `maxBuffer`; there is no daemon rung.
+- The binary prints one **summary JSON on stderr** per run
+  (`sessions` / `parsed` / `reused`), which the extension surfaces in
+  `details`.
+
+---
+
+## docheck — doc-consistency validator
+
+Not a tool replacement — a repo lint binary (`bin/docheck`), the Rust port of
+the former `scripts/doc-check.mjs` (deleted after byte-parity was pinned).
+Zero dependencies (std only). Four families:
+
+| Family | Checks |
+| --- | --- |
+| md-commands | fenced-block shell commands: syntax (`bash -n`), binary exists on PATH, script paths, flags appear in `--help`; mac-only / optional-toolchain / artifact / tmp classes are info-only |
+| skills-inventory | README skills table rows ↔ `skills/*/SKILL.md` dirs |
+| extensions-inventory | README Extensions section ↔ `extensions/*` dirs with `.ts` |
+| env-vars | `PI_*` vars in code ↔ docs, or allowlisted |
+
+`mdcmds.rs` splits the first family into **pure parsers** (unit-tested, no
+spawns) and the **two-process probes** (`bash -n`, `--help`), exercised by
+the parity diff and fixture tests. Everything is derived from the repo — no
+expected counts or inventories live in the binary.
 
 ---
 
