@@ -105,7 +105,7 @@ Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE
   </picture>
 </p>
 
-Interactive version: [pi-native architecture](docs/assets/diagrams/pi-native-architecture.html) (source: [JSON](docs/assets/diagrams/pi-native-architecture.json))
+▶ Explore the interactive view: [pi-native architecture](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pi-native-architecture.html)
 
 Every rung byte-matches the one below it (parity-pinned by tests); `details.via` records which rung served the call. Deep dive: [docs/rust-tools-architecture.md](docs/rust-tools-architecture.md).
 
