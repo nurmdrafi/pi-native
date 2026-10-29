@@ -7,6 +7,34 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.66.0] - 29-10-2026
+
+### Added
+
+- **Self-learn lessons store and skill routing.** Verified lessons route to the home that owns
+  them: an existing skill whose domain covers the topic is updated through skill-manager, while
+  ownerless topics land in `skills/self-learn/references/lessons/` — one file per topic in a
+  trigger, mistake-shape, fix-code-block, evidence format that rejects prose-only entries.
+- **Deployed code shapes in map-integration.** `references/realtime-plotting.md` gains the
+  live-trace dashboard shapes behind its rules: the session-configured MQTT connection hook
+  (latest-ref callbacks, topic-set-keyed reconnects, bounded credential re-auth), the interval
+  batch buffer with its flush gate, the per-entity `batch_update` store merge, the deck.gl
+  overlay via `useControl`, and style-gated throttled viewport reads.
+
+### Changed
+
+- **Anchor Guard names every uncertified edit span.** A multi-edit batch that misses
+  certification reports each failing `edits[i]` with its target line range and the exact
+  `piread` call that certifies it, replacing one opaque failure; the case corpus pins the
+  message format.
+- **Read/edit prerequisites restated.** SYSTEM.md scopes anchors to the current turn, requires
+  a search to name first-time paths (script-created files included) before `piread`, demands a
+  region re-read after half-failed batches or earlier-turn changes, pastes printed lines
+  verbatim into retries, resumes stopped reads at the named offset, and adds a context-budget
+  rule (~150K tokens) that prefers compaction over continuing. AGENTS.md drops the stale
+  commitlint filename, marks probe tests skippable for bug fixes, and directs config-file reads
+  to locate the basename instead of guessing its extension.
+
 ## [1.65.0] - 01-11-2026
 
 ### Added
