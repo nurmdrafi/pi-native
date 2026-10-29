@@ -4,12 +4,15 @@ description: >
   Audits recent session extracts for recurring behaviour failures — edit-anchor
   misses, identical-call retries, circling edits, read-tool bypass, shell
   hygiene, gate blockers, rule/gate desync — then discusses each verified
-  finding and applies the fix in the same run (TDD for code). Use when the
-  user asks to learn from sessions, run a retro, review repeated mistakes,
-  or check whether behaviour matches the rules. Bare invocation (no window
-  argument) audits the current session only. NOT for token/cost efficiency
-  reports (session-audit) or creating/modifying SKILL.md files
-  (skill-manager).
+  finding and applies the fix in the same run (TDD for code). Every
+  verified lesson routes to its owner: an existing skill whose domain
+  covers it gets updated (via skill-manager); ownerless lessons are
+  archived in references/lessons/ with trigger, mistake shape, and a fix
+  code block. Use when the user asks to learn from sessions, run a retro,
+  review repeated mistakes, or check whether behaviour matches the rules.
+  Bare invocation (no window argument) audits the current session only.
+  NOT for token/cost efficiency reports (session-audit) or authoring
+  brand-new skills (skill-manager).
 disable-model-invocation: true
 ---
 
@@ -18,8 +21,9 @@ disable-model-invocation: true
 Reasoning layer over `pidx` session extracts. Detectors are deterministic
 (`jq` queries, `references/detectors.md`); this skill classifies failures,
 discusses them, and applies fixes. Efficiency/cost analysis belongs to
-`session-audit`. No persistent store: verified findings become code, rules,
-or tests in the same run; anything deferred is simply re-detected next run.
+`session-audit`. Fixes land in the home that owns them — an existing
+skill, a rule, a test — and whatever cannot land yet is archived under
+`references/lessons/`, not dropped.
 
 ## Workflow
 
@@ -48,13 +52,36 @@ or tests in the same run; anything deferred is simply re-detected next run.
    the window overlaps work on the harness itself — self-referential edits
    inflate gate-related counts.
 4. **Discuss** — present each finding: signal, evidence, root cause,
-   proposed fix and its home (rule edit / gate rule / skill / test). Wait
+   proposed fix and its home. Homes, checked in order: an existing skill
+   (`ls ~/.pi/agent/skills/` + read its description — an auth lesson
+   belongs in the auth skill, not a new archive file), rule edit, gate
+   rule, test, `references/lessons/` when nothing owns the topic. Wait
    for the user's pick; apply nothing unapproved beyond fixes the invoking
    message already sanctioned.
 5. **Apply** — approved fixes land now: code via TDD (failing test → fix →
    green), rule edits take one home only (cross-reference, never restate),
-   skill updates through skill-manager. Report what landed; state anything
-   deferred and why.
+   skill updates through skill-manager (keep that skill's trigger scope;
+   long material into its `references/` as code blocks, not prose-only
+   bullets), ownerless lessons into `references/lessons/`. Report what
+   landed; state anything deferred and why.
+
+## Lessons store (`references/lessons/`)
+
+One file per topic, written only when no skill owns the topic — step 4's
+home check runs first: a lesson matching an existing skill updates that
+skill instead of growing this dir. A re-encountered topic extends its
+existing file; never fork a second file for it.
+
+File format — trigger, mistake, fix, evidence, in that order:
+
+1. **Trigger** — the recurring situation, phrased as words a future
+   session would recognize.
+2. **Mistake shape** — what went wrong; when code was involved, the
+   offending code as a fenced block.
+3. **Fix** — the corrected code as a fenced block. A prose-only lesson is
+   rejected at review: the code block is what gives the next run
+   copy-paste context.
+4. **Evidence** — source paths the lesson was distilled from.
 
 ## Calibration
 
