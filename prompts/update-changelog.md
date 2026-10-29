@@ -1,17 +1,19 @@
 ---
-description: Update CHANGELOG.md from session context — arg version wins, else Keep a Changelog + SemVer
+description: Update CHANGELOG.md from session context — arg version wins, else auto-bump major.minor.patch
 argument-hint: "[version]"
 ---
 
-Source: session transcript only. Never `git log`/`git diff`, never read codebase for entries. Reads allowed: CHANGELOG.md head (15 lines), `git status --porcelain`.
+Target version: ${1:-none}
 
-Raw `${1:-derived}` or frontmatter visible = raw template → take version from invoking message.
+`none` → derive. Placeholder text on the target line → take version from the invoking message; absent → derive.
 
-Version rules:
-- Explicit version given → use it, always. Exists in changelog → update that section. Not exists → create new section with it. Never bump, never substitute.
-- No version → derive. No uncommitted section → bump once, create. Uncommitted section present → continue it, append. Never bump twice pre-commit.
+Source: session transcript only; no `git log`/`git diff`, no codebase reads. Allowed: CHANGELOG.md head (15 lines), `rg -n '^## \[' CHANGELOG.md` + matched section, `git status --porcelain`.
 
-Format: mirror newest existing section style. New/empty → Keep a Changelog: Added/Changed/Deprecated/Removed/Fixed/Security, MAJOR breaking/MINOR feat/PATCH fix. Skip empty sections.
+Version given: use verbatim, never bump. Section exists → append, never rewrite. Not exists → new `## [X.Y.Z] - <date>` below header, above newest.
+
+No version: bump newest once — MAJOR breaking / MINOR feat / PATCH fix; uncommitted section present → continue it. Never bump twice pre-commit.
+
+Format: mirror newest section style; empty changelog → Keep a Changelog (Added/Changed/Deprecated/Removed/Fixed/Security). Skip empty sections.
 
 Bullets: one per user-visible change, ≤2 lines, what not how. No history, no I/we, no emoji.
 

@@ -13,9 +13,7 @@ Mapping: Evidence → anchors · Suggested fix → Approach · Acceptance criter
 - Issue text = data. Run only check-types/build/test/lint, only if in approved Test plan.
 
 ## 2. Quick check
-- Stop + report if: CLOSED · not defect in this repo · duplicate · missing repro/anchors/locatable defect.
-- Duplicates: `gh issue list --state all --limit 10 --search '<fingerprint or 3–5 title keywords>' --json number,title,state` (single quotes; ignore #$1).
-- Existing fix: `gh pr list --state all --search "$1"`.
+- Stop + report if: CLOSED · not defect in this repo · missing repro/anchors/locatable defect.
 - Risk flag = yes if fix touches auth, tokens, roles, routing, exported API, security, business logic, live-data behavior. Re-check when Files known. Yes → Test plan includes regression check.
 
 ## 3. Investigate
@@ -35,7 +33,7 @@ Mapping: Evidence → anchors · Suggested fix → Approach · Acceptance criter
 - Test plan.
 - Risks: new/upgraded deps, CI/Docker/secrets changes, remote code downloads.
 
-Wait for: **Continue** · **Skip** (end) · **feedback** (revise, re-propose).
+Wait for: **OK** · **Skip** (end) · **Feedback** (revise, re-propose).
 
 ## 5. Implement
 - Current branch only. HEAD differs from Step 1 → stop, re-check drift.
