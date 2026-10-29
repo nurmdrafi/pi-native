@@ -89,7 +89,7 @@ order, not alphabetical.
   </picture>
 </p>
 
-▶ Explore the interactive version: [tool dispatch ladder](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/tool-dispatch-ladder.html) (source: [JSON](assets/diagrams/tool-dispatch-ladder.workflow.json))
+▶ Explore the interactive view: [tool dispatch ladder](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/tool-dispatch-ladder.html) (source: [JSON](assets/diagrams/tool-dispatch-ladder.workflow.json))
 
 The ladder is **fail-open**: every rung's failure advances to the next, and the
 terminal rung is always the original TypeScript implementation. A missing
@@ -396,7 +396,7 @@ injection and TUI rendering.
   </picture>
 </p>
 
-▶ Explore the interactive version: [pibash pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pibash-pipeline.html) (source: [JSON](assets/diagrams/pibash-pipeline.workflow.json))
+▶ Explore the interactive view: [pibash pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pibash-pipeline.html) (source: [JSON](assets/diagrams/pibash-pipeline.workflow.json))
 
 ### Execution
 
@@ -530,7 +530,7 @@ a single JSON envelope.
   </picture>
 </p>
 
-▶ Explore the interactive version: [piread pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/piread-pipeline.html) (source: [JSON](assets/diagrams/piread-pipeline.workflow.json))
+▶ Explore the interactive view: [piread pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/piread-pipeline.html) (source: [JSON](assets/diagrams/piread-pipeline.workflow.json))
 
 ### Module map
 
@@ -611,7 +611,7 @@ apply → write → native diff/patch render.
   </picture>
 </p>
 
-▶ Explore the interactive version: [piedit pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/piedit-pipeline.html) (source: [JSON](assets/diagrams/piedit-pipeline.workflow.json))
+▶ Explore the interactive view: [piedit pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/piedit-pipeline.html) (source: [JSON](assets/diagrams/piedit-pipeline.workflow.json))
 
 ### Module map
 
@@ -689,7 +689,7 @@ per-session extracts consumed by session-audit's fast path.
   </picture>
 </p>
 
-▶ Explore the interactive version: [pidx pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pidx-pipeline.html) (source: [JSON](assets/diagrams/pidx-pipeline.workflow.json))
+▶ Explore the interactive view: [pidx pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pidx-pipeline.html) (source: [JSON](assets/diagrams/pidx-pipeline.workflow.json))
 
 ### Module map (single `main.rs`)
 
