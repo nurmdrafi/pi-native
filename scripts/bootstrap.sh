@@ -47,37 +47,45 @@ else
        "To enable: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && re-run"
 fi
 
-# 4. piread (native read tool, default-on — PI_NATIVE_READ=0 opts out;
-#    the extension falls back to the built-in read without the binary)
+# 4. piread (native read tool — registers unconditionally; Rust is the only
+#    executor, so an unbuilt binary makes the tool reject, not fall back)
 if [ -n "$CARGO" ]; then
   (cd rust-tools && "$CARGO" build --release -p piread)
   install_native rust-tools/target/release/piread bin/piread
   echo "== piread: built + installed to bin/piread"
 else
-  echo "== piread: cargo not found — the read tool stays on its built-in implementation." \
+  echo "== piread: cargo not found — the piread tool rejects until Rust is installed." \
        "To enable: install Rust (rustup command above) and re-run"
 fi
 
-# 5. piedit (native edit tool, default-on — PI_NATIVE_EDIT=0 opts out;
-#    the extension falls back to the built-in edit without the binary)
+# 5. piedit (native edit tool — registers unconditionally; Rust is the only
+#    executor, so an unbuilt binary makes the tool reject, not fall back)
 if [ -n "$CARGO" ]; then
   (cd rust-tools && "$CARGO" build --release -p piedit)
   install_native rust-tools/target/release/piedit bin/piedit
   echo "== piedit: built + installed to bin/piedit"
 else
-  echo "== piedit: cargo not found — the edit tool stays on its built-in implementation." \
+  echo "== piedit: cargo not found — the piedit tool rejects until Rust is installed." \
        "To enable: install Rust (rustup command above) and re-run"
 fi
 
-# 6. pibash (native shell tool, default-on — PI_NATIVE_BASH=0 opts out;
-#    the extension falls back to the built-in bash without the binary)
+# 6. pibash (native shell tool — registers unconditionally; Rust is the only
+#    executor, so an unbuilt binary makes the tool reject, not fall back)
 if [ -n "$CARGO" ]; then
   (cd rust-tools && "$CARGO" build --release -p pibash)
   install_native rust-tools/target/release/pibash bin/pibash
   echo "== pibash: built + installed to bin/pibash"
 else
-  echo "== pibash: cargo not found — the shell tool stays on its built-in implementation." \
+  echo "== pibash: cargo not found — the pibash tool rejects until Rust is installed." \
        "To enable: install Rust (rustup command above) and re-run"
+fi
+
+# 6b. outline (definition index: `outline <file>` prints `start end kind name`
+#    rows used to aim read windows without re-walking a file; plain CLI, not an extension)
+if [ -n "$CARGO" ]; then
+  (cd rust-tools && "$CARGO" build --release -p outline)
+  install_native rust-tools/target/release/outline bin/outline
+  echo "== outline: built + installed to bin/outline"
 fi
 
 # 7. health check

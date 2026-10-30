@@ -10,7 +10,7 @@
 # change to one crate does not rebuild the other two.
 [workspace]
 resolver = "2"
-members = ["pidx", "piread", "piedit", "pibash", "docheck"]
+members = ["pidx", "piread", "piedit", "pibash", "docheck", "outline"]
 
 # Shared release profile (profiles must live at the workspace root; per-crate
 # copies are ignored). Unified on the piread/piedit settings; pidx now also

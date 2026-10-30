@@ -1,0 +1,10 @@
+[package]
+name = "outline"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "outline"
+path = "src/main.rs"
+
+[dependencies]
