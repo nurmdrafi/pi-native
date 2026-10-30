@@ -9,10 +9,10 @@
  * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27); Stale bind (stat or hash drift since the certified read) with every anchor exact in the CURRENT file passes with a Stale-relaxed note (M2 skipped, coverage dropped; miss/fuzzy/duplicate reverts to the Stale warn) (2026-10-29) |
  * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation; single-file view commands in bash results credit their printed H1-visible lines (VC, 2026-10-29) |
  * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
- * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; the block lists those hit lines and the piread call that covers them |
+ * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; a fused piread `--hits` result certifies its `details.locate.windows` spans (complement over totalLines stays unread, a miss certifies nothing) and seeds the hit store with `locate.hits`; the block lists those hit lines and the piread call that covers them |
  * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
- * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread delegates them internally) |
- * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; pibash falls back itself) |
+ * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread would return them as lossy text) |
+ * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; no built-in fallback) |
  * | H1  | output cap (non-blocking)     | bash output capped at 100 lines / 4KB UTF-8; oversized first line head+tail; tail spilled to $TMPDIR/pgate-spill; errors capped too |
  * | H1b | read cap (non-blocking)       | read/piread result over 300 lines / 8KB truncated to the head, full text spilled to $TMPDIR/pgate-spill with a pointer — reads had no post-cap before |
  * | H2  | Permission Gate (Destructive) | destructive commands need approval: chat yes / UI confirm; fail closed headless; re-send re-prompts |
@@ -83,6 +83,7 @@ import {
   HASH_CAP_BYTES,
   hashFile,
   hashText,
+  locateReadCoverage,
   normPath,
   overlapLines,
   renderedCoverageFromBlocks,
@@ -208,7 +209,10 @@ export default function (pi: ExtensionAPI) {
     }
   >();
   /** read toolCallId -> { path, win }, awaiting its tool_result */
-  const pendingReads = new Map<string, { path: string; win: LineSpan }>();
+  const pendingReads = new Map<
+    string,
+    { path: string; win: LineSpan; fused?: boolean }
+  >();
   /** R10: bash toolCallId -> normalized base command, awaiting its tool_result */
   const pendingBash = new Map<string, string>();
   // 2026-10-08 extensions audit (Re-block): pendingBash is only set AFTER all
@@ -566,18 +570,18 @@ export default function (pi: ExtensionAPI) {
       const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
       // P1 (2026-10-15 audit): piread-first. Built-in `read` on a text file is
       // blocked so the native pipeline (same schema, same coverage) is used;
-      // images stay on `read`. piread itself falls back to the built-in reader
-      // for images/binary/missing-binary, so no manual fallback is needed.
-      // Skipped when the piread extension is opted out (PI_NATIVE_READ=0) —
-      // then `piread` does not exist and blocking `read` would strand the agent.
+      // images stay on `read`: piread returns their bytes as lossy text, which
+      // is what a text-only model wants but loses the attachment a multimodal
+      // model can use. Skipped when the extension is not loaded — an absent
+      // `piread` means the user chose the built-in tool, and blocking `read`
+      // would strand the agent. The rule's own severity is the switch.
       if (
         ruleEnabled("nativeReadFirst") &&
         isToolCallEventType("read", event) &&
-        process.env.PI_NATIVE_READ !== "0" &&
         !IMAGE_EXTENSIONS.some((ext) => display.toLowerCase().endsWith(ext))
       ) {
         return blockCall(
-          `Token Economy (Piread-first): '${shown}' is a text file — use the piread tool (piread {path, offset, limit}) instead of read. Images use the read tool.`,
+          `Token Economy (Piread-first): '${shown}' is a text file — use the piread tool (piread {path, offset, limit} or {path, hits}) instead of read. Images use the read tool.`,
         );
       }
       const start = Math.max(
@@ -611,8 +615,8 @@ export default function (pi: ExtensionAPI) {
         const hint = hits ? hitWindowHint(hits) : undefined;
         return blockCall(
           hint && hits
-            ? `Locate-first: no hit in this ${win.end - win.start + 1}-line window (hits ${hitLinesLabel(hits)}) — piread {path:'${shown}', offset:${hint.offset}, limit:${hint.limit}}. Hits recorded; do not re-search.`
-            : `Locate-first: '${shown}' was never named by a search this session — locate first (\`rg -n <term> ${shown.replace(/^.*\//, "")}\`), then piread the hit's line ±3.`,
+            ? `Locate-first: no hit in this ${win.end - win.start + 1}-line window (hits ${hitLinesLabel(hits)}) — piread {path:'${shown}', offset:${hint.offset}, limit:${hint.limit}}. Hits listed above; do not re-search.`
+            : `Locate-first: '${shown}' was never named by a search this session — locate first (\`rg -n <term> ${shown.replace(/^.*\//, "")}\`), or piread {path, hits:'<term>'}.`,
         );
       }
       // R1b (2026-10-10 audit; demoted 2026-10-21): a whole read of a large
@@ -629,7 +633,7 @@ export default function (pi: ExtensionAPI) {
         if (snap && snap.size > BIG_READ_BYTES) {
           const r = enforce(
             "largeReadGuard",
-            `Token Economy (Big read): '${shown}' is ~${Math.round(snap.size / 1024)}KB — target it with the piread tool (rg the symbol, then piread {path, offset, limit} ≤${BIG_READ_WIN} lines).`,
+            `Token Economy (Big read): '${shown}' is ~${Math.round(snap.size / 1024)}KB — target it with the piread tool ({path, hits:'<symbol>'}, or rg the symbol then {offset, limit} ≤${BIG_READ_WIN} lines).`,
           );
           if (r) return r;
         }
@@ -655,8 +659,8 @@ export default function (pi: ExtensionAPI) {
           const lo = sp.start;
           const hi = sp.end;
           return blockCall(
-            `Token Economy (Re-read): ${lo === hi ? `line ${lo}` : `lines ${lo}–${hi === Infinity ? "EOF" : hi}`} of '${shown}' are already in context ` +
-              `(${prior.kind}, file unchanged). Read another window via piread or act on what is there.`,
+            `Token Economy (Re-read): ${lo === hi ? `line ${lo}` : `lines ${lo}–${hi === Infinity ? "EOF" : hi}`} of '${shown}' are already in context — ` +
+              `read another window via piread or act on what is there.`,
           );
         }
         coverage.delete(path); // changed on disk (or no baseline) — the read is legitimate
@@ -692,7 +696,14 @@ export default function (pi: ExtensionAPI) {
             `Token Economy (Re-read): ~${Math.round(frac * 100)}% of lines ${win.start}–${win.end} of '${shown}' are already in context — shift the window to unread lines or act on what is there.`,
           );
       }
-      pendingReads.set(event.toolCallId, { path, win });
+      pendingReads.set(event.toolCallId, {
+        path,
+        win,
+        // fused locate+read call: certification runs off the structured
+        // `details.locate` field, never the rendered line count
+        fused: typeof (event.input as Record<string, unknown>).hits ===
+          "string",
+      });
     }
 
     if (isToolCallEventType("write", event)) {
@@ -785,17 +796,14 @@ export default function (pi: ExtensionAPI) {
     if (r11) return r11;
     // P2 (2026-10-18): pibash-first. Built-in `bash` is blocked so the native
     // pipeline (same schema, full bash-kind rule set — H1/R10/destructive/
-    // toolchain) runs; pibash itself falls back to the built-in executor when
-    // its binary is missing, so no manual fallback is needed. Skipped when the
-    // pibash extension is opted out (PI_NATIVE_BASH=0) — then `pibash` does not
-    // exist and blocking `bash` would strand the agent.
-    if (
-      ruleEnabled("nativeBashFirst") &&
-      event.toolName === "bash" &&
-      process.env.PI_NATIVE_BASH !== "0"
-    )
+    // toolchain) runs; pibash has no built-in fallback, so a broken binary is a
+    // tool error, not a silent downgrade. Skipped when the extension is not
+    // loaded — an absent `pibash` means the user chose the built-in tool, and
+    // blocking `bash` would strand the agent. The rule's own severity is the
+    // switch.
+    if (ruleEnabled("nativeBashFirst") && event.toolName === "bash")
       return blockCall(
-        "Token Economy (Pibash-first): use the pibash tool (pibash {command, timeout}) for shell work instead of bash — same schema and bash-kind gate rules; pibash falls back to the built-in executor itself.",
+        "Token Economy (Pibash-first): use the pibash tool (pibash {command, timeout}) for shell work instead of bash.",
       );
     pendingBashFull.set(event.toolCallId, cmd);
 
@@ -1044,6 +1052,28 @@ export default function (pi: ExtensionAPI) {
     if (text.endsWith("\n")) text = text.slice(0, -1);
     const visible = visibleLineCount(text);
     if (visible <= 0) return;
+    if (view.headerSpan) {
+      // outline --show: first line "start-end kind name"; oversized spans
+      // carry "... omitted N lines (lines A-B) ..." — only printed body
+      // lines certify (head run clamped to what was actually seen).
+      const m = /^(\d+)-(\d+) \S+ /.exec(text);
+      if (!m) return;
+      const sStart = Number(m[1]);
+      const sEnd = Number(m[2]);
+      if (!(sEnd >= sStart && sStart >= 1)) return;
+      const om = /\.\.\. omitted \d+ lines \(lines (\d+)-(\d+)\) \.\.\./.exec(text);
+      const bodyLines = visible - 1 - (om ? 1 : 0);
+      if (bodyLines <= 0) return;
+      const snap = await snapshot(view.path);
+      if (!snap) return;
+      const end = Math.min(
+        om ? Number(om[1]) - 1 : sEnd,
+        sStart + bodyLines - 1,
+      );
+      if (end >= sStart)
+        certify(coverage, view.path, { start: sStart, end }, "read", snap);
+      return;
+    }
     let start = view.from;
     if (view.last !== undefined) {
       // tail -n K: the printed lines are the file's LAST K — map through
@@ -1141,6 +1171,7 @@ export default function (pi: ExtensionAPI) {
               omittedChars?: unknown;
               omissions?: CompactionOmission[] | null;
             } | null;
+            locate?: unknown;
           };
         }
       ).details;
@@ -1156,6 +1187,34 @@ export default function (pi: ExtensionAPI) {
         compaction.strategy !== "none" &&
         typeof compaction.omittedChars === "number" &&
         compaction.omittedChars > 0;
+      // Fused locate+read (structured locate path): the result's
+      // `details.locate` names the exact windows the tool rendered — certify
+      // those spans, record the complement over totalLines as unread gaps,
+      // and seed the search-hit store with the reported hit lines (one
+      // source of truth with search-output seeding, no rendered-text
+      // sniffing). The rendered body mixes window headers and hit markers,
+      // so the window math below would mis-certify — a bare fused call
+      // reads as whole-file. A miss or malformed payload certifies nothing
+      // (fail closed).
+      if (read.fused) {
+        const located = locateReadCoverage(details?.locate);
+        if (located) {
+          for (const s of located.spans)
+            certify(coverage, read.path, s, "read", snap);
+          if (located.spans.length > 0)
+            recordGaps(coverage, read.path, located.gaps);
+          const hitLines = (details?.locate as { hits?: unknown } | null)
+            ?.hits;
+          if (ruleEnabled("locateFirst") && Array.isArray(hitLines)) {
+            const seed = searchHits.get(read.path) ?? new Set<number>();
+            for (const h of hitLines)
+              if (typeof h === "number" && Number.isInteger(h) && h >= 1)
+                seed.add(h);
+            if (seed.size > 0) searchHits.set(read.path, seed);
+          }
+        }
+        return;
+      }
       const counted = countTextLines(content);
       const lines =
         typeof trunc?.outputLines === "number"
@@ -1236,7 +1295,7 @@ export default function (pi: ExtensionAPI) {
               ...(event.content ?? []),
               {
                 type: "text",
-                text: `Token Economy (Re-read): ${Math.round(frac * 100)}% of the ${lines} lines just read from '${shown}' were already in context (${r1xPrior.kind}, file unchanged) — act on them or aim the next window at unread lines.`,
+                text: `Token Economy (Re-read): ${Math.round(frac * 100)}% of the ${lines} lines just read from '${shown}' were already in context — act on them or aim the next window at unread lines.`,
               },
             ],
           };
@@ -1421,7 +1480,7 @@ export default function (pi: ExtensionAPI) {
         ...(event.content ?? []),
         {
           type: "text",
-          text: `Cadence: ~${CADENCE_TURNS} turns / high context this session — the prefix now dominates cost. Propose compaction or a fresh session (AGENTS.md Token Economy: past ~150K context or ~${CADENCE_TURNS} turns).`,
+          text: `Cadence: ~${CADENCE_TURNS} turns / high context this session — the prefix now dominates cost. Propose compaction or a fresh session.`,
         },
       ],
     };
@@ -1504,6 +1563,7 @@ export default function (pi: ExtensionAPI) {
         win: LineSpan;
         write?: boolean;
         edited?: boolean;
+        fused?: boolean;
         ts?: number;
       }
     >();
@@ -1575,6 +1635,7 @@ export default function (pi: ExtensionAPI) {
                     ? start + call.arguments.limit - 1
                     : Infinity,
               },
+              fused: typeof call.arguments.hits === "string",
               ts: entryTs,
             });
           }
@@ -1614,6 +1675,21 @@ export default function (pi: ExtensionAPI) {
         // 2026-10-11: reads get the freshness rule writes already had —
         // a file changed after the replayed read certifies nothing
         if (snap && p.ts && snap.mtimeMs > p.ts + 1000) continue;
+        // fused replay: certify only the structured windows the replayed
+        // result reports — whole-file math on a fused call invents
+        // coverage; a replay without a parseable locate certifies nothing
+        if (p.fused) {
+          const located = locateReadCoverage(
+            (res as { details?: { locate?: unknown } }).details?.locate,
+          );
+          if (located) {
+            for (const s of located.spans)
+              certify(coverage, p.path, s, "read", snap);
+            if (located.spans.length > 0)
+              recordGaps(coverage, p.path, located.gaps);
+          }
+          continue;
+        }
         const counted = countTextLines(res.content ?? []);
         if (counted.lines <= 0) continue;
         const wholeFile =

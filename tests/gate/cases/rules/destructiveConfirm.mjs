@@ -262,7 +262,7 @@ export const cases = [
         "tool_call",
         {
           type: "tool_call",
-          toolName: "bash",
+          toolName: "pibash",
           toolCallId: id1,
           input: { command: cmd },
         },
@@ -271,7 +271,7 @@ export const cases = [
       if (!b1) return { blocked: false };
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: cmd },
         content: textBlocks(b1.reason),
@@ -281,7 +281,7 @@ export const cases = [
         "tool_call",
         {
           type: "tool_call",
-          toolName: "bash",
+          toolName: "pibash",
           toolCallId: `d8${nextId()}`,
           input: { command: cmd },
         },

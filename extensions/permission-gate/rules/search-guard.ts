@@ -134,7 +134,7 @@ export function swallowCheck(seg: string): string | undefined {
  * certify spans, so the reason must not claim they seed nothing. */
 export function readerBypassCheck(cmd: string): string | undefined {
   return /(?:^|&&|\|\||;|\||\bdo\b|\bthen\b)\s*(?:sed\s+[^|;&]*-n\b|cat\s)/.test(cmd)
-    ? "Hygiene (Reader-bypass): read windows go through piread — sed is a pipeline stage, never a reader; view-command output is capped and unnumbered, though its printed lines do count as read coverage."
+    ? "Hygiene (Reader-bypass): read windows go through piread — not cat/sed; a view command prints lines but is not the read tool."
     : undefined;
 }
 

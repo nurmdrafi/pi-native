@@ -146,6 +146,62 @@ export function recordGaps(
   entry.gaps = merged;
 }
 
+/** Fused locate+read certification (structured locate path): validate a
+ * piread `details.locate` payload and reduce it to the exact spans the tool
+ * rendered plus the unread complement over totalLines — the same
+ * window-complement math the fused ledger records. A fused result's rendered
+ * text mixes window headers and hit markers, so line counting can never
+ * recover the true coverage. Undefined when malformed: the caller then
+ * certifies nothing rather than guess. */
+export function locateReadCoverage(
+  locate: unknown,
+): { spans: LineSpan[]; gaps: LineSpan[] } | undefined {
+  if (typeof locate !== "object" || locate === null) return undefined;
+  const { windows, totalLines } = locate as {
+    windows?: unknown;
+    totalLines?: unknown;
+  };
+  if (
+    typeof totalLines !== "number" ||
+    !Number.isInteger(totalLines) ||
+    totalLines < 1
+  )
+    return undefined;
+  if (!Array.isArray(windows)) return undefined;
+  const spans: LineSpan[] = [];
+  for (const w of windows) {
+    if (!Array.isArray(w) || w.length !== 2) return undefined;
+    const [a, b] = w as [unknown, unknown];
+    if (
+      typeof a !== "number" ||
+      typeof b !== "number" ||
+      !Number.isInteger(a) ||
+      !Number.isInteger(b) ||
+      a < 1 ||
+      b < a
+    )
+      return undefined;
+    // a window past EOF cannot have rendered — clamp so the complement
+    // stays inside the file
+    spans.push({ start: a, end: b > totalLines ? totalLines : b });
+  }
+  const merged: LineSpan[] = [];
+  for (const s of [...spans].sort((x, y) => x.start - y.start)) {
+    const last = merged[merged.length - 1];
+    if (last && s.start <= last.end + 1)
+      last.end = s.end > last.end ? s.end : last.end;
+    else merged.push({ ...s });
+  }
+  const gaps: LineSpan[] = [];
+  let next = 1;
+  for (const s of merged) {
+    if (s.start > next) gaps.push({ start: next, end: s.start - 1 });
+    next = s.end + 1;
+  }
+  if (next <= totalLines) gaps.push({ start: next, end: totalLines });
+  return { spans: merged, gaps };
+}
+
 /** View-command span credit (2026-10-29, Claude Code parity): the printed
  * lines of a single-file view command in a bash result enter context like a
  * read window, so they certify spans. Only shapes whose output maps 1:1
@@ -160,6 +216,9 @@ export interface ViewCommand {
   from: number;
   to: number;
   last?: number;
+  /** outline --show: from/to are placeholders — the span comes from the
+   * result's first line ("start-end kind name"), credited at result time. */
+  headerSpan?: boolean;
 }
 export function viewCommandOf(
   cmd: string,
@@ -184,6 +243,15 @@ export function viewCommandOf(
   let n: number | undefined; // head/tail count
   let plus: number | undefined; // tail -n +N (from line N)
   let quiet = false; // sed -n
+  // outline --show <file> <symbol>: the span lives in the result header, not
+  // the command shape (headerSpan). Index mode (outline <file>) prints no
+  // file lines and credits nothing.
+  if (head === "outline") {
+    if (rest[0] !== "--show" || rest.length !== 3) return undefined;
+    const oPath = norm(rest[1]!, cwd);
+    if (!exists(oPath)) return undefined;
+    return { path: oPath, from: 1, to: Infinity, headerSpan: true };
+  }
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i]!;
     if (!t.startsWith("-")) {

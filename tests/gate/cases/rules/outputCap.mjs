@@ -87,7 +87,7 @@ export const cases = [
       const id = `cap${nextId()}`;
       const b = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat big.log" },
       });
@@ -98,7 +98,7 @@ export const cases = [
         };
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat big.log" },
         content: textBlocks(
@@ -128,13 +128,13 @@ export const cases = [
       const id = `cap${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat oneline.log" },
       });
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat oneline.log" },
         content: textBlocks("x".repeat(20000)),
@@ -153,13 +153,13 @@ export const cases = [
       const id = `cap${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "ls" },
       });
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "ls" },
         content: textBlocks("ok"),
@@ -180,13 +180,13 @@ export const cases = [
       const id = `cap${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat big.log" },
       });
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat big.log" },
         content: textBlocks(
@@ -207,13 +207,13 @@ export const cases = [
       const id = `cap${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "tsc --noEmit" },
       });
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "tsc --noEmit" },
         content: textBlocks(
@@ -234,14 +234,14 @@ export const cases = [
       const id = `rb${nextId()}`;
       const b1 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: bad },
       });
       if (!b1) return { blocked: false }; // precondition: commitlint blocks it
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: bad },
         content: textBlocks(b1.reason + "\n" + "x".repeat(9000)),
@@ -259,14 +259,14 @@ export const cases = [
       const id = `cap${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat oneline.log" },
       });
       const line = `ERR ${"x".repeat(9000)} at src/deep/path.ts:123:45`;
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat oneline.log" },
         content: textBlocks(line),
@@ -289,13 +289,13 @@ export const cases = [
       const id = `cap${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat i18n.log" },
       });
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat i18n.log" },
         content: textBlocks("আ".repeat(3000)),
@@ -314,13 +314,13 @@ export const cases = [
       const id = `a/../z-${nextId()}`;
       await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat big.log" },
       });
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: "cat big.log" },
         content: textBlocks(

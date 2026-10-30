@@ -78,7 +78,7 @@ export const cases = [
       try {
         const block = await pi.invoke(
           "tool_call",
-          { type: "tool_call", toolName: "bash", toolCallId: `tc${nextId()}`, input: {} },
+          { type: "tool_call", toolName: "pibash", toolCallId: `tc${nextId()}`, input: {} },
           approveUi(),
         );
         return block ? { blocked: true, reason: block.reason } : { blocked: false };
@@ -94,7 +94,7 @@ export const cases = [
       try {
         const block = await pi.invoke(
           "tool_call",
-          { type: "tool_call", toolName: "bash", toolCallId: `tc${nextId()}`, input: { command: 42 } },
+          { type: "tool_call", toolName: "pibash", toolCallId: `tc${nextId()}`, input: { command: 42 } },
           approveUi(),
         );
         return block ? { blocked: true, reason: block.reason } : { blocked: false };
@@ -136,13 +136,13 @@ export const cases = [
       const toolCallId = `tc${nextId()}`;
       await pi.invoke(
         "tool_call",
-        { type: "tool_call", toolName: "bash", toolCallId, input: { command: "git status" } },
+        { type: "tool_call", toolName: "pibash", toolCallId, input: { command: "git status" } },
         approveUi(),
       );
       try {
         await pi.invoke("tool_result", {
           type: "tool_result",
-          toolName: "bash",
+          toolName: "pibash",
           toolCallId,
           input: { command: "git status" },
           content: [{ type: "text", get text() { throw new Error("corrupt content"); } }],

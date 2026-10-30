@@ -50,14 +50,14 @@ export const cases = [
       const toolCallId = "../../evil";
       const block = await pi.invoke(
         "tool_call",
-        { type: "tool_call", toolName: "bash", toolCallId, input: { command: "seq 1 500" } },
+        { type: "tool_call", toolName: "pibash", toolCallId, input: { command: "seq 1 500" } },
         approveUi(),
       );
       if (block) return { blocked: true, reason: "unexpected block" };
       const huge = Array.from({ length: 500 }, (_, i) => `line ${i + 1}`).join("\n");
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId,
         input: { command: "seq 1 500" },
         content: textBlocks(huge),

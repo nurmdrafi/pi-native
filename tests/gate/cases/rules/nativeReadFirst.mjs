@@ -42,13 +42,16 @@ export const cases = [
     async (pi) => piread(pi, join(tmp, "shot.png"), {}, { outputLines: 3, totalLines: 3 }),
   ],
   [
-    "P1: built-in read passes when piread is opted out (PI_NATIVE_READ=0)",
-    "pass",
+    "P1: built-in read is blocked regardless of the retired PI_NATIVE_READ switch",
+    "blocked",
     async (pi) => {
       const prev = process.env.PI_NATIVE_READ;
       process.env.PI_NATIVE_READ = "0";
       try {
-        return await read(pi, fileA, { offset: 1, limit: 5 }, { outputLines: 5, tool: "read" });
+        const r = await read(pi, fileA, { offset: 1, limit: 5 }, { outputLines: 5, tool: "read" });
+        return r.blocked && r.reason.startsWith("Token Economy (Piread-first)")
+          ? r
+          : { blocked: false, reason: `wrong family: ${String(r.reason).slice(0, 70)}` };
       } finally {
         if (prev === undefined) delete process.env.PI_NATIVE_READ;
         else process.env.PI_NATIVE_READ = prev;

@@ -158,5 +158,5 @@ export function phaseRecord(
   if (t.turnPhase !== "recovering" || prev === "recovering" || t.phaseNoted)
     return undefined;
   t.phaseNoted = true;
-  return "Phase (PH1): recovering — the last verify failed right after an edit. Change the code before running it again; an unchanged re-run is what R10 blocks, a failure streak is what R11 blocks.";
+  return "Phase (PH1): recovering — the last verify failed right after an edit. Change the code before running it again; an unchanged re-run repeats the same failure.";
 }

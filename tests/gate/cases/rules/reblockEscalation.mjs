@@ -20,14 +20,14 @@ export const cases = [
       const id1 = `rb${nextId()}`;
       const b1 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: bad },
       });
       if (!b1) return { blocked: false }; // precondition: commitlint blocks the bad message
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: bad },
         content: textBlocks(b1.reason),
@@ -35,7 +35,7 @@ export const cases = [
       });
       const b2 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: `rb${nextId()}`,
         input: { command: bad },
       });
@@ -54,14 +54,14 @@ export const cases = [
       const id = `b1${nextId()}`;
       const blk = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: cmd },
       });
       if (!blk) return { blocked: false }; // precondition: R10 blocks the identical re-run
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id,
         input: { command: cmd },
         content: textBlocks(blk.reason),
@@ -82,14 +82,14 @@ export const cases = [
         const id = `b2${nextId()}`;
         const blk = await pi.invoke("tool_call", {
           type: "tool_call",
-          toolName: "bash",
+          toolName: "pibash",
           toolCallId: id,
           input: { command: cmd },
         });
         if (!blk) return { blocked: false }; // precondition
         await pi.invoke("tool_result", {
           type: "tool_result",
-          toolName: "bash",
+          toolName: "pibash",
           toolCallId: id,
           input: { command: cmd },
           content: textBlocks(blk.reason),
@@ -110,14 +110,14 @@ export const cases = [
       const id1 = `rb${nextId()}`;
       const b1 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: bad },
       });
       if (!b1) return { blocked: false }; // precondition: blocked first
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: bad },
         content: textBlocks(b1.reason),
@@ -137,14 +137,14 @@ export const cases = [
       const id1 = `rb${nextId()}`;
       const b1 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: cmd },
       });
       if (!b1) return { blocked: false }; // precondition: passes the gate
       await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: id1,
         input: { command: cmd },
         content: textBlocks("/bin/bash: timeout: command not found"),
@@ -152,7 +152,7 @@ export const cases = [
       });
       const b2 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: `rb${nextId()}`,
         input: { command: cmd },
       });

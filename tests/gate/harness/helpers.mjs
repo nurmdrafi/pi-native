@@ -51,10 +51,9 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 }
 
 // P2 (2026-10-18): the gate blocks built-in `bash` while pibash is
-// registered (pibash-first). The bash-mechanics cases below exercise the
-// built-in tool's rules, so the suite runs them in the pibash-opted-out
-// configuration; the dedicated P2 cases toggle the env to exercise the default.
-process.env.PI_NATIVE_BASH = "0";
+// registered (pibash-first). Bash-mechanics cases therefore replay the native
+// tool name `pibash` — the path a real session takes; the dedicated P2 cases
+// pass `{ tool: "bash" }` to exercise the built-in name.
 
 const gate = await import("../../../extensions/permission-gate/index.ts");
 const rc = await import("../../../extensions/permission-gate/rules/read-coverage.ts"); // S5: hash plumbing units
@@ -176,6 +175,7 @@ async function readVia(pi, toolName, path, opts = {}, result = {}) {
               totalLines: result.totalLines ?? n,
             },
             ...(result.compaction ? { compaction: result.compaction } : {}),
+            ...(result.locate ? { locate: result.locate } : {}),
           },
     isError: false,
   });
@@ -278,12 +278,13 @@ async function bash(
   pi,
   command,
   ctx = { hasUI: true, mode: "tui", ui: { confirm: async () => true } },
+  { tool = "pibash" } = {},
 ) {
   const block = await pi.invoke(
     "tool_call",
     {
       type: "tool_call",
-      toolName: "bash",
+      toolName: tool,
       toolCallId: `tc${++seqId}`,
       input: { command },
     },
@@ -297,13 +298,13 @@ async function runBash(pi, command, { error = false, ctx } = {}) {
   const toolCallId = `tc${++seqId}`;
   const block = await pi.invoke(
     "tool_call",
-    { type: "tool_call", toolName: "bash", toolCallId, input: { command } },
+    { type: "tool_call", toolName: "pibash", toolCallId, input: { command } },
     ctx,
   );
   if (block) return { blocked: true, reason: block.reason };
   const res = await pi.invoke("tool_result", {
     type: "tool_result",
-    toolName: "bash",
+    toolName: "pibash",
     toolCallId,
     input: { command },
     content: textBlocks("out"),
@@ -318,14 +319,14 @@ async function runSearch(pi, command, output, { error = false } = {}) {
   const toolCallId = `tc${++seqId}`;
   const block = await pi.invoke("tool_call", {
     type: "tool_call",
-    toolName: "bash",
+    toolName: "pibash",
     toolCallId,
     input: { command },
   });
   if (block) return { blocked: true, reason: block.reason };
   await pi.invoke("tool_result", {
     type: "tool_result",
-    toolName: "bash",
+    toolName: "pibash",
     toolCallId,
     input: { command },
     content: textBlocks(output),
@@ -363,11 +364,11 @@ async function nestedBash(pi, command, { error = false } = {}) {
   const toolCallId = `cm0/${++seqId}`;
   const block = await pi.invoke(
     "tool_call",
-    { type: "tool_call", toolName: "bash", toolCallId, parentToolCallId: "cm0", input: { command } },
+    { type: "tool_call", toolName: "pibash", toolCallId, parentToolCallId: "cm0", input: { command } },
   );
   if (block) return { blocked: true, reason: block.reason };
   await pi.invoke("tool_result", {
-    type: "tool_result", toolName: "bash", toolCallId, parentToolCallId: "cm0",
+    type: "tool_result", toolName: "pibash", toolCallId, parentToolCallId: "cm0",
     input: { command }, content: textBlocks("out"), isError: error,
   });
   return { blocked: false };
@@ -452,7 +453,7 @@ function prevBranch(descs) {
                   arguments:
                     d.call === "write"
                       ? { path: d.path, content: "x" }
-                      : { path: d.path },
+                      : { path: d.path, ...(d.args ?? {}) },
                 },
               ],
             },
@@ -465,6 +466,7 @@ function prevBranch(descs) {
               toolCallId: d.resultFor,
               toolName: d.tool ?? "read",
               content: [{ type: "text", text: d.text }],
+              ...(d.details ? { details: d.details } : {}),
               isError: false,
             },
           },
@@ -567,7 +569,7 @@ async function gatedExec(pi, command) {
   if (HARD_NET.test(command)) return { netRefused: true };
   const block = await pi.invoke(
     "tool_call",
-    { type: "tool_call", toolName: "bash", toolCallId: `tc${++seqId}`, input: { command } },
+    { type: "tool_call", toolName: "pibash", toolCallId: `tc${++seqId}`, input: { command } },
     { hasUI: false },
   );
   if (block) return { blocked: true, reason: block.reason };

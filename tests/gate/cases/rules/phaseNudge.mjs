@@ -25,13 +25,13 @@ export const cases = [
       const failVerify = async (id, cmd) => {
         const input = { command: cmd };
         const b = await pi.invoke("tool_call", {
-          type: "tool_call", toolName: "bash", toolCallId: id, input,
+          type: "tool_call", toolName: "pibash", toolCallId: id, input,
         });
         if (b) return { blocked: true };
         return {
           blocked: false,
           r: await pi.invoke("tool_result", {
-            type: "tool_result", toolName: "bash", toolCallId: id, input,
+            type: "tool_result", toolName: "pibash", toolCallId: id, input,
             content: textBlocks("boom"), isError: true,
           }),
         };
@@ -61,11 +61,11 @@ export const cases = [
         if (e.blocked) return { blocked: true };
         const input = { command: "cargo test" };
         const b = await pi.invoke("tool_call", {
-          type: "tool_call", toolName: "bash", toolCallId: `ph1-${tag}`, input,
+          type: "tool_call", toolName: "pibash", toolCallId: `ph1-${tag}`, input,
         });
         if (b) return { blocked: true };
         const r = await pi.invoke("tool_result", {
-          type: "tool_result", toolName: "bash", toolCallId: `ph1-${tag}`, input,
+          type: "tool_result", toolName: "pibash", toolCallId: `ph1-${tag}`, input,
           content: textBlocks("boom"), isError: true,
         });
         return {

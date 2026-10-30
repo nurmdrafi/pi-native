@@ -410,11 +410,11 @@ export async function validateEditAnchors(
       if (misses.length > 0) {
         const per = misses.map(
           (m) =>
-            `edits[${m.i}] targets lines ${m.start}–${m.end}, not in certified context — read lines ` +
+            `edits[${m.i}] targets lines ${m.start}–${m.end}, not in context yet — read lines ` +
             `${m.start}–${m.end} with the piread tool ` +
             `(piread {path:'${String(input.path)}', offset:${m.start}, limit:${m.end - m.start + 1}}) first.` +
             (inGap(m)
-              ? " The target falls in a compaction gap — this sub-window read is permitted (uncertified lines are never re-reads)."
+              ? " The target falls in a compaction gap — this sub-window read is permitted."
               : ""),
         );
         return {
@@ -423,7 +423,7 @@ export async function validateEditAnchors(
           reason:
             misses.length === 1
               ? `Anchor Guard (Unread): '${shown}' ${per[0]}`
-              : `Anchor Guard (Unread): '${shown}' ${misses.length} uncertified target regions in this batch — read every listed region, then resend the batch once. ${per.join(" ")}`,
+              : `Anchor Guard (Unread): '${shown}' ${misses.length} unread target regions in this batch — read every listed region, then resend the batch once. ${per.join(" ")}`,
         };
       }
     }

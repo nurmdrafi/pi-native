@@ -139,7 +139,7 @@ export const cases = [
         });
       const b = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: "cad1",
         input: { command: "echo hi" },
       });
@@ -150,7 +150,7 @@ export const cases = [
         };
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: "cad1",
         input: { command: "echo hi" },
         content: textBlocks("ok"),
@@ -165,14 +165,14 @@ export const cases = [
         return { blocked: true, reason: "nudge missing from tool_result" };
       const b2 = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: "cad2",
         input: { command: "echo again" },
       });
       if (b2) return { blocked: true, reason: "second call blocked" };
       const r2 = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: "cad2",
         input: { command: "echo again" },
         content: textBlocks("ok"),
@@ -196,13 +196,13 @@ export const cases = [
       await compact(pi);
       const b = await pi.invoke("tool_call", {
         type: "tool_call",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: "cad3",
         input: { command: "echo hi" },
       });
       const r = await pi.invoke("tool_result", {
         type: "tool_result",
-        toolName: "bash",
+        toolName: "pibash",
         toolCallId: "cad3",
         input: { command: "echo hi" },
         content: textBlocks("ok"),

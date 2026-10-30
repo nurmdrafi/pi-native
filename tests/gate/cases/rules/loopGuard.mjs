@@ -120,24 +120,24 @@ export const cases = [
           (c) => c.type === "text" && c.text.includes("Loop Guard (LG1)"),
         );
       const b3 = await pi.invoke("tool_call", {
-        type: "tool_call", toolName: "bash", toolCallId: "lg1e3",
+        type: "tool_call", toolName: "pibash", toolCallId: "lg1e3",
         input: { command: "ls /lg1-nope3" },
       });
       if (b3)
         return { blocked: true, reason: `error streak must not block: ${b3.reason.slice(0, 80)}` };
       const r3 = await pi.invoke("tool_result", {
-        type: "tool_result", toolName: "bash", toolCallId: "lg1e3",
+        type: "tool_result", toolName: "pibash", toolCallId: "lg1e3",
         input: { command: "ls /lg1-nope3" }, content: textBlocks("boom"), isError: true,
       });
       if (!noted(r3))
         return { blocked: true, reason: "no LG1 note on the 3rd consecutive error" };
       const b4 = await pi.invoke("tool_call", {
-        type: "tool_call", toolName: "bash", toolCallId: "lg1e4",
+        type: "tool_call", toolName: "pibash", toolCallId: "lg1e4",
         input: { command: "echo lg1-ok" },
       });
       if (b4) return { blocked: true, reason: `success must pass: ${b4.reason.slice(0, 80)}` };
       const r4 = await pi.invoke("tool_result", {
-        type: "tool_result", toolName: "bash", toolCallId: "lg1e4",
+        type: "tool_result", toolName: "pibash", toolCallId: "lg1e4",
         input: { command: "echo lg1-ok" }, content: textBlocks("ok"), isError: false,
       });
       return noted(r4)
