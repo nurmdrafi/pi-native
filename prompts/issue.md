@@ -48,6 +48,7 @@ Wait for: **OK** · **Skip** (end) · **Feedback** (revise, re-propose).
 - Then: files changed · verification run · open risks. Stop.
 
 ## Rules
+- Never touch default branch
 - No edits before Continue.
 - Never commit or push.
 - No state files.

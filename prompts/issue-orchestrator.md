@@ -57,6 +57,7 @@ SKIP: anything confusing · backend dependency needed · risk beyond SCOPE → f
 - Human next actions: review + merge in dependency order, then rerun this prompt to resume blocked groups.
 
 ## Rules
+- Never touch default branch
 - Full auto after trigger: no approval stops; plan lands in state file, execution starts immediately.
 - One PR per group, always draft; PR = review unit, never per-issue PRs.
 - State file = live tracker: single writer = orchestrator, edit only on trigger branch, never on a group branch. Every transition — issue start → `fixing` → `in-review` → `pr-open|blocked|skipped|done`, group blocked/unblocked, skip reason, worker/reviewer verdict — is written and committed immediately; never batched at close-out.
