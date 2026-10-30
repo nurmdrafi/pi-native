@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session start lists every name from the persistent registry with a resume-by-name hint, and
   `subagents_list` shows a registered-sessions section (resumable / session file missing) — so an
   orchestrator resumes dead workers instead of spawning replacements.
+- **Single-source-of-truth bounds table.** Every shared tunable bound (read window and result
+  caps, span limits, gate budgets) lives in one codegen table: a script emits a Rust module per
+  tool crate and a TypeScript module for the permission gate, and a drift test regenerates and
+  byte-compares each file, so a table edit without a regen (or a hand-edit of a generated file)
+  fails the suite. Consumers import the generated constants instead of hardcoding literals —
+  values mirror shipped behavior, no behavior change.
 
 ### Changed
 

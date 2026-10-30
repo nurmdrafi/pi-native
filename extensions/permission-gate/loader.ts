@@ -32,6 +32,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
+
 /** Config key → rule ID. The only place the two vocabularies meet; keep in
  * sync with the README rule table and each module's header. */
 export const RULE_IDS = {
@@ -114,7 +116,7 @@ export interface GateConfig {
 const CONFIG_PATH =
   process.env.PGATE_CONFIG ?? join(dirname(fileURLToPath(import.meta.url)), "config.json");
 
-const DEFAULT_OUTPUT_CAP = { maxLines: 40, maxBytes: 2048 };
+const DEFAULT_OUTPUT_CAP = { maxLines: BASH_CAP_LINES, maxBytes: BASH_CAP_BYTES };
 const DEFAULT_CONFIRM = { timeoutMs: 300_000 };
 
 

@@ -61,6 +61,7 @@ import {
 import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
 
+import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
 import { toLF, validateEditAnchors } from "./rules/anchor-guard.ts";
 import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed, visibleLineCount } from "./rules/bash-cap.ts";
 import { scrubBashText } from "./rules/output-scrub.ts";
@@ -250,7 +251,7 @@ export default function (pi: ExtensionAPI) {
     const text = (event.content as { text?: unknown }[] | undefined ?? [])
       .map((c) => (typeof c?.text === "string" ? c.text : ""))
       .join("\n");
-    return text.split("\n").length > 40 || Buffer.byteLength(text, "utf8") > 2_048;
+    return text.split("\n").length > BASH_CAP_LINES || Buffer.byteLength(text, "utf8") > BASH_CAP_BYTES;
   }
 
   /** R11: block the next shell call when the streak says the agent is circling —

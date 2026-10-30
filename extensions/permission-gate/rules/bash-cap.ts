@@ -13,11 +13,13 @@ import {
 } from "fs";
 import { join } from "path";
 
+import { BASH_CAP_BYTES, BASH_CAP_LINES } from "../bounds.gen.ts";
+
 /** cap ceiling — whichever is hit first (2026-10-11 user feedback: 40 lines /
  * 2 KB — most terminal output is noise while a task runs; the spill pointer
  * keeps the full output reachable. Was 100 lines / 4 KB (2026-10-08).) */
-const CAP_LINES = 40;
-const CAP_BYTES = 2_048;
+const CAP_LINES = BASH_CAP_LINES;
+const CAP_BYTES = BASH_CAP_BYTES;
 
 /**
  * True when a result was already compressed by the native Rust engine
