@@ -5,14 +5,18 @@ standalone binary in `rust-tools/` with a matching extension in
 `extensions/`. Every tool follows the same shape:
 
 - **Extension** (`extensions/<name>/index.ts`) — individual registration, a
-  **fail-open ladder** (`daemon → one-shot spawn → built-in`), and the
+  **two-rung dispatch** (`daemon → one-shot spawn` — Rust is the executor;
+  a terminal failure is a tool error, never a silent built-in run), and the
   session-sensitive glue (env + `PI_*` injection, cancellation, TUI render).
 - **Daemon** (`--serve`) — a persistent NDJSON-over-stdio process so the hot
   path avoids per-call spawn cost. One request per line, id-matched, lazy
   restart on death, `unref`'d while idle / `ref`'d in flight.
 - **One-shot** — a single `bin/<name>` spawn per call, the fallback when the
   daemon transport fails.
-- **Built-in fallback** — the original TypeScript tool, the final rung.
+- **Terminal failure** — thrown tool error plus exactly one stderr line
+  (`<tool>: native unavailable (<reason>)`). There is no built-in fallback;
+  piread keeps two capability routes to the built-in executor only where the
+  Rust tool cannot produce the output (image files, binary/NUL content).
 
 Parity is pinned against the built-in by a harness suite (`tests/*-parity.test.mjs`)
 and the permission-gate treats each native tool as a wrapper on the equivalent
@@ -91,17 +95,17 @@ order, not alphabetical.
 
 ▶ Explore the interactive view: [tool dispatch ladder](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/tool-dispatch-ladder.html)
 
-The ladder is **fail-open**: every rung's failure advances to the next, and the
-terminal rung is always the original TypeScript implementation. A missing
-binary, a crashed daemon, or unparseable stdout degrades performance, never
-correctness. Each terminal fallback writes exactly one stderr line
-(`<tool>: fallback (<reason>) path=<path>`) — one line per event, not per
-rung (the violation-memory NDJSON store that also logged these was removed
-in `177f3d4`; stderr is now the only fallback signal).
+The ladder is **fail-closed to Rust**: a daemon transport failure advances to
+the one-shot rung, and a terminal failure is a thrown tool error — a missing
+binary, a crashed daemon, or unparseable stdout surfaces to the model instead
+of silently degrading to the TypeScript path. Each terminal failure writes
+exactly one stderr line (`<tool>: native unavailable (<reason>)`) — one line
+per event, not per rung (the violation-memory NDJSON store that also logged
+these was removed in `177f3d4`; stderr is now the only failure signal).
 Binaries are installed through `scripts/lib/install-native.sh`, which re-signs
 them: a bare `cp` invalidates the adhoc signature and the kernel SIGKILLs the
 copy, which is indistinguishable from a missing binary and shows up as
-fallback churn on stderr. Rung selection is recorded on `details.via` (`daemon` | `oneshot` | `builtin`),
+failure churn on stderr. Rung selection is recorded on `details.via` (`daemon` | `oneshot`),
 which never enters model-visible content.
 
 ### Rung 0 — registration and entry conditions
@@ -111,10 +115,12 @@ All three tool extensions register a **distinct tool name** (`pibash`,
 parameter schema is copied verbatim from `createBashToolDefinition` /
 `createReadToolDefinition` / `createEditToolDefinition` so input normalization
 and sampling behave identically; only name/label/description/promptGuidelines/
-execute/renderCall are native. Load guards default every tool on:
-`PI_NATIVE_BASH=0` / `PI_NATIVE_READ=0` / `PI_NATIVE_EDIT=0` /
-`PI_NATIVE_PIDX=0` opts out (`PI_BASH_BIN` / `PI_READ_BIN` / `PI_PIDX_BIN`
-override the binary path for parity tests).
+execute/renderCall are native. Registration is unconditional — there is no env
+opt-out, because a native tool never falls back to a built-in executor:
+`PI_BASH_BIN` / `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_PIDX_BIN` override the
+binary path for parity tests. Choosing a built-in instead is configuration: do
+not load the extension, or set the gate's `nativeReadFirst` / `nativeBashFirst`
+to `off`.
 
 `announceNativeTool` (in each `extensions/<tool>/index.ts`) registers the tool
 name with the subagents extension's registry
@@ -129,9 +135,9 @@ Entry conditions decided **before** the ladder runs:
 
 | Tool | Pre-ladder routing |
 | --- | --- |
-| `pibash` | empty command → built-in directly; a bad `timeout` is validated first and thrown once — it must not fall open and spawn twice |
-| `piread` | image extension on `path` → built-in `read` (the model needs the image bytes); non-integer / pathological `offset`/`limit` → built-in |
-| `piedit` | the whole ladder runs inside `withFileMutationQueue(absPath)`; a fallback returns a `{fallback}` sentinel and the built-in runs **after** the queue releases — re-entering the same queue deadlocks |
+| `pibash` | a bad `timeout` is validated first and thrown once — it must not spawn twice; an empty command is a usage error |
+| `piread` | non-integer / pathological `offset`/`limit` and empty / non-string `hits` are usage errors; `hits` combined with `offset`/`limit` rejected before dispatch (never a silent paged read); nothing routes to a built-in — images and binary content come back as lossy text |
+| `piedit` | the whole ladder runs inside `withFileMutationQueue(absPath)`; a terminal failure throws from inside the queue — there is no built-in rung, so the sentinel is gone |
 | `pidx` | **no ladder** — one-shot `execFile` per call (indexing is infrequent; a daemon would never amortize); failures throw to the model |
 
 ### Request framing per tool
@@ -142,8 +148,9 @@ client keeps a `nextId` counter plus a `pending` map keyed by id:
 - `pibash`: `{id, command, cwd, timeout, env, stream}` — `env` is the **full
   child environment rebuilt per call** (see below); `stream: true` is set when
   an `AbortSignal` or `onUpdate` is present, enabling partial-output events.
-- `piread`: `{id, path, offset, limit, line_cap, cwd}` — `line_cap` caps one
-  line's chars; absent = no cap (byte parity with the built-in).
+- `piread`: `{id, path, offset, limit, hits, line_cap, cwd}` — `line_cap` caps one
+  line's chars; absent = no cap (byte parity with the built-in); `hits` routes
+  to the fused locate+read path and excludes `offset`/`limit`.
 - `piedit`: `{id, path, edits, renderDiff}` — `renderDiff: true` asks the
   daemon to return the rendered `{diff, patch, firstChangedLine}` instead of
   the content pair.
@@ -158,12 +165,12 @@ one-shot rung.
 | Failure | Class | Effect |
 | --- | --- | --- |
 | daemon spawn error / `exit` / stdin closed / unparseable response line / write failure | `DaemonUnavailableError` | advance to the one-shot rung |
-| one-shot spawn error, empty output, unparseable JSON | terminal | built-in rung + the one stderr fallback line |
+| one-shot spawn error, empty output, unparseable JSON | terminal | thrown tool error + the one stderr failure line |
 | envelope `error.kind` = `spawn` or `timeout` (`pibash`) | parity rethrow | rethrown in the built-in's thrown-error shape — a missing cwd or a timeout is a caller-visible error and must not fall open to a second spawn |
-| envelope `error.kind` = anything else (missing file, EISDIR, …) | tool-level | built-in rung produces the byte-identical error |
-| `binary: true` (`piread`) | tool-level | built-in `read` |
+| envelope `error.kind` = anything else (missing file, EISDIR, …) | tool-level | thrown with the native message (byte-identical to the built-in's where the binary mirrors it) |
+| `binary: true` (`piread`) | informational | stays on the native rung: the flag marks a NUL in the first 8 KiB, and the bytes are returned as lossy text |
 | caller abort | parity rethrow | the built-in's bare "Command aborted" / "Operation aborted" |
-| malformed envelope (`piedit`) | terminal | `{fallback: "malformed envelope"}` |
+| malformed envelope (`piedit`) | terminal | thrown tool error + the one stderr failure line |
 
 ### Environment injection (`pibash`)
 
@@ -253,7 +260,7 @@ Other lifecycle rules:
   under them — `scripts/after-pull.sh` (step 5c) kills them after a rebuild,
   and self-heal kills them at `session_start` when the `bin/` generation
   (max mtime, `.cache/bins-generation`) differs from the last session
-  (extensions/self-heal/bins.ts). One-shot fallback covers the gap. Manual
+  (extensions/self-heal/bins.ts). The one-shot rung covers the gap. Manual
   equivalent: `npm run daemons:kill`.
 - **Dying slots are refused**: a request entering a slot whose `dying` flag is
   set, or whose stdin is destroyed/ended, rejects immediately rather than
@@ -542,6 +549,7 @@ a single JSON envelope.
 | `compress.rs` | head-tail compaction (`COMPRESS_MAX_LINES` 40 / `COMPRESS_MAX_BYTES` 2048) + the `PI_READ_COMPRESS` switch |
 | `envelope.rs` | hand-rolled JSON writers incl. `write_success_with_id` |
 | `serve.rs` | daemon loop; always exits 0 |
+| `locate.rs` | fused locate+read (`--hits`): hit scan, window merge, marker/footer rendering |
 | `procgroup.rs` | same `setpgid` self-isolation as `pibash` |
 
 ### Streaming parser
@@ -580,6 +588,22 @@ Two details that matter:
 `details.truncation` is never rewritten, so permission-gate still derives read
 coverage from metadata (`countTextLines` is only the fallback) and windows are
 not under-certified.
+
+### Fused locate+read (`--hits`)
+
+`--path P --hits NEEDLE` replaces the two-call locate-then-read pattern with
+one call: `locate.rs` streams the file recording match line numbers, merges
+±12-line neighborhoods (`read.locate.context`), then streams again printing
+`N:text` lines (the shape `rg -n` emits, so hit-line parsers stay reusable)
+under the shared `read.window.lines`/`read.window.bytes` budget. Skipped
+ranges become omission markers carrying absolute ranges; hits beyond the
+budget become one footer pointer line (`read.locate.pointers`); a miss is a
+one-line notice, not an error. The envelope gains a `locate` field
+(`needle`, `hits`, `hitsTotal`, `windows`, `totalLines`), absent in default mode. Exclusive
+with `--offset`/`--limit` (usage error). Spec:
+`research/piread-fused-locate-read.md`; bench: `tests/tools/bench/locate-read/`
+(current run: 0.18x the built-in read's bytes, 0.25x piread's paged
+default — `results.txt` in that directory is the source of record).
 
 ### Serve and envelope
 

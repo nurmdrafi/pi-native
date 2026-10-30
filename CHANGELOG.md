@@ -7,6 +7,44 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.69.0] - 31-10-2026
+
+### Added
+
+- **Fused locate+read (`piread --hits`).** One call returns merged context windows around every
+  matching line plus pointers to hits past the budget: 72,445 B / 27 calls against the built-in
+  read's 399,683 B / 11 on the 27-task lookup corpus (0.18x the bytes).
+- **Wider default read budget.** A read now carries 100 lines / 8 KB before a gap marker (was
+  40 lines / 2 KB), so ordinary windows arrive whole and follow-up reads are rarer.
+- **Read budget and locate bounds are generated**, so the Rust tools, the gate and the docs read
+  the same numbers.
+
+### Changed
+
+- **Every native tool is Rust-only.** pibash, piread, piedit and pidx register unconditionally and
+  never fall back to a built-in executor; a missing or broken binary is a tool error plus one
+  stderr line instead of a silent downgrade.
+- **Built-in tools are a configuration choice.** `PI_NATIVE_READ`, `PI_NATIVE_BASH`,
+  `PI_NATIVE_EDIT` and `PI_NATIVE_PIDX` are gone; use pi's `read`/`bash`/`edit` by leaving the
+  extension out or by setting the gate's `nativeReadFirst` / `nativeBashFirst` rules to `off`.
+- **Read coverage comes from structured windows.** The gate certifies a fused read from
+  `details.locate` (printed windows, complement recorded as unread gaps) and seeds locate-first
+  anchors from the reported hit lines; the read ledger stores the same complement.
+- **Images read as text.** piread serves image and other binary files as lossy text like any other
+  content, and the built-in image route is gone; the tool no longer points at a `read` tool that
+  may not exist.
+
+### Fixed
+
+- **`npm run dashboard` boots again.** The server had lost its configuration block, so it died on
+  `ReferenceError` before listening; it now reads its sessions tree, pidx cache, gate config, poll
+  and active windows, honours `PI_DASH_PORT` / `PI_DASH_SESSIONS_DIR` / `PI_DASH_SESSION_BUDGET`,
+  and logs the port it actually bound.
+- **`doc:check` reports all four families clean.** The checker now scans `dashboard/scripts/`, waives
+  git subcommand flags, and every documented environment key resolves.
+- **Fused hit pointers and structured hits agree.** `details.locate.hits` carries the printed hits
+  plus the footer pointers, so locate-first anchoring no longer misses lines the footer named.
+
 ## [1.68.0] - 30-10-2026
 
 ### Added

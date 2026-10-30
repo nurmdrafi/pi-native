@@ -41,7 +41,7 @@
 | Rust (cargo) | Builds the native tools `piread`, `piedit`, `pibash`, and `pidx` |
 | Git          | For sync; `~/.pi/agent` is itself a repo              |
 
-Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE_EDIT=0`, `PI_NATIVE_BASH=0`, `PI_NATIVE_PIDX=0` — each fails open to the built-in tool or Node parser. Bootstrap prints the rustup command if cargo is missing.
+Native tools register unconditionally and always run the Rust binary; nothing opts out via env. Choosing pi's built-in `read`/`bash`/`edit` is configuration: leave that extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`. Bootstrap prints the rustup command if cargo is missing.
 
 ## Providers
 

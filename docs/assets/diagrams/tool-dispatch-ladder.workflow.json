@@ -3,7 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "Tool dispatch ladder",
-    "subtitle": "Every native tool: extension dispatch, three rungs, one envelope",
+    "subtitle": "Every native tool: extension dispatch, two rungs, one envelope",
     "output": "tool-dispatch-ladder.html",
     "quality_profile": "showcase"
   },
@@ -18,7 +18,7 @@
     { "id": "d", "lane": "ext", "col": 2, "type": "security", "label": "Daemon alive?", "sublabel": "transport check" },
     { "id": "r1", "lane": "native", "col": 2, "type": "backend", "label": "Rung 1, daemon", "sublabel": "bin/X --serve, NDJSON over stdio", "tag": "id-matched, lazy restart" },
     { "id": "r2", "lane": "native", "col": 3, "type": "backend", "label": "Rung 2, one-shot", "sublabel": "bin/X per call" },
-    { "id": "r3", "lane": "native", "col": 4, "type": "database", "label": "Rung 3, oracle", "sublabel": "built-in TypeScript tool, always correct" },
+    { "id": "r3", "lane": "native", "col": 4, "type": "database", "label": "Terminal failure", "sublabel": "thrown tool error + one stderr line" },
     { "id": "out", "lane": "model", "col": 5, "type": "backend", "label": "Envelope result", "sublabel": "to model" }
   ],
   "edges": [
@@ -30,7 +30,7 @@
     { "id": "e6", "from": "r2", "to": "r3", "label": "spawn / parse failure", "variant": "dashed" },
     { "id": "e7", "from": "r1", "to": "out", "label": "served" },
     { "id": "e8", "from": "r2", "to": "out", "label": "served" },
-    { "id": "e9", "from": "r3", "to": "out", "label": "served" }
+    { "id": "e9", "from": "r3", "to": "out", "label": "error to model" }
   ],
   "mainPath": ["m", "e", "d", "r1", "out"]
 }

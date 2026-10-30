@@ -3,7 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "piread — native windowed read pipeline",
-    "subtitle": "Image routing, windowed segment, head-tail compaction, envelope",
+    "subtitle": "Daemon → one-shot, windowed segment, head-tail compaction, envelope",
     "output": "piread-pipeline.html",
     "quality_profile": "standard"
   },
@@ -13,11 +13,10 @@
     { "id": "model", "label": "Result" }
   ],
   "nodes": [
-    { "id": "img", "lane": "ext", "col": 0, "type": "frontend", "label": "Image extensions", "sublabel": "route to private built-in read" },
-    { "id": "d", "lane": "ext", "col": 1, "type": "security", "label": "Daemon alive?", "sublabel": "non-image path continues" },
+    { "id": "d", "lane": "ext", "col": 1, "type": "security", "label": "Daemon alive?", "sublabel": "native only, no built-in rung" },
     { "id": "da", "lane": "ext", "col": 2, "type": "backend", "label": "Rung 1, daemon", "sublabel": "bin/piread --serve" },
     { "id": "os", "lane": "ext", "col": 3, "type": "backend", "label": "Rung 2, one-shot", "sublabel": "bin/piread per call" },
-    { "id": "bf", "lane": "ext", "col": 4, "type": "database", "label": "Rung 3, oracle", "sublabel": "built-in read, fail-open" },
+    { "id": "err", "lane": "ext", "col": 4, "type": "database", "label": "Terminal failure", "sublabel": "thrown tool error + one stderr line" },
     { "id": "cli", "lane": "core", "col": 1, "type": "backend", "label": "cli.rs", "sublabel": "--path/--offset/--limit, limit >= 1" },
     { "id": "main", "lane": "core", "col": 2, "type": "backend", "label": "main.rs" },
     { "id": "pipe", "lane": "core", "col": 3, "type": "backend", "label": "pipeline.rs", "sublabel": "streaming Segmenter + HeadTruncator" },
@@ -26,10 +25,10 @@
     { "id": "out", "lane": "model", "col": 5, "type": "backend", "label": "Envelope to model", "width": 176 }
   ],
   "edges": [
-    { "id": "r1", "from": "img", "to": "d", "label": "non-image path" },
-    { "id": "r2", "from": "d", "to": "cli", "label": "yes", "variant": "emphasis" },
+    { "id": "r1", "from": "d", "to": "da", "label": "yes", "variant": "emphasis" },
+    { "id": "r2", "from": "d", "to": "cli", "label": "cold start", "variant": "emphasis" },
     { "id": "r3", "from": "d", "to": "os", "label": "no / transport fails", "variant": "dashed" },
-    { "id": "r4", "from": "os", "to": "bf", "label": "spawn / parse failure", "variant": "dashed" },
+    { "id": "r4", "from": "os", "to": "err", "label": "spawn / parse failure", "variant": "dashed" },
     { "id": "r5", "from": "da", "to": "os", "label": "spawn / timeout parity failure", "variant": "dashed" },
     { "id": "r6", "from": "cli", "to": "main", "variant": "emphasis" },
     { "id": "r7", "from": "main", "to": "pipe", "variant": "emphasis" },
@@ -37,8 +36,7 @@
     { "id": "r9", "from": "pipe", "to": "comp", "variant": "emphasis" },
     { "id": "r10", "from": "comp", "to": "env", "variant": "emphasis", "toSide": "top" },
     { "id": "r11", "from": "env", "to": "out", "label": "envelope JSON", "variant": "emphasis" },
-    { "id": "r12", "from": "os", "to": "out", "variant": "dashed" },
-    { "id": "r13", "from": "bf", "to": "out", "variant": "dashed" }
+    { "id": "r12", "from": "os", "to": "out", "variant": "dashed" }
   ],
-  "mainPath": ["img", "d", "cli", "main", "pipe", "comp", "env", "out"]
+  "mainPath": ["d", "cli", "main", "pipe", "comp", "env", "out"]
 }

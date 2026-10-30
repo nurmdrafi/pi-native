@@ -5196,7 +5196,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <div class="pulse-dot"></div>
         <h1>pi-native harness</h1>
       </div>
-      <p class="subtitle">Tool-call path: permission gate, three-rung fail-open ladder, context shaping</p>
+      <p class="subtitle">Tool-call path: permission gate, daemon → one-shot native ladder, context shaping</p>
     </div>
 
 
@@ -5206,7 +5206,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
          data-preset-badge-editorial-plate="ARCHIFY / PLATE 04">
       <svg viewBox="0 0 1240 620" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-diagram-type="architecture" data-reader-fit="authored-height">
         <title id="archify-diagram-title">pi-native harness</title>
-        <desc id="archify-diagram-description">Tool-call path: permission gate, three-rung fail-open ladder, context shaping</desc>
+        <desc id="archify-diagram-description">Tool-call path: permission gate, daemon → one-shot native ladder, context shaping</desc>
         <!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5279,16 +5279,16 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <path data-edge-from="rung2" data-edge-to="rung3" data-edge-label="any failure" data-edge-key="5" data-edge-id="c-f2" data-composition-points="800,475;900,475" data-composition-crossover="halo" data-composition-independent="true" d="M 800 475 L 900 475" class="a-dashed" data-animate="edge" style="--step:5" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:6">
-          <path data-graph-role="automatic-crossover-underlay" d="M 484 430 L 484 332 Q 484 324 492 324 L 970 324" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="rung1" data-edge-to="shape" data-edge-label="served" data-edge-key="6" data-edge-id="c-s1" data-composition-points="484,430;484,324;970,324" data-composition-crossover="halo" data-composition-independent="true" d="M 484 430 L 484 332 Q 484 324 492 324 L 970 324" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 407 430 L 407 414 Q 407 406 415 406 L 1048 406 Q 1056 406 1056 398 L 1056 340" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="rung1" data-edge-to="shape" data-edge-label="served" data-edge-key="6" data-edge-id="c-s1" data-composition-points="407,430;407,406;1056,406;1056,340" data-composition-crossover="halo" data-composition-independent="true" d="M 407 430 L 407 414 Q 407 406 415 406 L 1048 406 Q 1056 406 1056 398 L 1056 340" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:7">
-          <path data-graph-role="automatic-crossover-underlay" d="M 700 430 L 700 414 Q 700 406 708 406 L 1062 406 Q 1070 406 1070 398 L 1070 340" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="rung2" data-edge-to="shape" data-edge-label="served" data-edge-key="7" data-edge-id="c-s2" data-composition-points="700,430;700,406;1070,406;1070,340" data-composition-crossover="halo" data-composition-independent="true" d="M 700 430 L 700 414 Q 700 406 708 406 L 1062 406 Q 1070 406 1070 398 L 1070 340" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 784 430 L 784 332 Q 784 324 792 324 L 970 324" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="rung2" data-edge-to="shape" data-edge-label="served" data-edge-key="7" data-edge-id="c-s2" data-composition-points="784,430;784,324;970,324" data-composition-crossover="halo" data-composition-independent="true" d="M 784 430 L 784 332 Q 784 324 792 324 L 970 324" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:8">
           <path data-graph-role="automatic-crossover-underlay" d="M 1084 430 L 1084 340" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="rung3" data-edge-to="shape" data-edge-label="served" data-edge-key="8" data-edge-id="c-s3" data-composition-points="1084,430;1084,340" data-composition-crossover="halo" data-composition-independent="true" d="M 1084 430 L 1084 340" class="a-default" data-animate="edge" style="--step:8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-edge-from="rung3" data-edge-to="shape" data-edge-label="error to model" data-edge-key="8" data-edge-id="c-s3" data-composition-points="1084,430;1084,340" data-composition-crossover="halo" data-composition-independent="true" d="M 1084 430 L 1084 340" class="a-default" data-animate="edge" style="--step:8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:9">
           <path data-graph-role="automatic-crossover-underlay" d="M 970 295 L 954 295 Q 946 295 946 287 L 946 147 Q 946 139 938 139 L 480 139" fill="none" stroke="var(--mask)" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
@@ -5415,17 +5415,17 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="700" y="512" class="t-backend" font-size="7" text-anchor="middle">via = cli</text>
         </g>
 
-        <g id="node-rung3" data-node-id="rung3" data-node-label="Rung 3, oracle" tabindex="0" role="button" aria-label="Focus Rung 3, oracle, TypeScript, always answers, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="TypeScript, always answers" data-node-tag="via = oracle" data-node-context="Architecture component">
-          <title>Rung 3, oracle · TypeScript, always answers · Architecture component · via = oracle</title>
+        <g id="node-rung3" data-node-id="rung3" data-node-label="Terminal failure" tabindex="0" role="button" aria-label="Focus Terminal failure, tool error, one stderr line, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="tool error, one stderr line" data-node-tag="no built-in rung" data-node-context="Architecture component">
+          <title>Terminal failure · tool error, one stderr line · Architecture component · no built-in rung</title>
           <rect x="900" y="430" width="200" height="90" rx="8" class="c-mask"/>
           <rect x="900" y="430" width="200" height="90" rx="8" class="c-database" data-animate="node" style="--step:6" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(906 436) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1000" y="473" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Rung 3, oracle</text>
-        <text data-detail="context" x="1000" y="489" class="t-muted" font-size="9" text-anchor="middle">TypeScript, always answers</text>
-        <text data-detail="fine" x="1000" y="512" class="t-database" font-size="7" text-anchor="middle">via = oracle</text>
+          <text data-node-label="" data-detail-anchor="" x="1000" y="473" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Terminal failure</text>
+        <text data-detail="context" x="1000" y="489" class="t-muted" font-size="9" text-anchor="middle">tool error, one stderr line</text>
+        <text data-detail="fine" x="1000" y="512" class="t-database" font-size="7" text-anchor="middle">no built-in rung</text>
         </g>
 
         <!-- Connection labels -->
@@ -5454,16 +5454,16 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text x="850" y="465" class="t-edge-dashed" font-size="8" text-anchor="middle">any failure</text>
         </g>
         <g data-detail="context" data-edge-from="rung1" data-edge-to="shape" data-edge-label="served" data-edge-key="6" data-edge-id="c-s1">
-          <rect x="707.6" y="304" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="727" y="314" class="t-edge-default" font-size="8" text-anchor="middle">served</text>
+          <rect x="712.1" y="386" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="731.5" y="396" class="t-edge-default" font-size="8" text-anchor="middle">served</text>
         </g>
         <g data-detail="context" data-edge-from="rung2" data-edge-to="shape" data-edge-label="served" data-edge-key="7" data-edge-id="c-s2">
-          <rect x="865.6" y="386" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="885" y="396" class="t-edge-default" font-size="8" text-anchor="middle">served</text>
+          <rect x="857.6" y="304" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="877" y="314" class="t-edge-default" font-size="8" text-anchor="middle">served</text>
         </g>
-        <g data-detail="context" data-edge-from="rung3" data-edge-to="shape" data-edge-label="served" data-edge-key="8" data-edge-id="c-s3">
-          <rect x="1064.6" y="410" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="1084" y="420" class="t-edge-default" font-size="8" text-anchor="middle">served</text>
+        <g data-detail="context" data-edge-from="rung3" data-edge-to="shape" data-edge-label="error to model" data-edge-key="8" data-edge-id="c-s3">
+          <rect x="1045.4" y="410" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1084" y="420" class="t-edge-default" font-size="8" text-anchor="middle">error to model</text>
         </g>
         <g data-detail="context" data-edge-from="shape" data-edge-to="turn" data-edge-label="shaped answer" data-edge-key="9" data-edge-id="c-back">
           <rect x="909.8" y="197" width="72.4" height="14" rx="3" class="c-mask"/>

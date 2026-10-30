@@ -25,8 +25,8 @@ Coding-agent configs rot — they accumulate always-on prompt bloat, machine-spe
 
 The pi-native harness optimizes agent execution loops by replacing built-in tool functionalities with **five** native Rust crates. It functions as a **transparent, high-throughput co-processor**, offloading heavy string validation, windowed file reading, and shell output filtering from the single-threaded Node.js event loop while maintaining strict parity with the upstream platform API.
 
-### Three-Rung Fallback Ladder Pipeline
-Each native utility is integrated into a **three-rung fail-open ladder** consisting of a **persistent background daemon process (`--serve`)** communicating over an NDJSON socket, a **one-shot CLI spawn** fallback process, and a **TypeScript built-in oracle**. This **architectural ladder design** ensures that any structural signature variance or unhandled native panic degrades smoothly to default platform behavior, ensuring that the active agent session never breaks.
+### Daemon → One-Shot Ladder
+Each native utility runs the same **two-rung ladder**: a **persistent background daemon process (`--serve`)** over NDJSON stdio, then a **one-shot CLI spawn** when the daemon transport fails. There is no third rung and no functional fallback: a terminal failure — missing binary, unhandled panic, unparseable output — is a thrown tool error plus one stderr line, so a broken binary is visible instead of silently masked. Choosing pi's built-in tool instead is configuration: leave the extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`.
 
 *   **`piread` (Windowed Context Truncation Driver):** Replaces default text file reading routines by deploying **windowed reads with head-tail compaction**. The **persistent daemon path** operates at a p50 latency threshold of **0.03 to 0.39 ms** below the built-in tool across all **seven** corpora (achieving up to a **3.4x performance speedup** on small file reads), keeping the transcript completely byte-identical on cases within the budget.
 *   **`piedit` (Fuzzy Normalized Diff Processor):** Optimizes file modification operations via **exact-then-fuzzy matching (NFKC, smart quotes, CRLF)** backed by a **native diff/patch engine**. It delivers a **2.7x performance acceleration** over standard tools on **1 MiB** source files while maintaining **Anchor Guard parity** and strict line-coverage tracking.
@@ -94,7 +94,7 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 | tmux         | Only for subagents — [docs/subagents.md](docs/subagents.md) |
 | Git          | For sync; `~/.pi/agent` is itself a repo              |
 
-Native tools are default-on and opt out per tool: `PI_NATIVE_READ=0`, `PI_NATIVE_EDIT=0`, `PI_NATIVE_BASH=0`, `PI_NATIVE_PIDX=0` — each fails open to the built-in tool or Node parser.
+Native tools register unconditionally and always execute the Rust binary; no env switch turns one off or hands the work to a built-in. Choosing pi's built-in `read`/`bash`/`edit` is configuration: do not load that extension, or flip the permission-gate rule that steers calls to it (`nativeReadFirst` / `nativeBashFirst` in `extensions/permission-gate/config.json`, or `PGATE_CONFIG`).
 
 ## Architecture
 
@@ -139,6 +139,7 @@ Every native-tool spawn re-sets the session keys from the live tool context (`ex
 | `PI_SUBAGENT_NAME`    | subagents  | worker display name                                            |
 | `PI_SUBAGENT_MAX_CONCURRENT` | user | cap on simultaneous subagent spawns (default 3; <1 unlimited) |
 | `PI_PIDX_MAX_INLINE`  | user       | pidx inline-output cap before spill (default 2000)             |
+| `PI_READ_LEDGER`      | user       | `0` disables piread's per-repo read ledger                     |
 | `PI_DASH_PORT`        | user       | dashboard server port (`npm run dashboard`; default 8787)      |
 | `PI_DASH_SESSIONS_DIR`| user       | dashboard sessions tree to index (default `~/.pi/agent/sessions`) |
 | `PI_DASH_SESSION_BUDGET` | user  | dashboard per-session cost budget in USD for alerts (0 disables) |
