@@ -53,14 +53,9 @@ const piedit = (await import("../../../extensions/piedit/index.ts")).default;
 function loadWrappedTool() {
   const tools = new Map();
   const pi = { registerTool: (def) => tools.set(def.name, def), on: () => () => {} };
-  process.env.PI_NATIVE_EDIT = "1";
-  try {
-    piedit(pi);
-  } finally {
-    delete process.env.PI_NATIVE_EDIT;
-  }
+  piedit(pi);
   const tool = tools.get("piedit");
-  assert.ok(tool, "PI_NATIVE_EDIT=1 must register the 'piedit' tool");
+  assert.ok(tool, "the piedit extension must register the 'piedit' tool");
   return tool;
 }
 

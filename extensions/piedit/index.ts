@@ -8,27 +8,28 @@
  * and TUI behavior are unchanged; only name/label/description/
  * promptGuidelines/execute/renderCall are piedit-specific.
  *
- * Default on: the load guard registers unless `PI_NATIVE_EDIT=0` (explicit
- * opt-out). permission-gate treats `piedit` calls as edit-kind (Anchor Guard,
+ * Registers unconditionally: no env switch turns it off. A user who prefers
+ * pi's built-in edit tool simply does not load this extension (or flips the
+ * permission-gate rules that steer edits here). permission-gate treats
+ * `piedit` calls as edit-kind (Anchor Guard,
  * protected-path confirm, M1/M2/M3 chain, coverage binding), so gate
  * protection survives the individual name.
  *
  * Dispatch: a persistent `bin/piedit --serve` daemon (lazy-started, id-matched
  * NDJSON over stdio; restarts on death) removes the per-call process-spawn
- * floor, then a one-shot `bin/piedit` spawn, then the built-in executor — the
- * fail-open ladder. Every native rung runs inside the exported
- * `withFileMutationQueue` so same-path serialization matches the built-in.
- * The Rust side owns read → normalize → match → apply → write → render: it
- * returns the natively rendered `{diff, patch, firstChangedLine}` (a
- * byte-identical jsdiff port, `src/diff.rs` — pinned by the parity suite and
- * `tests/piedit-diff-fuzz.mjs`), so neither the content pair nor a TypeScript
- * diff pass crosses the boundary (the D2 speed amendment); the legacy
- * `{baseContent, newContent}` envelope remains as the mixed-version rung and
- * falls back to the exported `generateDiffString`/`generateUnifiedPatch`.
- * Any transport or envelope failure falls back to the built-in executor plus
- * one stderr line — fail-open to correctness. Validation failures (`ok:false`)
- * throw the exact built-in message so the model sees identical text and retry
- * semantics.
+ * floor, then a one-shot `bin/piedit` spawn. Every native rung runs inside the
+ * exported `withFileMutationQueue` so same-path serialization matches the
+ * built-in. The Rust side owns read → normalize → match → apply → write →
+ * render: it returns the natively rendered
+ * `{diff, patch, firstChangedLine}` (a byte-identical jsdiff port, `src/diff.rs`
+ * — pinned by the parity suite and `tests/piedit-diff-fuzz.mjs`), so neither the
+ * content pair nor a TypeScript diff pass crosses the boundary (the D2 speed
+ * amendment); the legacy `{baseContent, newContent}` envelope remains as the
+ * mixed-version rung and renders through the exported
+ * `generateDiffString`/`generateUnifiedPatch`. Any transport or envelope
+ * failure is thrown with one stderr line — Rust is the executor; there is no
+ * built-in rung. Validation failures (`ok:false`) throw the exact built-in
+ * message so the model sees identical text and retry semantics.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -36,7 +37,6 @@ import { isAbsolute, join, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  createEditTool,
   createEditToolDefinition,
   generateDiffString,
   generateUnifiedPatch,
@@ -123,17 +123,6 @@ type EditResult = {
 /** Schema/contract source: the built-in edit definition. Copied verbatim;
  * the registration below overrides name/label/description/promptGuidelines. */
 const definition = createEditToolDefinition(process.cwd());
-
-/** Private built-in executor: fallback path. Cast to a structural type — the
- * wrapped AgentTool types ctx loosely, and its precise d.ts types live in a
- * second pi-agent-core module identity that does not unify under skipLibCheck. */
-const builtinExecute = createEditTool(process.cwd()).execute as (
-  toolCallId: string,
-  params: EditParams,
-  signal?: AbortSignal,
-  onUpdate?: unknown,
-  ctx?: unknown,
-) => Promise<EditResult>;
 
 /** piedit's stdout contract (crate docs, `rust-tools/piedit`). The
  * rendered shape (`renderDiff: true`) carries the native diff/patch; the
@@ -449,25 +438,14 @@ function abortError(): Error {
 }
 
 export default function pieditExtension(pi: ExtensionAPI): void {
-  // Load guard: default on; PI_NATIVE_EDIT=0 opts out.
-  if (process.env.PI_NATIVE_EDIT === "0") return;
-
   announceNativeTool("piedit", fileURLToPath(import.meta.url));
 
-  const fallbackToBuiltin = (
-    toolCallId: string,
-    params: EditParams,
-    signal: AbortSignal | undefined,
-    onUpdate: unknown,
-    ctx: unknown,
-    reason: string,
-  ) => {
-    // Observability: one line per fallback (spec §5.2) + violation log.
-    process.stderr.write(`piedit: fallback (${reason}) path=${params.path}\n`);
-    // Called OUTSIDE this extension's `withFileMutationQueue`: the built-in
-    // executor takes the same queue itself, and re-entering it on the same
-    // path would deadlock.
-    return builtinExecute(toolCallId, params, signal, onUpdate, ctx);
+  const nativeUnavailable = (reason: string): never => {
+    // Observability: one line per failure (spec §5.2).
+    process.stderr.write(`piedit: native unavailable (${reason})\n`);
+    throw new Error(
+      `piedit: native edit unavailable (${reason}) — rebuild via scripts/bootstrap.sh`,
+    );
   };
 
   const execute = async (
@@ -482,16 +460,16 @@ export default function pieditExtension(pi: ExtensionAPI): void {
     const absPath = resolveToolPath(path, spawnCwd);
 
     // Native dispatch runs under the exported queue so same-path writes
-    // serialize exactly as the built-in does. A fallback is deferred to AFTER
-    // the queue releases (it takes the queue itself).
-    const native = await withFileMutationQueue(absPath, async (): Promise<EditResult | { fallback: string }> => {
+    // serialize exactly as the built-in does. A terminal failure throws
+    // from inside the queue — Rust is the executor, no built-in rung.
+    const native = await withFileMutationQueue(absPath, async (): Promise<EditResult> => {
       // Do not reject from an abort listener here (same reason as the built-in):
       // the queue must stay locked until the in-flight operation settles.
       if (signal?.aborted) throw new Error("Operation aborted");
 
-      // Dispatch ladder: daemon (persistent) → one-shot spawn → built-in.
-      // A daemon TRANSPORT failure moves to the one-shot rung; only the
-      // terminal failure emits the fallback line — exactly one per call.
+      // Dispatch ladder: daemon (persistent) → one-shot spawn.
+      // A daemon TRANSPORT failure moves to the one-shot rung; a terminal
+      // failure throws — exactly one stderr line per call.
       let envelope: PieditEnvelope;
       try {
         envelope = await daemonRequest(absPath, path, edits, signal);
@@ -502,7 +480,7 @@ export default function pieditExtension(pi: ExtensionAPI): void {
         } catch (err2) {
           if (isAbort(err2, signal)) throw abortError();
           const reason = err2 instanceof OneshotError ? err2.reason : `spawn ${String(err2)}`;
-          return { fallback: reason };
+          return nativeUnavailable(reason);
         }
       }
       if (signal?.aborted) throw new Error("Operation aborted");
@@ -512,7 +490,7 @@ export default function pieditExtension(pi: ExtensionAPI): void {
         // throw it here rather than paying for a re-dispatch.
         const message = envelope.error?.message;
         if (typeof message === "string") throw new Error(message);
-        return { fallback: "malformed envelope" };
+        return nativeUnavailable("malformed envelope");
       }
 
       // Fast path (D2 speed amendment): the daemon rendered the diff/patch
@@ -536,7 +514,7 @@ export default function pieditExtension(pi: ExtensionAPI): void {
       // Legacy envelope (older binary): {baseContent, newContent} — render
       // with the exported TS helpers, byte-identical by construction.
       if (typeof envelope.baseContent !== "string" || typeof envelope.newContent !== "string") {
-        return { fallback: "incomplete envelope" };
+        return nativeUnavailable("incomplete envelope");
       }
       const diffResult = generateDiffString(envelope.baseContent, envelope.newContent);
       const patch = generateUnifiedPatch(path, envelope.baseContent, envelope.newContent);
@@ -550,9 +528,6 @@ export default function pieditExtension(pi: ExtensionAPI): void {
       };
     });
 
-    if ("fallback" in native) {
-      return fallbackToBuiltin(toolCallId, input, signal, onUpdate, ctx, native.fallback);
-    }
     return native;
   };
 

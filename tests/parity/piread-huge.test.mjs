@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 
-process.env.PI_NATIVE_READ = "1";
 process.env.PI_READ_COMPRESS = "1"; // this suite's whole point: shaping ON
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");

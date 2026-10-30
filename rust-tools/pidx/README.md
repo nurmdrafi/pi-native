@@ -13,7 +13,8 @@ turns, tool calls with param hashes, tool results, compactions, skill loads.
 - Extension: `extensions/pidx/index.ts`
 - Source: `src/main.rs` (single file, ~790 lines)
 
-Status: shipped, default-on, opt out with `PI_NATIVE_PIDX=0`.
+Status: shipped, registers unconditionally, Rust is the only executor (no built-in
+route).
 
 ---
 

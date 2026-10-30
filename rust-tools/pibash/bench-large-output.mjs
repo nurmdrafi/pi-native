@@ -151,14 +151,9 @@ if (!existsSync(BIN)) {
 function loadWrappedTool() {
   const tools = new Map();
   const pi = { registerTool: (def) => tools.set(def.name, def), on: () => () => {} };
-  process.env.PI_NATIVE_BASH = "1";
-  try {
-    pibash(pi);
-  } finally {
-    delete process.env.PI_NATIVE_BASH;
-  }
+  pibash(pi);
   const tool = tools.get("pibash");
-  assert.ok(tool, "PI_NATIVE_BASH=1 must register the 'pibash' tool");
+  assert.ok(tool, "the pibash extension must register the 'pibash' tool");
   return tool;
 }
 

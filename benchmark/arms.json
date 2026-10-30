@@ -8,7 +8,7 @@
   {
     "name": "piedit-native",
     "description": "S8 adoption pair arm: the native edit pipeline (Rust piedit daemon + permission-gate) against the baseline's built-in edit.",
-    "config": "Run the agent with the permission-gate extension loaded and the native edit pipeline on: PI_NATIVE_EDIT=1 (default-on — verify it is not explicitly disabled). All other native toggles stay at their defaults. Verify with: bin/piedit --version (expect a version, not ENOENT) and echo \"PI_NATIVE_EDIT is '${PI_NATIVE_EDIT:-unset}'\" (unset or 1 — never 0).",
+    "config": "Run the agent with the permission-gate extension loaded and the piedit extension present (it registers unconditionally — there is no env switch). Verify with: bin/piedit --version (expect a version, not ENOENT). To measure the built-in edit instead, drop the piedit extension from the loaded set; nothing else changes.",
     "baseline": false
   }
 ]

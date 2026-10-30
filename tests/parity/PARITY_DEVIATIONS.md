@@ -38,9 +38,9 @@ default. This is a recorded decision, not an unfinished flag.
 ## piread — `details.via` and `details.fallbackReason`
 
 **What.** Native piread results carry `details.via` with the serving rung:
-`"daemon" | "oneshot" | "builtin"`. On the terminal builtin rung (a real
-fallback) they also carry `details.fallbackReason` (the cause string). The
-built-in read tool has neither field.
+`"daemon" | "oneshot"`. There is no third rung. On a transport failure the
+call runs on the one-shot rung with no `details.fallbackReason`; the built-in
+read tool has neither field.
 
 **Why.** Previously the rung was advertised by appending a `"\n[piread native]"`
 marker to the model-visible `content[].text`. That text was never needed by the
@@ -55,20 +55,39 @@ model context (working rule 4).
 byte-identical (`0.0%`), down from `+69.6%`.
 
 **Affected assertions.** `tests/piread-parity.test.mjs`:
-- `parityCase` asserts `details.via` is one of the three rungs, then deletes it
+- `parityCase` asserts `details.via` is one of the two rungs, then deletes it
   and collapses an empty `details` back to `undefined` (the built-in's shape)
   before the structural compare.
 - The concurrent-dispatch case does the same normalization.
 - Both marker-strip sites (previously `MARKER = "\n[piread native]"`) are gone.
-- The cross-rung parity test asserts `via`/
-  `fallbackReason` per rung and that content bytes are identical across all
-  three rungs for the same input.
+- The cross-rung parity test asserts `via` per rung and that content bytes are
+  identical across both rungs for the same input.
+- `arch: extension imports no built-in executor` pins the Rust-only ladder.
 
-**Note on `fallbackReason`.** The direct-image path returns `via: "builtin"`
-with **no** `fallbackReason` — images are routed to the built-in by design, not
-because a rung failed, so advertising a fallback cause would be misleading.
-The daemon and one-shot rungs likewise carry no `fallbackReason`.
+**Note on `fallbackReason`.** No rung carries one: the daemon and one-shot
+rungs are both native and neither is a fallback cause.
 
 **Not a deviation.** The `content[].text` itself is now byte-identical to the
 built-in for every text case; the marker removal *restores* parity rather than
 breaking it.
+
+## all native tools — no built-in fallback rung
+
+**What.** A terminal ladder failure (missing binary, crashed daemon,
+unparseable stdout) is a thrown tool error (`<tool>: native … unavailable`)
+plus one stderr line, not a silent run on the TypeScript executor. Tool-level
+errors (missing file, EISDIR) reject with the native envelope message. For
+piread, pathological params (`offset`/`limit` < 1 or non-integer, empty or
+non-string `hits`) are usage errors instead of the built-in's odd-but-defined
+JS semantics. Images and NUL-bearing content are not routed out either: the
+extension imports no built-in executor, so piread returns their bytes as lossy
+text (byte-identical to what the built-in read tool returns for NUL text).
+
+**Why.** Rust is the executor; a hidden fallback silently masked broken
+binaries and made the native path's performance and ledger guarantees
+unfalsifiable.
+
+**Affected assertions.** The `fallback:` parity cases became
+`native failure:` / `native error:` cases; the corpus matrix moved pathological
+params to `rejects pathological params:`; the cross-rung check asserts the
+missing-binary rung rejects.

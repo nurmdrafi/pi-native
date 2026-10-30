@@ -7,11 +7,13 @@
  * and the oracle must produce identical results — content arrays, details,
  * structuredContent — or identical rejection messages.
  *
- * Also locks in: env-off = zero registration; env-on = exactly one `piread`
- * tool with an individual name/label and a schema byte-equal to
- * createReadToolDefinition's (distinct registration, 2026-10-18); fail-open
- * fallback (missing binary, error envelope, garbage stdout) equals the
- * oracle plus one stderr line.
+ * Also locks in: registration is unconditional (no env opt-out); exactly one
+ * `piread`
+ * tool with an individual name/label, the built-in params kept shape-equal
+ * plus the deliberate `hits` fused-locate addition (distinct registration,
+ * 2026-10-18; `hits`, 2026-10-31); Rust is the executor — native failures
+ * (missing binary, garbage stdout) are tool errors plus one stderr line,
+ * and tool errors reject with the native message.
  *
  * Preflight: symlink the global pi package into the gitignored root
  * node_modules (same trick as tests/permission-gate.test.mjs).
@@ -140,7 +142,7 @@ async function parityCase(params, ctx) {
   // byte-parity compare (the oracle has neither field).
   if (!a.rejected && !b.rejected) {
     assert.ok(
-      a.value?.details?.via === "daemon" || a.value?.details?.via === "oneshot" || a.value?.details?.via === "builtin",
+      a.value?.details?.via === "daemon" || a.value?.details?.via === "oneshot",
       `piread result missing details.via (got ${a.value?.details?.via})`,
     );
   }
@@ -175,51 +177,86 @@ function captureStderr(fn) {
 const cases = [];
 const add = (name, fn) => cases.push([name, fn]);
 
-// env gating + registration lock-in (R2)
-add("env gate: default-on registers piread unless PI_NATIVE_READ=0", () => {
-  // Default-on (D5 flip): unset registers; explicit 0 opts out.
-  const unsetPi = loadExtension(undefined);
-  assert.equal(unsetPi.tools.size, 1);
-  assert.ok(unsetPi.tools.has("piread"), "unset must register 'piread' (default on)");
-  assert.equal(loadExtension("0").tools.size, 0);
+// registration lock-in (R2): unconditional — no env arm decides whether the
+// tool exists; choosing the built-in read is a configuration decision.
+add("env gate: registers piread with PI_NATIVE_READ unset, 0, or 1", () => {
+  for (const value of [undefined, "0", "1"]) {
+    const pi = loadExtension(value);
+    assert.equal(pi.tools.size, 1, `PI_NATIVE_READ=${String(value)} must still register`);
+    assert.ok(pi.tools.has("piread"), "registered tool must be named 'piread'");
+  }
 });
-add("env gate: PI_NATIVE_READ=1 registers exactly one 'piread' tool", () => {
-  const pi = loadExtension("1");
-  assert.equal(pi.tools.size, 1);
-  assert.ok(pi.tools.has("piread"), "registered tool must be named 'piread'");
-});
-add("registration: individual name/label, schema byte-equal to createReadToolDefinition", () => {
+add("registration: individual name/label, schema keeps the built-in params verbatim and adds optional hits", () => {
   assert.equal(wrapped.name, "piread");
   assert.equal(wrapped.label, "piread");
   assert.notEqual(wrapped.description, sdkDefinition.description);
   assert.match(wrapped.description, /offset\/limit/, "description keeps the windowing contract");
   assert.equal(wrapped.promptSnippet, sdkDefinition.promptSnippet);
-  assert.deepStrictEqual(wrapped.parameters, sdkDefinition.parameters);
+  // The built-in's three params must stay shape-equal verbatim; `hits` (the
+  // fused locate+read selector) is the one deliberate addition. The two
+  // TypeBox identities carry different Symbol registries, so compare the
+  // JSON-serializable shape rather than deepStrictEqual on schemas.
+  const shape = (schema) => JSON.parse(JSON.stringify(schema));
+  const actual = shape(wrapped.parameters);
+  const expected = shape(sdkDefinition.parameters);
+  assert.deepEqual(actual.properties.path, expected.properties.path);
+  assert.deepEqual(actual.properties.offset, expected.properties.offset);
+  assert.deepEqual(actual.properties.limit, expected.properties.limit);
+  assert.deepEqual(Object.keys(actual.properties), ["path", "offset", "limit", "hits"]);
+  assert.equal(actual.properties.hits.type, "string", "hits is a string param");
+  assert.deepEqual(actual.required ?? [], expected.required ?? []);
   assert.deepStrictEqual(wrapped.outputSchema, sdkDefinition.outputSchema);
   assert.deepStrictEqual(wrapped.constrainedSampling, sdkDefinition.constrainedSampling);
 });
 
-// corpus × offset/limit matrix (pathological params delegate → trivially equal)
+// corpus × offset/limit matrix. Pathological params (0, non-integers) are
+// REJECTED up front — the native CLI contract is integers >= 1; the
+// built-in's odd-but-defined JS semantics are not approximated (see
+// PARITY_DEVIATIONS.md).
 const variants = [
   {}, { offset: 1 }, { offset: 2, limit: 3 }, { offset: 5, limit: 2 },
   { offset: 29, limit: 5 }, { offset: 2001 }, { offset: 999999 },
-  { limit: 1 }, { offset: 1, limit: 0 }, { offset: 0 }, { offset: 2.5, limit: 1 },
+  { limit: 1 },
 ];
 for (const [name] of textFixtures) {
   for (const v of variants) {
     add(`parity: ${name} ${JSON.stringify(v)}`, () => parityCase({ path: join(dir, name), ...v }));
   }
 }
+for (const [name] of textFixtures) {
+  for (const v of [{ offset: 1, limit: 0 }, { offset: 0 }, { offset: 2.5, limit: 1 }]) {
+    add(`rejects pathological params: ${name} ${JSON.stringify(v)}`, async () => {
+      const a = await armResult(wrapped, { path: join(dir, name), ...v });
+      if (!a.rejected || !/offset\/limit must be integers >= 1/.test(a.error))
+        return { ok: false, diff: `expected usage rejection, got ${JSON.stringify(a)}` };
+    });
+  }
+}
 
-// images (delegated to the built-in instance on both arms)
-add("parity: png image delegates to built-in", () => parityCase({ path: join(dir, "img.png") }));
-add("parity: jpg image delegates to built-in", () => parityCase({ path: join(dir, "img.jpg") }));
+// images (out of scope: the model cannot process images). Rust serves the bytes
+// as lossy text — one text block, no image block, no built-in executor.
+for (const name of ["img.png", "img.jpg"]) {
+  add(`image route: ${name} served by rust as text`, async () => {
+    const a = await armResult(wrapped, { path: join(dir, name) });
+    if (a.rejected) return { ok: false, diff: `image read rejected: ${a.error}` };
+    const blocks = a.value?.content ?? [];
+    if (blocks.some((b) => b.type === "image")) return { ok: false, diff: "image block returned" };
+    if (blocks.length !== 1 || blocks[0].type !== "text")
+      return { ok: false, diff: `unexpected blocks: ${JSON.stringify(blocks).slice(0, 120)}` };
+    const via = a.value?.details?.via;
+    if (via !== "daemon" && via !== "oneshot") return { ok: false, diff: `served by ${via}` };
+  });
+}
 
 // errors
 add("parity: missing file rejects identically", () => parityCase({ path: missingPath }));
 add("parity: missing file with offset rejects identically", () => parityCase({ path: missingPath, offset: 3 }));
 add("parity: directory rejects identically", () => parityCase({ path: join(dir, "a-directory") }));
-add("parity: undefined path rejects identically", () => parityCase({ path: undefined }));
+add("parity: non-string path rejects with the native usage error", async () => {
+  const a = await armResult(wrapped, { path: undefined });
+  if (!a.rejected || !/path must be a string/.test(a.error))
+    return { ok: false, diff: `expected usage rejection, got ${JSON.stringify(a)}` };
+});
 // NBSP in the path must normalize to a space (built-in resolveToCwd), not open
 // a literal-NBSP sibling — the extension pre-resolves with the same rules.
 add("parity: NBSP path normalizes to the space variant (no wrong-file read)", async () => {
@@ -239,50 +276,55 @@ add("parity: relative path via ctx.cwd", () => {
 // are "binary missing/garbage before first daemon start" — a live daemon
 // would keep serving from the renamed inode, which is correct production
 // behavior but not what these two cases pin.)
-add("fallback: missing binary → oracle result + one stderr line", async () => {
+add("native failure: missing binary → tool error + one stderr line", async () => {
   const bak = `${BIN}.parity-bak`;
   renameSync(BIN, bak);
   resetDaemon();
   try {
-    const cap = captureStderr(() => parityCase({ path: join(dir, "no-eol") }));
+    const cap = captureStderr(() => armResult(wrapped, { path: join(dir, "no-eol") }));
     const r = await cap.run();
     const lines = cap.done();
-    if (!r.ok) return r;
-    const fb = lines.filter((l) => l.startsWith("piread: fallback"));
-    assert.equal(fb.length, 1, `expected exactly one fallback line, got: ${JSON.stringify(lines)}`);
+    if (!r.rejected || !/native read unavailable/.test(r.error))
+      return { ok: false, diff: `expected native-unavailable rejection, got ${JSON.stringify(r)}` };
+    const fb = lines.filter((l) => l.startsWith("piread: native unavailable"));
+    assert.equal(fb.length, 1, `expected exactly one failure line, got: ${JSON.stringify(lines)}`);
   } finally {
     renameSync(bak, BIN);
   }
 });
-add("fallback: error envelope (exit 3) → oracle rejection + stderr line", async () => {
-  const cap = captureStderr(() => parityCase({ path: missingPath }));
+add("native error: missing file rejects with the native message (no stderr)", async () => {
+  const cap = captureStderr(() => armResult(wrapped, { path: missingPath }));
   const r = await cap.run();
   const lines = cap.done();
-  if (!r.ok) return r;
-  assert.ok(lines.some((l) => l.startsWith("piread: fallback (exit 3)")), JSON.stringify(lines));
+  if (!r.rejected) return { ok: false, diff: `expected rejection, got ${JSON.stringify(r)}` };
+  assert.equal(
+    lines.filter((l) => l.startsWith("piread: native unavailable")).length,
+    0,
+    JSON.stringify(lines),
+  );
 });
-add("fallback: garbage stdout → oracle result + stderr line", async () => {
+add("native failure: garbage stdout → tool error + one stderr line", async () => {
   const bak = `${BIN}.parity-bak`;
   renameSync(BIN, bak);
   writeFileSync(BIN, "#!/bin/sh\necho 'not-json at all'\n");
   chmodSync(BIN, 0o755);
   resetDaemon();
   try {
-    const cap = captureStderr(() => parityCase({ path: join(dir, "no-eol") }));
+    const cap = captureStderr(() => armResult(wrapped, { path: join(dir, "no-eol") }));
     const r = await cap.run();
     const lines = cap.done();
-    if (!r.ok) return r;
-    assert.ok(lines.some((l) => l.startsWith("piread: fallback (unparseable stdout)")), JSON.stringify(lines));
+    if (!r.rejected || !/native read unavailable/.test(r.error))
+      return { ok: false, diff: `expected native-unavailable rejection, got ${JSON.stringify(r)}` };
+    assert.ok(lines.some((l) => l.startsWith("piread: native unavailable")), JSON.stringify(lines));
   } finally {
     unlinkSync(BIN);
     renameSync(bak, BIN);
   }
 });
 
-// ---- cross-rung parity: daemon vs one-shot vs built-in ----
-// piread is idempotent, so it may always fall through; the CONTENT must be
-// byte-identical no matter which rung served the call, and every rung must
-// tag details.via (the terminal rung also tags details.fallbackReason).
+// ---- cross-rung parity: daemon vs one-shot (no built-in rung) ----
+// The CONTENT must be byte-identical no matter which rung served the call,
+// and every rung must tag details.via; a missing binary rejects.
 // Inputs cover the shapes that differ per rung: a plain read, an
 // offset/limit window, a missing file, a directory, a binary (NUL) file, an
 // offset beyond EOF, and CRLF text.
@@ -297,7 +339,7 @@ import { join } from "node:path";
 const [ROOT, REAL_BIN] = process.argv.slice(2);
 const m = await import(join(ROOT, "extensions/piread/index.ts"));
 const pi = { tools: new Map(), registerTool: (d) => pi.tools.set(d.name, d), on: () => () => {} };
-process.env.PI_NATIVE_READ = "1"; m.default(pi);
+m.default(pi);
 const t = pi.tools.get("piread"); const reset = m.__resetDaemonForTest;
 const dir = mkdtempSync(join(tmpdir(), "cr-"));
 mkdirSync(join(dir, "a-directory"));
@@ -342,7 +384,8 @@ console.log(JSON.stringify(out));
 // checked-in `bin/piread`:
 //   daemon/one-shot  -> a copy of the real binary (one-shot: a wrapper whose
 //                       `--serve` fails so dispatch falls to the one-shot spawn)
-//   built-in         -> a path that does not exist (daemon + one-shot fail)
+//   missing binary   -> a path that does not exist (daemon + one-shot fail
+//                       → native-unavailable rejection)
 // The check runs in a CHILD process: rapidly switching PI_READ_BIN and
 // resetting the daemon inside one long-lived process wedges on the failed
 // child's inherited stdio (observed reliably), whereas a fresh process with a
@@ -363,22 +406,22 @@ add("cross-rung: content is byte-identical across daemon/one-shot/built-in", () 
   } catch (e) {
     return { ok: false, diff: `child stdout not JSON: ${e.message}\n${res.stdout.slice(0, 200)}` };
   }
-  const validVia = (v) => v === "daemon" || v === "oneshot" || v === "builtin";
+  const validVia = (v) => v === "daemon" || v === "oneshot";
   for (const { label, d, o, b } of rows) {
     // Byte-identical content/errors no matter which rung served the call.
     if (o.text !== d.text) return { ok: false, diff: `one-shot content differs from daemon for ${label}` };
-    if (b.text !== d.text) return { ok: false, diff: `built-in content differs from daemon for ${label}` };
-    for (const [name, r] of [["daemon", d], ["one-shot", o], ["built-in", b]]) {
+    // No built-in rung: a missing binary rejects every input.
+    if (!b.rej || !b.text.includes("native read unavailable"))
+      return { ok: false, diff: `missing-binary rung must reject (${label}): ${JSON.stringify(b)}` };
+    for (const [name, r] of [["daemon", d], ["one-shot", o]]) {
       if (!r.rej && !validVia(r.via)) return { ok: false, diff: `${name} via for ${label} (got ${r.via})` };
     }
-    // A successful envelope is served by its own rung: daemon and one-shot
-    // carry no fallbackReason; built-in is itself a fallback.
+    // A successful envelope is served by its own rung; neither tags a
+    // fallback cause.
     if (!d.rej && d.via === "daemon") {
       if (d.fr !== undefined) return { ok: false, diff: `daemon fallbackReason for ${label}` };
       if (o.via !== "oneshot") return { ok: false, diff: `one-shot via for ${label} (got ${o.via})` };
       if (o.fr !== undefined) return { ok: false, diff: `one-shot fallbackReason for ${label}` };
-      if (b.via !== "builtin") return { ok: false, diff: `built-in via for ${label} (got ${b.via})` };
-      if (typeof b.fr !== "string") return { ok: false, diff: `built-in fallbackReason for ${label}` };
     }
   }
   return { ok: true };
@@ -572,8 +615,8 @@ add("gate: node_modules read passes through to execution (NM1 removed 2026-10-18
 // (gap-anchored edit → block → remedy read → edit passes) round-trips.
 add("gate C3: compaction-on read — structured omissions match the marker walk; sanctioned gap remedy round-trips", async () => {
   if (!existsSync(BIN)) return { ok: false, diff: `missing binary ${BIN}` };
-  const path = join(dir, "c3-120");
-  writeFileSync(path, Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join("\n"));
+  const path = join(dir, "c3-420");
+  writeFileSync(path, Array.from({ length: 420 }, (_, i) => `line ${i + 1}`).join("\n"));
   process.env.PI_READ_COMPRESS = "1";
   resetDaemon();
   try {

@@ -31,12 +31,12 @@ function fixtures() {
     lines: Array.from({ length: n }, (_, i) => line(i + 1)),
   });
   return [
-    mk("plain", 120, (i) => `line ${i}`),
-    mk("blank-heavy", 120, (i) => (i % 4 === 0 && i !== 120 ? "" : `row ${i}`)),
-    mk("long-lines", 100, (i) => (i % 5 === 0 ? `${"w".repeat(300)} ${i}` : `line ${i}`)),
-    mk("repetitive", 90, (i) => `repeat ${Math.floor(i / 6)}`),
-    mk("unicode", 80, (i) => `café — ligne ${i} — €${i % 97} →`),
-    mk("mixed", 110, (i) =>
+    mk("plain", 240, (i) => `line ${i}`),
+    mk("blank-heavy", 240, (i) => (i % 4 === 0 && i !== 240 ? "" : `row ${i}`)),
+    mk("long-lines", 160, (i) => (i % 5 === 0 ? `${"w".repeat(300)} ${i}` : `line ${i}`)),
+    mk("repetitive", 160, (i) => `repeat ${Math.floor(i / 6)}`),
+    mk("unicode", 160, (i) => `café — ligne ${i} — €${i % 97} →`),
+    mk("mixed", 240, (i) =>
       i % 7 === 0 ? "" : i % 5 === 0 ? `${"y".repeat(240)} ${i}` : `mix ${i} é €`,
     ),
   ];
@@ -65,7 +65,7 @@ test("differential: Rust omissions[] agree with the TS walk over the real binary
     const total = fx.lines.length;
     for (const [offset, limit] of [
       [1, total],
-      [Math.floor(total / 3), 40],
+      [Math.max(1, Math.floor(total / 3)), 130],
       [Math.floor(total / 2), 12],
     ]) {
       const env = readWindow(path, offset, limit);

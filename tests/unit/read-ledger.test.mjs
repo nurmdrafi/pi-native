@@ -121,3 +121,55 @@ test("rotation shifts archives and drops the oldest beyond three", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("records a fused read with complement omissions from locate windows", () => {
+  const { dir, src } = repoFixture();
+  try {
+    appendReadRecord({
+      cwd: dir,
+      sessionId: "sess-fused",
+      file: src,
+      params: { path: "app.ts", hits: "two" },
+      envelope: {
+        ok: true,
+        content: "1:line one\n2:line two",
+        truncation: null,
+        binary: false,
+        totalBytes: 30,
+        compaction: null,
+        locate: { needle: "two", hits: [2], hitsTotal: 1, windows: [[1, 2]], totalLines: 3 },
+      },
+    });
+    const rec = JSON.parse(readFileSync(readLedgerPath(dir), "utf8").trim());
+    assert.equal(rec.requested.hits, "two", "records the selector");
+    // printed 1-2 of 3 lines: the unread tail is the only omission
+    assert.deepEqual(rec.omissions, [{ startLine: 3, endLine: 3 }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("records a fused miss as fully omitted (nothing rendered)", () => {
+  const { dir, src } = repoFixture();
+  try {
+    appendReadRecord({
+      cwd: dir,
+      sessionId: "sess-miss",
+      file: src,
+      params: { path: "app.ts", hits: "zzz" },
+      envelope: {
+        ok: true,
+        content: "[no lines matching 'zzz' in app.ts (3 lines, 30 bytes)]",
+        truncation: null,
+        binary: false,
+        totalBytes: 30,
+        compaction: null,
+        locate: { needle: "zzz", hits: [], hitsTotal: 0, windows: [], totalLines: 3 },
+      },
+    });
+    const rec = JSON.parse(readFileSync(readLedgerPath(dir), "utf8").trim());
+    assert.deepEqual(rec.omissions, [{ startLine: 1, endLine: 3 }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

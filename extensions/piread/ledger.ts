@@ -71,13 +71,32 @@ export interface ReadRecordInput {
   sessionId?: string | null;
   /** Resolved absolute path of the file read. */
   file: string;
-  params: { path: string; offset?: number; limit?: number };
+  params: { path: string; offset?: number; limit?: number; hits?: string };
   envelope: {
     content?: string;
     compaction?: {
       omissions?: { startLine: number; endLine: number; chars?: number; lines?: number }[] | null;
     } | null;
+    /** Fused locate+read (`--hits`): printed windows + whole-file line
+     * count, present only in fused mode. */
+    locate?: { windows: [number, number][]; totalLines: number } | null;
   };
+}
+
+/** Unread spans of a fused read: the complement of the printed windows over
+ * the whole file. A miss printed nothing, so the entire file is omitted. */
+function windowComplement(
+  windows: [number, number][],
+  totalLines: number,
+): { startLine: number; endLine: number }[] {
+  const spans: { startLine: number; endLine: number }[] = [];
+  let next = 1;
+  for (const [start, end] of windows) {
+    if (start > next) spans.push({ startLine: next, endLine: start - 1 });
+    next = Math.max(next, end + 1);
+  }
+  if (next <= totalLines) spans.push({ startLine: next, endLine: totalLines });
+  return spans;
 }
 
 /** Append one read record. Best-effort: a failed append never fails the read. */
@@ -100,11 +119,17 @@ export function appendReadRecord(input: ReadRecordInput): void {
       }
     } catch {}
 
-    const omissions =
-      input.envelope.compaction?.omissions?.map((o) => ({
-        startLine: o.startLine,
-        endLine: o.endLine,
-      })) ?? null;
+    // Fused reads carry their true coverage structurally: the ledger records
+    // the complement of the printed windows (never "whole file" for a mode
+    // that rendered only hit neighborhoods).
+    const locate = input.envelope.locate;
+    const omissions = locate
+      ? windowComplement(locate.windows ?? [], locate.totalLines)
+      : (input.envelope.compaction?.omissions?.map((o) => ({
+          startLine: o.startLine,
+          endLine: o.endLine,
+        })) ??
+        null);
 
     const record = {
       ts: Date.now(),
@@ -114,6 +139,7 @@ export function appendReadRecord(input: ReadRecordInput): void {
       requested: {
         ...(input.params.offset !== undefined ? { offset: input.params.offset } : {}),
         ...(input.params.limit !== undefined ? { limit: input.params.limit } : {}),
+        ...(input.params.hits !== undefined ? { hits: input.params.hits } : {}),
       },
       omissions,
       chars: input.envelope.content?.length ?? 0,

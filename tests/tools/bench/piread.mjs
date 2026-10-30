@@ -49,18 +49,14 @@ const { createReadTool } = await import(
 );
 const piread = (await import("../../../extensions/piread/index.ts")).default;
 
-/** Stubbed ExtensionAPI capturing the registered piread tool. */
+/** Stubbed ExtensionAPI capturing the registered piread tool. Registration is
+ * unconditional now, so no env arm is needed. */
 function loadWrappedTool() {
   const tools = new Map();
   const pi = { registerTool: (def) => tools.set(def.name, def), on: () => () => {} };
-  process.env.PI_NATIVE_READ = "1";
-  try {
-    piread(pi);
-  } finally {
-    delete process.env.PI_NATIVE_READ;
-  }
+  piread(pi);
   const tool = tools.get("piread");
-  assert.ok(tool, "PI_NATIVE_READ=1 must register the 'piread' tool");
+  assert.ok(tool, "the piread extension must register the 'piread' tool");
   return tool;
 }
 

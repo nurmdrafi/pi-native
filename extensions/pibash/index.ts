@@ -13,8 +13,8 @@
  *      lazily started, restarted on death. This rung is what makes the native
  *      path beat the built-in: one spawn per session, not one per call.
  *   2. one-shot `bin/pibash` spawn per call when the daemon transport fails.
- *   3. built-in bash implementation — fail-open to correctness — plus ONE
- *      stderr fallback line (the terminal reason) per call.
+ *   3. terminal failure → thrown tool error plus ONE stderr line — Rust is
+ *      the executor; there is no built-in rung.
  *
  * The session-sensitive parts live here: the full spawn environment (PI_* keys
  * and the managed PATH) is rebuilt per call and sent with each request, the
@@ -22,9 +22,9 @@
  * live output can be rendered, and an AbortSignal kills the whole process group
  * mid-run.
  *
- * Default on: the load guard registers unless PI_NATIVE_BASH=0 (explicit
- * opt-out — the ladder still guarantees the built-in path when the native
- * binary is missing).
+ * Registers unconditionally: no env switch turns it off. A user who prefers
+ * pi's built-in bash simply does not load this extension (or flips the
+ * permission-gate P2 rule off).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -33,7 +33,6 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createBashTool,
   createBashToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
@@ -48,8 +47,8 @@ class DaemonUnavailableError extends Error {
 }
 
 /** Wraps an error that must reach the caller unchanged (built-in parity for the
- * spawn/timeout failure shapes), distinguishing it from a transport failure that
- * should fall open to the built-in executor. */
+ * spawn/timeout failure shapes), distinguishing it from a transport failure
+ * that becomes a thrown native-unavailable error. */
 class ParityError extends Error {
   readonly cause: Error;
   constructor(cause: Error) {
@@ -213,15 +212,6 @@ type BashResult = {
 /** Schema/prompt source: the built-in bash definition. Copied verbatim; the
  * registration below overrides name/label/description/promptGuidelines. */
 const definition = createBashToolDefinition(process.cwd());
-
-/** Private built-in executor — the final fail-open rung. Never registered. */
-const builtinExecute = createBashTool(process.cwd()).execute as (
-  toolCallId: string,
-  params: BashParams,
-  signal?: AbortSignal,
-  onUpdate?: unknown,
-  ctx?: unknown,
-) => Promise<BashResult>;
 
 // ---- daemon client (`pibash --serve`, NDJSON over stdio) ----
 
@@ -493,8 +483,6 @@ function toResult(envelope: PibashEnvelope): BashResult {
 }
 
 export default function pibashExtension(pi: ExtensionAPI): void {
-  if (process.env.PI_NATIVE_BASH === "0") return;
-
   announceNativeTool("pibash", fileURLToPath(import.meta.url));
 
   async function execute(
@@ -505,7 +493,7 @@ export default function pibashExtension(pi: ExtensionAPI): void {
     ctx?: ExecContext,
   ): Promise<BashResult> {
     const command = typeof params?.command === "string" ? params.command : "";
-    if (!command.trim()) return builtinExecute(toolCallId, params, signal, onUpdate, ctx);
+    if (!command.trim()) throw new Error("pibash: empty command");
     const cwd = ctx?.cwd ?? process.cwd();
     const timeout = typeof params.timeout === "number" ? params.timeout : undefined;
     // Validate before dispatching: the built-in rejects a bad timeout with a
@@ -537,16 +525,21 @@ export default function pibashExtension(pi: ExtensionAPI): void {
           throw new ParityError(new Error(envelope.error?.message ?? kind));
         }
         reason = `native error: ${envelope.error?.message ?? "unknown"}`;
-        return builtinExecute(toolCallId, params, signal, onUpdate, ctx);
+        process.stderr.write(`pibash: native unavailable (${reason})\n`);
+        throw new Error(
+          `pibash: native execution failed (${reason}) — rebuild via scripts/bootstrap.sh`,
+        );
       }
       return toResult(envelope);
     } catch (err) {
       // A deliberate parity rethrow (spawn/timeout) must propagate untouched —
-      // only transport failures fall through to the built-in.
+      // transport failures throw: Rust is the executor, no built-in rung.
       if (err instanceof ParityError) throw err.cause;
       reason = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`pibash: falling back to built-in bash (${reason})\n`);
-      return builtinExecute(toolCallId, params, signal, onUpdate, ctx);
+      process.stderr.write(`pibash: native unavailable (${reason})\n`);
+      throw new Error(
+        `pibash: native execution failed (${reason}) — rebuild via scripts/bootstrap.sh`,
+        );
     }
   }
 

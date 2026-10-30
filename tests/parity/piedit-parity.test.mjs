@@ -7,7 +7,7 @@
  * identical results — final file bytes, thrown error message, `content` text,
  * and `details.{diff,patch,firstChangedLine}` — or identical rejections.
  *
- * Also locks in: env-off = zero registration; env-on = exactly one `piedit`
+ * Also locks in: registration is unconditional (no env opt-out); exactly one `piedit`
  * tool with an individual name/label and a schema byte-equal to
  * createEditToolDefinition's; fail-open fallback (missing binary, garbage
  * stdout, non-zero exit) equals the oracle plus one stderr line.
@@ -180,14 +180,14 @@ function captureStderr(fn) {
 const cases = [];
 const add = (name, fn) => cases.push([name, fn]);
 
-// env gating + registration lock-in
-add("env gate: PI_NATIVE_EDIT=0 registers nothing", () => {
-  assert.equal(loadExtension("0").tools.size, 0);
-});
-add("env gate: unset (default-on) registers exactly one 'piedit' tool", () => {
-  const pi = loadExtension(undefined);
-  assert.equal(pi.tools.size, 1);
-  assert.ok(pi.tools.has("piedit"), "unset must register 'piedit' (default on)");
+// registration lock-in: unconditional — no env arm decides whether the tool
+// exists; choosing the built-in edit is a configuration decision.
+add("env gate: registers piedit with PI_NATIVE_EDIT unset, 0, or 1", () => {
+  for (const value of [undefined, "0", "1"]) {
+    const pi = loadExtension(value);
+    assert.equal(pi.tools.size, 1, `PI_NATIVE_EDIT=${String(value)} must still register`);
+    assert.ok(pi.tools.has("piedit"), "registered tool must be named 'piedit'");
+  }
 });
 add("registration: individual name/label, schema byte-equal to createEditToolDefinition", () => {
   assert.equal(wrapped.name, "piedit");
@@ -389,57 +389,44 @@ add("parity: read-only file rejects identically", async () => {
 });
 
 // fallback: fail-open to the oracle plus one stderr line
-add("fallback: missing binary → oracle result + one stderr line", async () => {
+add("native failure: missing binary → tool error + one stderr line", async () => {
   const bak = `${BIN}.parity-bak`;
   renameSync(BIN, bak);
   resetDaemon(); // cold-start path: no live daemon may serve from the renamed inode
   try {
-    const name = "fallback-missing";
-    const mine = fixture(`${name}.piedit`, "alpha\nbeta\n");
-    const orc = fixture(`${name}.oracle`, "alpha\nbeta\n");
-    const cap = captureStderr(async () => {
-      const a = await armResult(wrapped, { path: mine, edits: [{ oldText: "beta", newText: "BETA" }] });
-      const b = await armResult(oracle, { path: orc, edits: [{ oldText: "beta", newText: "BETA" }] });
-      return { a, b };
-    });
-    const { a, b } = await cap.run();
+    const mine = fixture("native-failure-missing.piedit", "alpha\nbeta\n");
+    const cap = captureStderr(async () =>
+      armResult(wrapped, { path: mine, edits: [{ oldText: "beta", newText: "BETA" }] }),
+    );
+    const a = await cap.run();
     const lines = cap.done();
-    const fb = lines.filter((l) => l.startsWith("piedit: fallback"));
-    assert.equal(fb.length, 1, `expected exactly one fallback line, got: ${JSON.stringify(lines)}`);
-    const map = (v) =>
-      JSON.parse(JSON.stringify(v ?? null), (_k, val) =>
-        typeof val === "string" ? val.replaceAll(`${name}.piedit`, "<F>").replaceAll(`${name}.oracle`, "<F>") : val,
-      );
-    assert.deepStrictEqual(map(a.value?.content), map(b.value?.content));
-    assert.deepStrictEqual(readFileSafe(mine), readFileSafe(orc));
+    if (!a.rejected || !/native edit unavailable/.test(a.error))
+      return { ok: false, diff: `expected native-unavailable rejection, got ${JSON.stringify(a)}` };
+    const fb = lines.filter((l) => l.startsWith("piedit: native unavailable"));
+    assert.equal(fb.length, 1, `expected exactly one failure line, got: ${JSON.stringify(lines)}`);
+    // no built-in rung: the file must be untouched
+    assert.equal(readFileSafe(mine), "alpha\nbeta\n");
   } finally {
     renameSync(bak, BIN);
   }
 });
-add("fallback: garbage stdout → oracle result + stderr line", async () => {
+add("native failure: garbage stdout → tool error + one stderr line", async () => {
   const bak = `${BIN}.parity-bak`;
   renameSync(BIN, bak);
   writeFileSync(BIN, "#!/bin/sh\necho 'not-json at all'\n");
   chmodSync(BIN, 0o755);
   resetDaemon(); // cold-start path: no live daemon may serve from the renamed inode
   try {
-    const name = "fallback-garbage";
-    const mine = fixture(`${name}.piedit`, "alpha\nbeta\n");
-    const orc = fixture(`${name}.oracle`, "alpha\nbeta\n");
-    const cap = captureStderr(async () => {
-      const a = await armResult(wrapped, { path: mine, edits: [{ oldText: "beta", newText: "BETA" }] });
-      const b = await armResult(oracle, { path: orc, edits: [{ oldText: "beta", newText: "BETA" }] });
-      return { a, b };
-    });
-    const { a, b } = await cap.run();
+    const mine = fixture("native-failure-garbage.piedit", "alpha\nbeta\n");
+    const cap = captureStderr(async () =>
+      armResult(wrapped, { path: mine, edits: [{ oldText: "beta", newText: "BETA" }] }),
+    );
+    const a = await cap.run();
     const lines = cap.done();
-    assert.ok(lines.some((l) => l.startsWith("piedit: fallback (exit")), JSON.stringify(lines));
-    const map = (v) =>
-      JSON.parse(JSON.stringify(v ?? null), (_k, val) =>
-        typeof val === "string" ? val.replaceAll(`${name}.piedit`, "<F>").replaceAll(`${name}.oracle`, "<F>") : val,
-      );
-    assert.deepStrictEqual(map(a.value?.content), map(b.value?.content));
-    assert.deepStrictEqual(readFileSafe(mine), readFileSafe(orc));
+    if (!a.rejected || !/native edit unavailable/.test(a.error))
+      return { ok: false, diff: `expected native-unavailable rejection, got ${JSON.stringify(a)}` };
+    assert.ok(lines.some((l) => l.startsWith("piedit: native unavailable")), JSON.stringify(lines));
+    assert.equal(readFileSafe(mine), "alpha\nbeta\n");
   } finally {
     unlinkSync(BIN);
     renameSync(bak, BIN);

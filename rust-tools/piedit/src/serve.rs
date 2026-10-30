@@ -12,8 +12,8 @@
 //! Requests are processed serially in arrival order; the `id` echo lets the
 //! client match responses under concurrency. Request failures are per-line
 //! error envelopes (never process failures); only transport loss (crash,
-//! EOF) is a client-side failure, and the extension's fail-open ladder
-//! (one-shot spawn → built-in) covers it.
+//! EOF) is a client-side failure, and the extension's daemon → one-shot
+//! ladder covers it.
 //!
 //! Hot path: one `read_until` into a reused byte buffer per request (no
 //! per-line String), one `serde_json` parse of that line (the id is a

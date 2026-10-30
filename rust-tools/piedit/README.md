@@ -9,13 +9,14 @@ extension renders it with the exported TypeScript `generateDiffString`/
 `generateUnifiedPatch` helpers — either way `details` is byte-identical to the built-in
 `edit`, pinned by the parity suite and the differential fuzz.
 
-- Spec: `docs/specs/2026-10-16-s8-piedit-design.md`
-- Plan: `docs/specs/2026-10-16-s8-piedit-plan.md`
+- Spec: `docs/specs/2026-10-16-s8-piedit-design.md` (the specs archive is no longer in the tree; the design lives on in this file)
+- Plan: `docs/specs/2026-10-16-s8-piedit-plan.md` (same)
 - Extension: `extensions/piedit/index.ts`
-- Tests: `../..//tests/piedit-parity.test.mjs`, `../../tests/piedit-bench.mjs`
+- Tests: `../../tests/parity/piedit-parity.test.mjs`, `../../tests/tools/bench/piedit.mjs`
 - Bench: `../../benchmark/runs/piedit-microbench-*.md`
 
-Status: shipped, default-on, opt out with `PI_NATIVE_EDIT=0`. Parity 40/40, crate 25/25,
+Status: shipped, registers unconditionally, Rust is the only executor (no built-in
+route). Parity 40/40, crate 25/25,
 permission-gate 246/246 unchanged, `doc:check` 4/4.
 
 ---
@@ -40,7 +41,7 @@ later session can retrace the path without re-deriving it.
 ### Phase 1 — Studying the precedent (pidx, piread)
 
 4. Read `rust-tools/piread/src/{main,cli,envelope,pipeline,serve}.rs`, `Cargo.toml`.
-5. Read `extensions/piread/index.ts` (individual registration, fail-open ladder, daemon
+5. Read `extensions/piread/index.ts` (individual registration, daemon
    client, `__resetDaemonForTest`) and `extensions/pidx/index.ts`.
 6. Read the built-in contracts to mirror exactly: `edit.js` (schema,
    `prepareArguments`, `validateEditInput`, executor, write call), `edit-diff.js`
@@ -171,8 +172,9 @@ later session can retrace the path without re-deriving it.
 ### Side task (unrelated, requested mid-stream)
 
 48. **DeepSeek thinking level off.** `settings.json` has `defaultThinkingLevel: high`;
-    `models-store.json` is a regenerated cache (not editable). Per `docs/settings.md` /
-    `docs/models.md`, `modelThinkingLevels` is keyed by exact `provider/modelId`. Set
+    `models-store.json` is a regenerated cache (not editable). Per pi's settings
+    schema (`settings.json` `$schema`), `modelThinkingLevels` is keyed by exact
+    `provider/modelId`. Set
     `deepseek/deepseek-flash` and `deepseek/deepseek-v4-pro` → `"off"`. Caveat: keys
     assume the catalog IDs; a custom provider needs different keys.
 
@@ -214,8 +216,8 @@ jsdiff v8 — line tokenizer, greedy Myers walk with jsdiff's exact tie-break
 and component coalescing, `structuredPatch`/`formatPatch` with
 `FILE_HEADERS_ONLY` — plus pi's `generateDiffString` rendering. One
 `diff_lines` pass feeds both renders. Parity is pinned by the TS oracle:
-`tests/piedit-parity.test.mjs` (51/51, diff-adversarial corpus) and
-`tests/piedit-diff-fuzz.mjs` (deterministic differential fuzz).
+`tests/parity/piedit-parity.test.mjs` (51/51, diff-adversarial corpus) and
+`tests/tools/audit/diff-fuzz.mjs` (deterministic differential fuzz).
 
 ## Not done
 

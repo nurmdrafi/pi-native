@@ -140,9 +140,10 @@ const NO_UI_CTX = makeCtx();
 
 // ---- registration / definition lock-ins ----
 
-check("env-off (PI_NATIVE_BASH=0) registers no tool", () => {
+check("env gate: PI_NATIVE_BASH=0 still registers the tool", () => {
   const pi = loadExtension("0");
-  assert.equal(pi.tools.size, 0);
+  assert.equal(pi.tools.size, 1);
+  assert.ok(pi.tools.has("pibash"));
 });
 
 check("env-on registers exactly one tool named 'pibash'", () => {
@@ -368,9 +369,9 @@ await checkAsync("truncation: byte-capped single line stays within budget", asyn
   assertCompressionInvariants(mine.value.content[0].text, "single 60k line");
 });
 
-// ---- fail-open ladder ----
+// ---- native failure (no built-in rung) ----
 
-await checkAsync("fail-open: missing binary equals the oracle plus one stderr line", async () => {
+await checkAsync("native failure: missing binary → tool error + one stderr line", async () => {
   const hidden = `${BIN}.hidden`;
   if (existsSync(BIN)) renameSync(BIN, hidden);
   resetDaemon();
@@ -387,11 +388,10 @@ await checkAsync("fail-open: missing binary equals the oracle plus one stderr li
     process.stderr.write = original;
     if (existsSync(hidden)) renameSync(hidden, BIN);
   }
-  const theirs = await run(oracle, { command: "printf 'hi\\n'" }, NO_UI_CTX);
-  assert.deepStrictEqual(normalize(mine), normalize(theirs));
-  const fallbackLines = stderr.filter((line) => line.startsWith("pibash: falling back"));
-  assert.equal(fallbackLines.length, 1, `expected exactly one fallback line, got ${JSON.stringify(stderr)}`);
-  assert.match(fallbackLines[0], /pibash: falling back to built-in bash/);
+  assert.ok(mine.rejected, `expected rejection, got ${JSON.stringify(mine)}`);
+  assert.match(String(mine.error ?? ""), /native execution failed/);
+  const failLines = stderr.filter((line) => line.startsWith("pibash: native unavailable"));
+  assert.equal(failLines.length, 1, `expected exactly one failure line, got ${JSON.stringify(stderr)}`);
 });
 
 // ---- daemon protocol lock-ins ----

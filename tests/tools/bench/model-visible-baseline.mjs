@@ -50,22 +50,17 @@ function makePi() {
   return { tools, registerTool: (d) => tools.set(d.name, d), on: () => () => {} };
 }
 
-function loadExtension(ext, envKey, envValue = "1") {
-  const before = process.env[envKey];
-  process.env[envKey] = envValue;
-  try {
-    const pi = makePi();
-    ext(pi);
-    return pi.tools.values().next().value;
-  } finally {
-    if (before === undefined) delete process.env[envKey];
-    else process.env[envKey] = before;
-  }
+/** Stubbed ExtensionAPI capturing the extension's tool. Registration is
+ * unconditional, so the arms differ only by which tool object is called. */
+function loadExtension(ext) {
+  const pi = makePi();
+  ext(pi);
+  return pi.tools.values().next().value;
 }
 
-const piread = loadExtension(pireadExt, "PI_NATIVE_READ");
-const pibash = loadExtension(pibashExt, "PI_NATIVE_BASH");
-const piedit = loadExtension(pieditExt, "PI_NATIVE_EDIT");
+const piread = loadExtension(pireadExt);
+const pibash = loadExtension(pibashExt);
+const piedit = loadExtension(pieditExt);
 
 const builtinRead = createReadTool(process.cwd());
 const builtinBash = createBashTool(process.cwd());

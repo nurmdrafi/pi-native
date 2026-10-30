@@ -16,7 +16,7 @@
  * caller opts in with `stdout: true`, and even then it is hard-capped.
  * PI_PIDX_MAX_INLINE toggles that cap (default 2000 chars).
  *
- * Load guard: default on; PI_NATIVE_PIDX=0 opts out.
+ * Registers unconditionally: no env switch turns it off.
  */
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -284,9 +284,6 @@ const pidxTool = defineTool({
 });
 
 export default function pidxExtension(pi: ExtensionAPI): void {
-  // Load guard: default on; PI_NATIVE_PIDX=0 opts out.
-  if (process.env.PI_NATIVE_PIDX === "0") return;
-
   announceNativeTool("pidx", fileURLToPath(import.meta.url));
 
   pi.registerTool(pidxTool);
