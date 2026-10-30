@@ -8,7 +8,7 @@
     "after-pull": "sh scripts/after-pull.sh",
     "link-pi": "node scripts/link-pi.mjs",
     "typecheck": "node scripts/link-pi.mjs && tsc -p tsconfig.json",
-    "test": "node --test \"tests/**/*.test.mjs\"",
+    "test": "node --test \"tests/**/*.test.mjs\" \"dashboard/tests/**/*.test.mjs\"",
     "test:subagents": "node --test tests/subagents/runner.ts 'tests/subagents/*.test.ts'",
     "lint:agents": "node scripts/agents-lint.mjs",
     "doc:check": "~/.pi/agent/bin/docheck",
@@ -23,7 +23,7 @@
     "check": "npm run typecheck && npm run lint:agents && npm run doc:check && npm test",
     "audit:session": "node tests/tools/audit/session-blocks.mjs",
     "audit:bin-diff": "node tests/tools/audit/bin-diff.mjs",
-    "dashboard": "node scripts/dashboard.mjs"
+    "dashboard": "node dashboard/scripts/dashboard.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",

@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   aggregateModelMix,
@@ -726,6 +729,71 @@ describe("createSessionTailer", () => {
       const tailer = createSessionTailer(file);
       assert.equal(tailer.tick().length, 0);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("server shell", () => {
+  const SERVER = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "dashboard.mjs");
+
+  /** Spawn the server against an empty sessions tree; resolve on the boot line. */
+  function boot(sessionsDir) {
+    const child = spawn(process.execPath, [SERVER], {
+      env: {
+        ...process.env,
+        PI_DASH_PORT: "0", // let the OS pick a free port
+        PI_DASH_SESSIONS_DIR: sessionsDir,
+        PI_DASH_SESSION_BUDGET: "0",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return new Promise((resolvePromise, rejectPromise) => {
+      let out = "";
+      let err = "";
+      const timer = setTimeout(() => {
+        child.kill();
+        rejectPromise(new Error(`server did not boot in 20s\nstdout: ${out}\nstderr: ${err}`));
+      }, 20_000);
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (c) => (err += c));
+      child.stdout.on("data", (chunk) => {
+        out += chunk;
+        const line = out.split("\n").find((l) => l.startsWith("dashboard: http://"));
+        if (line) {
+          clearTimeout(timer);
+          resolvePromise({ child, url: line.match(/http:\/\/[^\s)]+/)[0], log: line });
+        }
+      });
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        rejectPromise(new Error(`server exited early (code ${code})\nstderr: ${err}`));
+      });
+    });
+  }
+
+  it("boots with every config constant defined and serves the UI + API", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dash-boot-"));
+    let child;
+    try {
+      const booted = await boot(dir);
+      child = booted.child;
+      // PI_DASH_PORT=0 must log the port the OS actually bound.
+      const port = Number(new URL(booted.url).port);
+      assert.ok(port > 0, `boot line must carry the bound port, got ${booted.log}`);
+
+      const ui = await fetch(`${booted.url}/`);
+      assert.equal(ui.status, 200);
+      assert.match(ui.headers.get("content-type") ?? "", /text\/html/);
+
+      const api = await fetch(`${booted.url}/api/sessions`);
+      assert.equal(api.status, 200);
+      const body = await api.json();
+      assert.ok(body && typeof body === "object", "snapshot is a JSON object");
+      assert.ok(Array.isArray(body.sessions), "snapshot carries a sessions array");
+    } finally {
+      child?.kill();
       rmSync(dir, { recursive: true, force: true });
     }
   });

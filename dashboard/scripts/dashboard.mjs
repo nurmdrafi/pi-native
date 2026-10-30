@@ -27,6 +27,24 @@ import {
   spendSummary,
   summarizeSession,
 } from "./data.mjs";
+// ── Config (defaults are the README environment table) ──────
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** pidx binary the snapshot is built with (`npm run bootstrap` installs it). */
+const PIDX_BIN = join(REPO_ROOT, "bin", "pidx");
+/** pi's session tree; pidx leaves a session out while it is still being written. */
+const SESSIONS_DIR =
+  process.env.PI_DASH_SESSIONS_DIR ||
+  join(process.env.HOME ?? "", ".pi", "agent", "sessions");
+/** Cache files under the repo's gitignored `.cache/`, so runs stay incremental. */
+const STATE_FILE = join(REPO_ROOT, ".cache", "dashboard-pidx-state.bin");
+const OUT_FILE = join(REPO_ROOT, ".cache", "dashboard-extracts.jsonl");
+const GATE_CONFIG = join(REPO_ROOT, "extensions", "permission-gate", "config.json");
+/** Per-session cost budget in USD for alerts; 0 (the default) disables them. */
+const SESSION_BUDGET = Number(process.env.PI_DASH_SESSION_BUDGET ?? 0) || 0;
+/** Snapshot refresh cadence. */
+const POLL_MS = 5_000;
+/** A session file touched within this window is active and tailed live. */
+const ACTIVE_WINDOW_MS = 5 * 60_000;
 // ── Server shell ─────────────────────────────────────────────
 
 
@@ -250,7 +268,7 @@ es.onerror = () => document.getElementById('conn').textContent = 'reconnecting�
 
 async function main() {
   const tailers = new Map();
-  const PORT = process.env.PORT || 8989;
+  const PORT = Number(process.env.PI_DASH_PORT ?? 8787);
 
   const server = createServer(async (req, res) => {
     if (req.url === "/api/stream") {
@@ -305,7 +323,9 @@ async function main() {
   });
 
   await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
-  console.log(`dashboard: http://127.0.0.1:${PORT} (sessions: ${SESSIONS_DIR})`);
+  // Log the port the OS actually bound: PI_DASH_PORT=0 asks for a free one.
+  const bound = server.address()?.port ?? PORT;
+  console.log(`dashboard: http://127.0.0.1:${bound} (sessions: ${SESSIONS_DIR})`);
   await cycle(tailers);
   setInterval(() => {
     cycle(tailers).catch((err) => console.error("cycle failed:", err?.message));
