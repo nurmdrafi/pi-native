@@ -74,6 +74,26 @@ function requireTmux(): void {
   }
 }
 
+// ── Process seam ──
+
+/** Fake tmux binary for unit tests (null = run the real process). */
+let tmuxRunner: ((args: string[]) => string) | null = null;
+
+/** Run one synchronous tmux command and return its stdout. All pane-creation
+ *  paths go through here so tests can substitute the multiplexer. */
+function runTmux(args: string[]): string {
+  if (tmuxRunner) return tmuxRunner(args);
+  return execFileSync("tmux", args, { encoding: "utf8" });
+}
+
+/** Whether an error is tmux reporting the target pane does not exist — the
+ *  one pane failure creation can self-heal from by re-targeting the split. */
+function isPaneNotFound(err: unknown): boolean {
+  const stderr = typeof (err as { stderr?: unknown })?.stderr === "string" ? (err as { stderr: string }).stderr : "";
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /can't find pane/i.test(stderr) || /can't find pane/i.test(message);
+}
+
 /**
  * Ensure the dedicated agents session exists and return a pane id inside it
  * that new subagent panes can be split from. Detached by default so it never
@@ -83,23 +103,19 @@ function ensureAgentsSessionPane(): string {
   if (agentsSessionBasePane) return agentsSessionBasePane;
   let exists = false;
   try {
-    execFileSync("tmux", ["has-session", "-t", AGENTS_TMUX_SESSION], {
-      stdio: "ignore",
-    });
+    runTmux(["has-session", "-t", AGENTS_TMUX_SESSION]);
     exists = true;
   } catch {}
   if (!exists) {
-    execFileSync(
-      "tmux",
-      ["new-session", "-d", "-s", AGENTS_TMUX_SESSION, "-x", "200", "-y", "50"],
-      { encoding: "utf8" },
-    );
+    runTmux(["new-session", "-d", "-s", AGENTS_TMUX_SESSION, "-x", "200", "-y", "50"]);
   }
-  const paneList = execFileSync(
-    "tmux",
-    ["list-panes", "-t", AGENTS_TMUX_SESSION, "-F", "#{pane_id}"],
-    { encoding: "utf8" },
-  );
+  const paneList = runTmux([
+    "list-panes",
+    "-t",
+    AGENTS_TMUX_SESSION,
+    "-F",
+    "#{pane_id}",
+  ]);
   // First valid pane id line. Deliberately no `-f` filter: filter tokens like
   // `#M` are not uniform across tmux versions (on 3.5a `#M` matches EVERY
   // pane), so a filtered list once returned multiple lines that passed the
@@ -182,18 +198,12 @@ export function createSurface(name: string): string {
   return createSurfaceSplit(name, "right", splitOriginPane());
 }
 
-/**
- * Create a new split in the given direction from an optional source pane.
- * Returns the new pane id (e.g. `%12`).
- */
-export function createSurfaceSplit(
-  name: string,
+/** Run one split-window against `fromSurface` (or the current window when
+ *  absent) and return the new pane id. */
+function splitPaneOnce(
   direction: "left" | "right" | "up" | "down",
   fromSurface?: string,
 ): string {
-  void name;
-  requireTmux();
-
   const args = ["split-window", "-d"];
   if (direction === "left" || direction === "right") {
     args.push("-h");
@@ -208,9 +218,38 @@ export function createSurfaceSplit(
   }
   args.push("-P", "-F", "#{pane_id}");
 
-  const pane = execFileSync("tmux", args, { encoding: "utf8" }).trim();
+  const pane = runTmux(args).trim();
   if (!pane.startsWith("%")) {
     throw new Error(`Unexpected tmux split-window output: ${pane}`);
+  }
+  return pane;
+}
+
+/**
+ * Create a new split in the given direction from an optional source pane.
+ * Returns the new pane id (e.g. `%12`).
+ *
+ * Self-heal: when the from-pane is dead — its window reaped, or a parent pane
+ * id gone stale after a reload — tmux answers `can't find pane` and every
+ * spawn would keep failing until process restart. Retry exactly once against
+ * a live pane of the dedicated agents session, re-derived from live tmux
+ * state (never the stale cache). Any other failure propagates unchanged.
+ */
+export function createSurfaceSplit(
+  name: string,
+  direction: "left" | "right" | "up" | "down",
+  fromSurface?: string,
+): string {
+  void name;
+  requireTmux();
+
+  let pane: string;
+  try {
+    pane = splitPaneOnce(direction, fromSurface);
+  } catch (err) {
+    if (!fromSurface || !isPaneNotFound(err)) throw err;
+    agentsSessionBasePane = null;
+    pane = splitPaneOnce(direction, ensureAgentsSessionPane());
   }
 
   rebalanceSurfaces(pane);
@@ -390,6 +429,23 @@ function interpretExitSidecar(data: any): PollResult {
 }
 
 export const __pollForExitTest__ = { interpretExitSidecar };
+
+/** Test hooks for the pane-creation paths: substitute the tmux binary and
+ *  reset the state a fake run leaves behind (base-pane cache, availability
+ *  cache, pending layout rebalance). */
+export const __surfaceTest__ = {
+  setTmuxRunner(fn: ((args: string[]) => string) | null): void {
+    tmuxRunner = fn;
+    agentsSessionBasePane = null;
+    if (fn) commandAvailability.set("tmux", true);
+    else commandAvailability.delete("tmux");
+    if (rebalanceTimer) {
+      clearTimeout(rebalanceTimer);
+      rebalanceTimer = null;
+    }
+  },
+  isPaneNotFound,
+};
 
 /**
  * Poll until the subagent exits. Checks for a `.exit` sidecar file first

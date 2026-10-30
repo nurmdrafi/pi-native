@@ -713,6 +713,12 @@ interface RunningSubagent {
    * subagent's pane (e.g. planner).
    */
   interactive: boolean;
+  /** Whether the child self-terminates on completion (auto-exit agent).
+   *  Only auto-exit children qualify for automatic pane-loss restarts. */
+  autoExit?: boolean;
+  /** Pane-loss restart bookkeeping: set when the single restart attempt
+   *  began; `respawnedAt` added once a replacement pane is actually running. */
+  restart?: { attemptedAt: number; respawnedAt?: number };
 }
 
 /** All currently running subagents, keyed by id. */
@@ -1208,8 +1214,7 @@ function startStatusRefresh(pi: ExtensionAPI) {
     sweepRunningSubagents({
       runningSubagents,
       listPanes: listLiveSurfaces,
-      finalize: (entry, kind) =>
-        deliverSubagentResult(pi, entry as RunningSubagent, synthesizeLostResult(entry as RunningSubagent, kind), kind),
+      finalize: (entry, kind) => finalizeLostSubagent(pi, entry as RunningSubagent, kind),
     }).catch(() => {});
 
     if (shouldRefreshWidget) updateWidget();
@@ -1258,6 +1263,10 @@ export const __test__ = {
   uniqueRunningName,
   reservedNames,
   synthesizeLostResult,
+  canRestartLostPane,
+  restartLostPane,
+  finalizeLostSubagent,
+  watchSubagent,
   deliverSubagentResult,
   adoptPendingSubagents,
   steerSubagent,
@@ -1577,6 +1586,7 @@ async function launchSubagent(
     launchScriptFile,
     activityFile,
     interactive: effectiveInteractive,
+    autoExit: !!agentDefs?.autoExit,
     cwd: effectiveCwd ?? process.cwd(),
     parentSessionId: sessionId,
     ...budgetRuntimeFields(budget, surface, subagentSessionFile),
@@ -1733,8 +1743,13 @@ function synthesizeLostResult(
     kind === "pane_lost"
       ? "Pane lost: the child's terminal pane disappeared (reaped or killed) before it could report."
       : "Stalled: the child's session file stopped advancing; treated as dead.";
+  const restartLine =
+    kind === "pane_lost" && running.restart?.respawnedAt
+      ? "\n\nAn automatic restart was attempted: the child was resumed in a replacement pane, and that pane was lost too."
+      : "";
   const summary =
     (breach ? budgetBreachSummary(breach) : lossLine) +
+    restartLine +
     (lastText ? `\n\nLast output:\n${lastText}` : "");
   return {
     name,
@@ -1824,31 +1839,242 @@ function deliverSubagentResult(
   );
 }
 
+/** Dependencies of a pane-loss restart; injectable so tests can fake the
+ *  multiplexer. Production callers use the real surface layer. */
+interface RestartDeps {
+  createSurface?: (name: string) => string;
+  sendScript?: (
+    surface: string,
+    command: string,
+    opts: { scriptPath: string; scriptPreamble: string },
+  ) => void;
+  closeSurface?: (surface: string) => void;
+  /** Overrides the fresh-pane shell-ready wait (tests). */
+  shellDelayMs?: number;
+}
+
+/** Gates for the one automatic pane-loss restart. A child qualifies only if
+ *  it self-terminates (interactive panes are user-driven — respawning one
+ *  would strand the user's context), is a pi child (the restart resumes the
+ *  session file with the pi CLI), has real progress worth resuming, has
+ *  neither been restarted before nor already delivered, and was not killed
+ *  by its own budget (a budget stop is intentional — restarting would
+ *  bypass it). */
+function canRestartLostPane(running: RunningSubagent): boolean {
+  if (running.delivered) return false;
+  if (running.restart) return false; // exactly one attempt per child
+  if (running.interactive || !running.autoExit) return false;
+  if (running.cli === "claude") return false;
+  if (running.budgetStopper?.breached()) return false;
+  if (
+    running.budget &&
+    running.budgetMeter &&
+    checkBudgetExceeded(running.budget, running.budgetMeter.update(), Date.now() - running.startTime)
+  ) {
+    return false;
+  }
+  if (!existsSync(running.sessionFile)) return false;
+  return findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) !== null;
+}
+
+/** Restart a pane-lost child: respawn a pane and resume its durable session
+ *  file with the sandbox snapshot recorded at spawn (mirrors the
+ *  subagent_message resume construction). Returns true when a replacement
+ *  pane is running the resumed child; false when the gates refused or the
+ *  attempt itself failed. The attempt flag flips synchronously, so racing
+ *  callers (watcher + sweep) can never double-restart. */
+async function restartLostPane(
+  running: RunningSubagent,
+  deps: RestartDeps = {},
+): Promise<boolean> {
+  if (!canRestartLostPane(running)) return false;
+  running.restart = { attemptedAt: Date.now() };
+
+  // Without the spawn-time sandbox snapshot a resume would launch with all
+  // global extensions and the full toolset — refuse rather than escalate.
+  const loadout = readSubagentLoadout(running.sessionFile);
+  if (!loadout) return false;
+
+  const spawn = deps.createSurface ?? createSurface;
+  const sendScript = deps.sendScript ?? sendLongCommand;
+  const close = deps.closeSurface ?? closeSurface;
+
+  const artifactDir = running.parentArtifactDir ?? dirname(running.sessionFile);
+  const safeName =
+    running.name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "subagent";
+
+  let surface: string;
+  try {
+    surface = spawn(running.name);
+  } catch {
+    return false;
+  }
+  // Claim the new pane before any await so a concurrent sweep sees the entry
+  // alive instead of finalizing a loss mid-restart.
+  const deadSurface = running.surface;
+  running.surface = surface;
+
+  await new Promise<void>((resolve) =>
+    setTimeout(resolve, deps.shellDelayMs ?? getShellReadyDelayMs()),
+  );
+
+  try {
+    // The resumed process needs a user turn to act on; without one the CLI
+    // would park the pane waiting for input.
+    const msgDir = join(artifactDir, "subagent-resume");
+    mkdirSync(msgDir, { recursive: true });
+    const msgFile = join(msgDir, `${safeName}-restart-${Date.now()}.md`);
+    writeFileSync(
+      msgFile,
+      "Your terminal pane was lost (reaped or killed) mid-task. You have been automatically " +
+        "restarted in a new pane with your full session history intact. Continue the task from " +
+        "where you left off. If you had already finished, restate your final summary and stop.",
+      "utf8",
+    );
+
+    // Same construction as the subagent_message resume: the pi CLI resuming
+    // the durable session file, sandbox replayed from the spawn-time snapshot.
+    const parts = ["pi", "--session", shellEscape(running.sessionFile)];
+    parts.push("-e", shellEscape(join(SUBAGENTS_DIR, "subagent-done.ts")));
+    applySandboxToParts(parts, loadout, { artifactDir, name: running.name });
+    parts.push(shellEscape(`@${msgFile}`));
+
+    const envParts: string[] = [];
+    if (loadout.agentDir) {
+      envParts.push(`PI_CODING_AGENT_DIR=${shellEscape(loadout.agentDir)}`);
+    }
+    if (loadout.spawnable && loadout.spawnable.length > 0) {
+      envParts.push(`PI_SUBAGENT_ALLOWED=${shellEscape(loadout.spawnable.join(","))}`);
+    }
+    if (loadout.agent) {
+      envParts.push(`PI_SUBAGENT_AGENT=${shellEscape(loadout.agent)}`);
+    }
+    envParts.push(`PI_SUBAGENT_NAME=${shellEscape(running.name)}`);
+    envParts.push(`PI_SUBAGENT_AUTO_EXIT=1`);
+    envParts.push(`PI_SUBAGENT_SESSION=${shellEscape(running.sessionFile)}`);
+    envParts.push(`PI_SUBAGENT_ID=${shellEscape(running.id)}`);
+    envParts.push(`PI_SUBAGENT_TASK=${shellEscape(running.task)}`);
+    envParts.push(`PI_SUBAGENT_PARENT_SESSION=${shellEscape(running.parentSessionId ?? "")}`);
+    envParts.push(`PI_SUBAGENT_START_MS=${String(running.startTime)}`);
+    if (running.activityFile) {
+      envParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(running.activityFile)}`);
+    }
+    envParts.push(`PI_SUBAGENT_SURFACE=${shellEscape(surface)}`);
+    const cdPrefix = loadout.cwd ? `cd ${shellEscape(loadout.cwd)} && ` : "";
+
+    const command =
+      `${cdPrefix}${envParts.join(" ") + " "}${parts.join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
+    const scriptPath = join(
+      artifactDir,
+      "subagent-scripts",
+      `${safeName}-restart-${Date.now()}.sh`,
+    );
+    sendScript(surface, command, {
+      scriptPath,
+      scriptPreamble: [
+        `# Subagent restart script for ${running.name}`,
+        `# Generated: ${new Date().toISOString()}`,
+        `# Session: ${running.sessionFile}`,
+        `# Surface: ${surface}`,
+        `# Restarted from dead pane: ${deadSurface}`,
+      ].join("\n"),
+    });
+
+    running.launchScriptFile = scriptPath;
+    // The resumed child re-appends in its own time; re-baseline the sweep's
+    // stall bookkeeping so the restart pause is not read as a new stall.
+    delete running.reconcile;
+    // Restart is the recovery path, same as the subagent_message resume: the
+    // budget that was metering the pre-loss run would re-breach instantly
+    // against the re-read session file, so resumed runs are unenforced.
+    running.budget = undefined;
+    running.budgetMeter = undefined;
+    running.budgetStopper = undefined;
+    running.restart.respawnedAt = Date.now();
+    updateWidget();
+    return true;
+  } catch {
+    // The replacement pane exists but runs nothing — close it and restore the
+    // dead pane id so the loss is detected (and delivered) again.
+    try {
+      close(surface);
+    } catch {}
+    running.surface = deadSurface;
+    return false;
+  }
+}
+
+/** Finalize a lost child for the sweep and watcher: try the one automatic
+ *  restart first; deliver the synthesized loss when the gates refuse or the
+ *  attempt fails. The restart path is fire-and-forget: a failed attempt
+ *  leaves the attempt flag set, so the next sweep tick (or the watcher)
+ *  delivers the loss. */
+function finalizeLostSubagent(
+  pi: ExtensionAPI,
+  running: RunningSubagent,
+  kind: "pane_lost" | "stalled",
+  deps: RestartDeps = {},
+): void {
+  if (kind === "pane_lost" && canRestartLostPane(running)) {
+    void restartLostPane(running, deps).then((respawned) => {
+      if (!respawned && !running.delivered) {
+        deliverSubagentResult(pi, running, synthesizeLostResult(running, "pane_lost"), "pane_lost");
+      }
+    });
+    return;
+  }
+  deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);
+}
+
 async function watchSubagent(
   running: RunningSubagent,
   signal: AbortSignal,
+  deps: { poll?: typeof pollForExit; restart?: (r: RunningSubagent) => Promise<boolean> } = {},
 ): Promise<SubagentResult> {
-  const { name, task, surface, startTime, sessionFile } = running;
+  const { name, task, startTime, sessionFile } = running;
+  const poll = deps.poll ?? pollForExit;
+  const restart = deps.restart ?? restartLostPane;
 
   try {
-    const result = await pollForExit(surface, AbortSignal.any([signal, getModuleAbortSignal()]), {
-      interval: 1000,
-      sessionFile,
-      sentinelFile: running.sentinelFile,
-      onTick() {
-        observeRunningSubagent(running);
-        deliverPendingQuestion(running);
-        enforceBudget(running);
-      },
-    });
+    let result: Awaited<ReturnType<typeof pollForExit>>;
+    for (;;) {
+      // Poll the entry's CURRENT pane: a sweep-initiated restart may have
+      // moved the entry while an earlier poll still watched the dead pane.
+      const surface = running.surface;
+      result = await poll(surface, AbortSignal.any([signal, getModuleAbortSignal()]), {
+        interval: 1000,
+        sessionFile,
+        sentinelFile: running.sentinelFile,
+        onTick() {
+          observeRunningSubagent(running);
+          deliverPendingQuestion(running);
+          enforceBudget(running);
+        },
+      });
+      if (result.reason !== "gone") break;
+      // The polled pane is gone, but the entry may already sit on a
+      // replacement pane (sweep-initiated restart): keep watching that one.
+      if (running.surface !== surface) continue;
+      // First confirmed loss of the entry's own pane: try the one automatic
+      // restart (respawn + resume the durable session file). On success keep
+      // watching the replacement pane; on failure synthesize the loss below.
+      if (await restart(running)) continue;
+      break;
+    }
 
     // The pane disappeared without an exit record (group reap, external
-    // kill-pane, or the budget stopper's kill racing the poll). The durable
-    // session file is the source of truth — synthesize, don't spin.
+    // kill-pane, or the budget stopper's kill racing the poll) and no
+    // automatic restart applies. The durable session file is the source of
+    // truth — synthesize, don't spin.
     if (result.reason === "gone") {
       const synthesized = synthesizeLostResult(running, "pane_lost");
       try {
-        closeSurface(surface);
+        closeSurface(running.surface);
       } catch {}
       runningSubagents.delete(running.id);
       return synthesized;
@@ -1868,7 +2094,7 @@ async function watchSubagent(
       }
 
       if (!summary) {
-        summary = readScreen(surface, 200)
+        summary = readScreen(running.surface, 200)
           .replace(/__SUBAGENT_DONE_\d+__/, "")
           .trimEnd();
       }
@@ -1887,7 +2113,9 @@ async function watchSubagent(
         try { unlinkSync(running.sentinelFile + ".transcript"); } catch {}
       }
 
-      closeSurface(surface);
+      try {
+        closeSurface(running.surface);
+      } catch {}
       runningSubagents.delete(running.id);
 
       return { name, task, summary, exitCode: result.exitCode, elapsed, ...(sessionId ? { claudeSessionId: sessionId } : {}) };
@@ -1915,7 +2143,12 @@ async function watchSubagent(
     const stats = existsSync(sessionFile) ? summarizeSessionStats(sessionFile) : null;
     const subagentSessionId = existsSync(sessionFile) ? getSessionId(sessionFile) : null;
 
-    closeSurface(surface);
+    // Close the finished pane. Non-fatal: the pane may already be gone (it
+    // can close itself moments before this), and a cleanup failure must never
+    // turn a completed child's result into an error result.
+    try {
+      closeSurface(running.surface);
+    } catch {}
     runningSubagents.delete(running.id);
 
     const budgetBreach = running.budgetStopper?.breached() ?? null;
@@ -1955,7 +2188,7 @@ async function watchSubagent(
       };
     }
     try {
-      closeSurface(surface);
+      closeSurface(running.surface);
     } catch {}
     runningSubagents.delete(running.id);
 
@@ -2749,6 +2982,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           name,
           task: message,
           surface,
+          autoExit: true,
           startTime,
           sessionFile: sessionPath,
           parentArtifactDir,
