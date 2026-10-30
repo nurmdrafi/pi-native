@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   readdirSync,
@@ -33,6 +33,7 @@ import {
   findLastAssistantMessage,
   getNewEntries,
   getSessionId,
+  listRegisteredSubagents,
   readNameRegistry,
   readSubagentLoadout,
   registerName,
@@ -2034,6 +2035,30 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     } catch {
       // Discovery is best-effort.
     }
+
+    // Sync the persistent name registry into this session's view: a resumed
+    // parent must see its registered children so it resumes them by name
+    // instead of spawning replacements.
+    try {
+      const sm = (ctx as any).sessionManager;
+      const sessionDir = sm?.getSessionDir?.();
+      const sessionId = sm?.getSessionId?.();
+      if (sessionDir && sessionId) {
+        const registered = listRegisteredSubagents(getArtifactDir(sessionDir, sessionId));
+        if (registered.length > 0) {
+          const missing = registered.filter((r) => !r.exists).length;
+          ctx.ui.notify?.(
+            `${registered.length} subagent session(s) registered by an earlier run of this ` +
+              `session: ${registered.map((r) => r.name).join(", ")}. Resume them by name ` +
+              `(subagent_message) instead of spawning new subagents` +
+              (missing > 0 ? ` — ${missing} session file(s) missing` : "") + ".",
+            "info",
+          );
+        }
+      }
+    } catch {
+      // Registry sync is best-effort.
+    }
   });
 
   // Clean up on session shutdown
@@ -2378,20 +2403,37 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       description:
         "List all available subagent definitions. " +
         "Scans project-local .pi/agents/ and global ~/.pi/agent/agents/. " +
-        "Project-local agents override global ones with the same name.",
+        "Project-local agents override global ones with the same name. " +
+        "Also lists this session's registered subagent sessions, resumable by name.",
       promptSnippet:
         "List all available subagent definitions. " +
         "Scans project-local .pi/agents/ and global ~/.pi/agent/agents/. " +
-        "Project-local agents override global ones with the same name.",
+        "Project-local agents override global ones with the same name. " +
+        "Also lists this session's registered subagent sessions, resumable by name.",
       parameters: Type.Object({}),
 
       async execute() {
         const list = discoverAgentDefinitions().filter((agent) => !agent.disableModelInvocation);
 
-        if (list.length === 0) {
+        // This session's registered children from the persistent name
+        // registry — resumable by name, so a resumed parent can pick them
+        // up instead of spawning replacements.
+        let registered: ReturnType<typeof listRegisteredSubagents> = [];
+        try {
+          const sm = (latestCtx as any)?.sessionManager;
+          const sessionDir = sm?.getSessionDir?.();
+          const sessionId = sm?.getSessionId?.();
+          if (sessionDir && sessionId) {
+            registered = listRegisteredSubagents(getArtifactDir(sessionDir, sessionId));
+          }
+        } catch {
+          // Registry listing is best-effort.
+        }
+
+        if (list.length === 0 && registered.length === 0) {
           return {
             content: [{ type: "text", text: "No subagent definitions found." }],
-            details: { agents: [] },
+            details: { agents: [] as typeof list, registered: [] as typeof registered },
           };
         }
 
@@ -2401,17 +2443,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           const model = a.model ? ` [${a.model}]` : "";
           return `• ${a.name}${badge}${model}${desc}`;
         });
+        if (registered.length > 0) {
+          lines.push("", "Registered sessions (resume by name via subagent_message):");
+          for (const r of registered) {
+            const state = r.exists ? "resumable" : "session file missing";
+            lines.push(`• ${r.name} — ${state} (${basename(r.sessionFile)})`);
+          }
+        }
 
         return {
           content: [{ type: "text", text: lines.join("\n") }],
-          details: { agents: list },
+          details: { agents: list, registered },
         };
       },
 
       renderResult(result, _opts, theme) {
         const details = result.details as any;
         const agents = details?.agents ?? [];
-        if (agents.length === 0) {
+        const registered = details?.registered ?? [];
+        if (agents.length === 0 && registered.length === 0) {
           return new Text(theme.fg("dim", "No subagent definitions found."), 0, 0);
         }
         const lines = agents.map((a: any) => {
@@ -2420,6 +2470,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           const model = a.model ? theme.fg("dim", ` [${a.model}]`) : "";
           return `  ${theme.fg("toolTitle", theme.bold(a.name))}${badge}${model}${desc}`;
         });
+        if (registered.length > 0) {
+          if (agents.length > 0) lines.push("");
+          lines.push(theme.fg("dim", "Registered sessions (resume via subagent_message):"));
+          for (const r of registered) {
+            const state = r.exists ? "resumable" : "session file missing";
+            lines.push(
+              `  ${theme.fg("toolTitle", theme.bold(r.name))}${theme.fg("dim", ` — ${state}`)}`,
+            );
+          }
+        }
         return new Text(lines.join("\n"), 0, 0);
       },
     });

@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-repo read ledger.** Each read window (path, span, omissions, stat, sha256, session id) is
   appended to `<repo-root>/.pi/read-ledger.jsonl`, rotated at 5 MiB with three archives;
   `PI_READ_LEDGER=0` opts out.
+- **Subagent registry sync on resume.** A resumed parent session now sees its registered children:
+  session start lists every name from the persistent registry with a resume-by-name hint, and
+  `subagents_list` shows a registered-sessions section (resumable / session file missing) — so an
+  orchestrator resumes dead workers instead of spawning replacements.
 
 ### Changed
 

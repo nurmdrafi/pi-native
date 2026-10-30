@@ -216,6 +216,31 @@ export function resolveNameInRegistry(
   return entry && typeof entry.sessionFile === "string" ? entry : null;
 }
 
+/** A registered subagent session as seen by a (re)started spawner. */
+export interface RegisteredSubagent {
+  name: string;
+  /** Absolute path to the session .jsonl recorded at spawn time. */
+  sessionFile: string;
+  /** Whether the session file still exists on disk (resumable). */
+  exists: boolean;
+}
+
+/** List a spawner session's registered subagents (name to session file),
+ * sorted by name. Empty when the registry is absent or corrupt — callers
+ * render nothing in that case. */
+export function listRegisteredSubagents(
+  artifactDir: string,
+): RegisteredSubagent[] {
+  return Object.entries(readNameRegistry(artifactDir))
+    .filter(([, entry]) => typeof entry.sessionFile === "string")
+    .map(([name, entry]) => ({
+      name,
+      sessionFile: entry.sessionFile,
+      exists: existsSync(entry.sessionFile),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function readEntries(sessionFile: string): SessionEntry[] {
   const raw = readFileSync(sessionFile, "utf8");
   return raw
