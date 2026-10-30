@@ -17,6 +17,8 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder } from "./activity.ts";
+import { appendSubagentResult, repoRootFor } from "./inbox.ts";
+import { findLastAssistantMessage, getNewEntries } from "./session.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
   return agentStarted;
@@ -108,6 +110,35 @@ export function parseDeniedTools(rawValue: string | undefined): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+/** Durable self-report: append this child's own result to the repo inbox.
+ * The parent's delivery may never happen — it may already be gone. The record
+ * is marked unobserved so any later session, including a resumed parent,
+ * surfaces it. Same id as the parent's record: drains dedupe by id. */
+export function appendSelfResult(): void {
+  const sessionFile = process.env.PI_SUBAGENT_SESSION;
+  const id = process.env.PI_SUBAGENT_ID;
+  if (!sessionFile || !id) return;
+  let summary = "Subagent finished (no assistant output).";
+  try {
+    summary = findLastAssistantMessage(getNewEntries(sessionFile, 0)) ?? summary;
+  } catch {}
+  const startMs = Number(process.env.PI_SUBAGENT_START_MS);
+  appendSubagentResult({
+    id,
+    ts: Date.now(),
+    name: process.env.PI_SUBAGENT_NAME ?? id,
+    task: process.env.PI_SUBAGENT_TASK ?? "",
+    agent: process.env.PI_SUBAGENT_AGENT,
+    sessionFile,
+    parentSessionId: process.env.PI_SUBAGENT_PARENT_SESSION ?? null,
+    repoRoot: repoRootFor(process.cwd()),
+    summary,
+    exitCode: 0,
+    elapsed: Number.isFinite(startMs) && startMs > 0 ? Math.max(0, Math.floor((Date.now() - startMs) / 1000)) : 0,
+    observedByParent: false,
+  });
 }
 
 export default function (pi: ExtensionAPI) {
@@ -263,6 +294,7 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
+      appendSelfResult();
       recorder.agentEndDone();
       ctx.shutdown();
       return;
@@ -317,6 +349,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", (event) => {
+    appendSelfResult();
     recorder.sessionShutdown((event as any).reason);
   });
 

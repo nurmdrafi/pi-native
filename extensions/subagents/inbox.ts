@@ -29,6 +29,10 @@ export interface InboxRecord {
   sessionId?: string;
   /** Session id of the spawning parent, when known. The parent's own drain skips it. */
   parentSessionId?: string | null;
+  /** False when only the child itself reported this result — the spawning
+   * parent died before in-memory delivery, so even its own resumed session
+   * must surface the record. Absent (undefined) = legacy parent-appended. */
+  observedByParent?: boolean;
   repoRoot: string;
   summary: string;
   error?: string;
@@ -109,10 +113,17 @@ export function drainSubagentResults(repoRoot: string, sessionId?: string | null
   } catch {}
   const seen = new Set(drainedIds);
 
-  const fresh = records.filter((r) => !seen.has(r.id));
+  // The same id can be appended twice (child self-report + parent delivery):
+  // keep the last line — the parent's record is richer and marked observed.
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const fresh = [...byId.values()].filter((r) => !seen.has(r.id));
   if (fresh.length === 0) return [];
 
-  const toSurface = fresh.filter((r) => !sessionId || r.parentSessionId !== sessionId);
+  // A record the spawning parent never observed surfaces even to that same
+  // (resumed) session — the in-memory steer never happened.
+  const toSurface = fresh.filter(
+    (r) => r.observedByParent === false || !sessionId || r.parentSessionId !== sessionId,
+  );
   if (toSurface.length === 0) return [];
 
   // Only surfaced records are marked drained — a record skipped because the

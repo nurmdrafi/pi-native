@@ -25,6 +25,7 @@ import {
   repoRootFor,
   resultInboxPath,
 } from "../../extensions/subagents/inbox.ts";
+import { appendSelfResult } from "../../extensions/subagents/subagent-done.ts";
 import { __test__ } from "../../extensions/subagents/index.ts";
 
 /** Minimal session JSONL fixture: header + two assistant turns. */
@@ -78,6 +79,19 @@ function fakePi() {
       sent.push({ content: msg.content, details: msg.details });
     },
   };
+}
+
+/** Run `fn` with the process cwd moved to `dir`. Adoption resolves the
+ * durable-inbox repo root from cwd — without this the tests append their
+ * synthesized results to the real repo inbox and a live session drains them. */
+async function withCwd<T>(dir: string, fn: () => T | Promise<T>): Promise<T> {
+  const here = process.cwd();
+  process.chdir(dir);
+  try {
+    return await fn();
+  } finally {
+    process.chdir(here);
+  }
 }
 
 describe("synthesized results from the durable session file", () => {
@@ -259,6 +273,68 @@ describe("durable result inbox", () => {
     assert.equal(readFileSync(inbox, "utf8"), "", "corrupt line cleaned by compaction");
   });
 
+  it("surfaces an unobserved record even to its own parent session", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-unobserved-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    appendSubagentResult({ id: "u-1", ts: Date.now(), name: "W", task: "t", sessionFile: "/tmp/u.jsonl", parentSessionId: "parent-1", repoRoot: root, summary: "self-reported", exitCode: 0, elapsed: 1, observedByParent: false });
+    const got = drainSubagentResults(root, "parent-1");
+    assert.equal(got.length, 1, "parent never saw the in-memory delivery — surface on resume");
+    assert.equal(got[0].id, "u-1");
+  });
+
+  it("still skips an observed record for its own parent session", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-observed-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    appendSubagentResult({ id: "o-1", ts: Date.now(), name: "W", task: "t", sessionFile: "/tmp/o.jsonl", parentSessionId: "parent-1", repoRoot: root, summary: "delivered", exitCode: 0, elapsed: 1, observedByParent: true });
+    assert.deepEqual(drainSubagentResults(root, "parent-1"), [], "already steered in memory");
+  });
+
+  it("dedupes same-id lines, keeping the last (richest) record", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-dedupe-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const base = { id: "d-1", ts: Date.now(), name: "W", task: "t", sessionFile: "/tmp/d.jsonl", parentSessionId: "parent-1", repoRoot: root, exitCode: 0, elapsed: 1 };
+    appendSubagentResult({ ...base, summary: "child self-report", observedByParent: false });
+    appendSubagentResult({ ...base, summary: "parent delivery", observedByParent: true });
+    const got = drainSubagentResults(root, "other-session");
+    assert.equal(got.length, 1, "one record per id");
+    assert.equal(got[0].summary, "parent delivery");
+  });
+
+  it("child self-report appends an unobserved record to the repo inbox", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-selfreport-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const sessionFile = writeSessionFixture(root, "child.jsonl");
+    const here = process.cwd();
+    const saved: Record<string, string | undefined> = {};
+    const setEnv = (k: string, v: string) => {
+      saved[k] = process.env[k];
+      process.env[k] = v;
+    };
+    setEnv("PI_SUBAGENT_ID", "self-1");
+    setEnv("PI_SUBAGENT_NAME", "Worker-9");
+    setEnv("PI_SUBAGENT_TASK", "verify child self-report");
+    setEnv("PI_SUBAGENT_SESSION", sessionFile);
+    setEnv("PI_SUBAGENT_PARENT_SESSION", "parent-9");
+    setEnv("PI_SUBAGENT_START_MS", String(Date.now() - 5000));
+    try {
+      process.chdir(root);
+      appendSelfResult();
+    } finally {
+      process.chdir(here);
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+    const lines = readFileSync(resultInboxPath(root), "utf8").split("\n").filter(Boolean);
+    assert.equal(lines.length, 1, "one self-report record");
+    const rec = JSON.parse(lines[0]);
+    assert.equal(rec.id, "self-1");
+    assert.equal(rec.observedByParent, false);
+    assert.equal(rec.parentSessionId, "parent-9");
+    assert.match(rec.summary, /LAST ASSISTANT TEXT/);
+  });
+
   it("ignores inbox records from another repo root", () => {
     const other = mkdtempSync(join(tmpdir(), "reconcile-inbox-other-"));
     appendSubagentResult({
@@ -279,5 +355,45 @@ describe("durable result inbox", () => {
       true,
       "record landed in its own repo's inbox",
     );
+  });
+});
+
+describe("adoption of previous-session orphans", () => {
+  it("finalizes a dead-pane orphan from its session file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "adopt-dead-"));
+    const sessionFile = writeSessionFixture(dir, "orphan.jsonl");
+    const pi = fakePi();
+    const orphan = {
+      id: "adopt-1",
+      name: "Worker-A",
+      task: "t",
+      sessionFile,
+      surface: "%424242",
+      startedAt: Date.now() - 60_000,
+      detachedAt: Date.now(),
+    };
+    await withCwd(dir, () =>
+      __test__.adoptPendingSubagents(pi as never, [orphan], async () => new Set<string>()));
+    assert.equal(pi.sent.length, 1, "synthesized pane_lost delivered");
+    assert.match(pi.sent[0].content, /was lost/, "pane_lost presentation");
+  });
+
+  it("re-watches a live-pane orphan under its registered name", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "adopt-live-"));
+    const sessionFile = writeSessionFixture(dir, "orphan2.jsonl");
+    const pi = fakePi();
+    const orphan = {
+      id: "adopt-2",
+      name: "Worker-B",
+      task: "t",
+      sessionFile,
+      surface: "%111222",
+      startedAt: Date.now() - 60_000,
+      detachedAt: Date.now(),
+    };
+    await withCwd(dir, () =>
+      __test__.adoptPendingSubagents(pi as never, [orphan], async () => new Set(["%111222"])));
+    const found = __test__.resolveRunningByName("Worker-B");
+    assert.ok("running" in found, "adopted entry is watchable/steerable by name");
   });
 });

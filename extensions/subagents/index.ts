@@ -77,7 +77,7 @@ import {
   type SubagentActivityState,
 } from "./activity.ts";
 import { SpawnQueue, resolveMaxConcurrent } from "./spawn-queue.ts";
-import { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
+import { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents, type PendingDetachedSubagent } from "./pending.ts";
 export { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
 
 /** Absolute path to `pi-extension/subagents`. https://github.com/nodejs/node/issues/37845 */
@@ -1259,6 +1259,7 @@ export const __test__ = {
   reservedNames,
   synthesizeLostResult,
   deliverSubagentResult,
+  adoptPendingSubagents,
   steerSubagent,
   handleSubagentSteer,
   resolveResultPresentation,
@@ -1504,6 +1505,9 @@ async function launchSubagent(
   }
   envParts.push(`PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`);
   envParts.push(`PI_SUBAGENT_ID=${shellEscape(id)}`);
+  envParts.push(`PI_SUBAGENT_TASK=${shellEscape(params.task)}`);
+  envParts.push(`PI_SUBAGENT_PARENT_SESSION=${shellEscape(sessionId ?? "")}`);
+  envParts.push(`PI_SUBAGENT_START_MS=${Date.now()}`);
   envParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
   envParts.push(`PI_SUBAGENT_SURFACE=${shellEscape(surface)}`);
   const envPrefix = envParts.join(" ") + " ";
@@ -1756,7 +1760,7 @@ function persistResultRecord(
   synthesized?: "pane_lost" | "stalled",
 ): void {
   appendSubagentResult({
-    id: `${running.id}:${result.exitCode}:${result.elapsed}`,
+    id: running.id,
     ts: Date.now(),
     name: result.name,
     task: result.task,
@@ -1764,6 +1768,7 @@ function persistResultRecord(
     sessionFile: result.sessionFile ?? running.sessionFile,
     sessionId: result.sessionId,
     parentSessionId: running.parentSessionId ?? null,
+    observedByParent: true,
     repoRoot: repoRootFor(running.cwd ?? process.cwd()),
     summary: result.summary,
     error: result.error,
@@ -2003,6 +2008,44 @@ function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
   }
 }
 
+/** Re-attach to orphans left by a previous session of this project.
+ * Live pane -> watch again (the result delivers when the child exits);
+ * dead pane -> synthesize from the durable session file and deliver now.
+ * Budgets stay unenforced on adoption: a restart-fresh meter cannot be
+ * trusted against already-elapsed work. */
+async function adoptPendingSubagents(
+  pi: ExtensionAPI,
+  pending: PendingDetachedSubagent[],
+  listPanes: () => Promise<Set<string> | null> = listLiveSurfaces,
+): Promise<void> {
+  const live = await listPanes();
+  const sessionId = (latestCtx as any)?.sessionManager?.getSessionId?.() ?? null;
+  for (const p of pending) {
+    const running: RunningSubagent = {
+      id: p.id,
+      name: p.name,
+      task: p.task,
+      surface: p.surface,
+      sessionFile: p.sessionFile,
+      startTime: p.startedAt,
+      cwd: process.cwd(),
+      parentSessionId: sessionId,
+      interactive: false,
+      statusState: createStatusState({ source: "pi", startTimeMs: p.startedAt }),
+    };
+    if (live !== null && live.has(p.surface)) {
+      runningSubagents.set(running.id, running);
+      watchSubagent(running, getModuleAbortSignal()).then(
+        (result) => deliverSubagentResult(pi, running, result),
+        () => {},
+      );
+    } else {
+      deliverSubagentResult(pi, running, synthesizeLostResult(running, "pane_lost"), "pane_lost");
+    }
+  }
+  updateWidget();
+}
+
 export default function subagentsExtension(pi: ExtensionAPI) {
   latestPi = pi;
   // Capture the UI context for widget updates
@@ -2056,8 +2099,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
       }
       if (lines.length > 0) ctx.ui.notify?.(lines.join("\n"), severity);
-      // Warn once per orphan set: the sidecar's only duty was this notice.
+      // Warn once per orphan set: the sidecar's only duty was this notice —
+      // adoption takes over from here (re-watch or finalize + deliver).
       if (surfaced.length > 0) dismissPendingDetached(surfaced);
+      if (surfaced.length > 0) {
+        void adoptPendingSubagents(pi, surfaced).catch(() => {});
+      }
     } catch {
       // Discovery and registry sync are best-effort.
     }
