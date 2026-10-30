@@ -22,8 +22,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // ---------------------------------------------------------------------------
 export const BOUNDS = {
   read: {
-    window: { lines: 40, bytes: 2048 }, // piread compaction trigger + safe window
+    window: { lines: 100, bytes: 8192 }, // piread read budget before a gap (inside H1b 300/8192)
     span: { capBytes: 51200 }, // piread span cap (~50 KB) before footer paging
+    locate: { context: 12, pointers: 40 }, // piread fused locate+read (--hits): context lines each side of a hit; hit pointers listed in the footer
   },
   bash: {
     cap: { lines: 40, bytes: 2048 }, // pibash result cap (H1)

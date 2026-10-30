@@ -2,14 +2,20 @@
 // Edit BOUNDS there and run: node scripts/gen-bounds.mjs
 #![allow(dead_code)] // crates use a subset; the table is shared
 
-/// read.window.lines = 40
-pub const READ_WINDOW_LINES: u64 = 40;
+/// read.window.lines = 100
+pub const READ_WINDOW_LINES: u64 = 100;
 
-/// read.window.bytes = 2048
-pub const READ_WINDOW_BYTES: u64 = 2048;
+/// read.window.bytes = 8192
+pub const READ_WINDOW_BYTES: u64 = 8192;
 
 /// read.span.capBytes = 51200
 pub const READ_SPAN_CAPBYTES: u64 = 51200;
+
+/// read.locate.context = 12
+pub const READ_LOCATE_CONTEXT: u64 = 12;
+
+/// read.locate.pointers = 40
+pub const READ_LOCATE_POINTERS: u64 = 40;
 
 /// bash.cap.lines = 40
 pub const BASH_CAP_LINES: u64 = 40;
