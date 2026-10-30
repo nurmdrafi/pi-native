@@ -1,4 +1,4 @@
-//! CLI parsing: `piread --path <P> [--offset <N>] [--limit <N>]`.
+//! CLI parsing: `piread --path <P> [--offset <N>] [--limit <N>] [--hits <S>]`.
 
 /// A fully validated invocation.
 pub struct Run {
@@ -15,6 +15,10 @@ pub struct Run {
     /// `...[+M chars]` marker; `None` (default) leaves every line untouched,
     /// preserving byte parity with the built-in read.
     pub line_cap: Option<u64>,
+    /// Fused locate+read selector (`--hits <NEEDLE>`): locate NEEDLE in the
+    /// file and print merged context windows around the hits instead of a
+    /// paged window. Exclusive with `--offset`/`--limit`.
+    pub hits: Option<String>,
 }
 
 /// Non-`Run` outcomes that still exit 0.
@@ -29,7 +33,7 @@ pub enum Parsed {
 pub const HELP: &str = "\
 piread — native read pipeline for the pi agent harness
 
-usage: piread --path <P> [--offset <N>] [--limit <N>] [--line-cap <N>]
+usage: piread --path <P> [--offset <N>] [--limit <N>] [--line-cap <N>] [--hits <NEEDLE>]
        piread --serve
 
   --path <P>    file to read; ~ and relative paths resolve against the
@@ -39,6 +43,11 @@ usage: piread --path <P> [--offset <N>] [--limit <N>] [--line-cap <N>]
   --line-cap <N>
                 cap each line at <N> characters, appending a
                 ...[+M chars] marker; omitted = no cap (byte parity)
+  --hits <NEEDLE>
+                fused locate+read: print merged context windows around
+                every line containing NEEDLE (literal, case-sensitive)
+                within the read budget; hits beyond the budget are listed
+                as line pointers. Excludes --offset/--limit
   --serve       daemon mode: newline-delimited JSON requests on stdin, one
                 response line per request (same envelope plus an echoed
                 `id`); exits on stdin EOF
@@ -54,6 +63,7 @@ Exit codes: 0 ok · 2 usage (stderr) · 3 I/O error (JSON on stdout)
 /// arguments, missing values, and offset/limit < 1 are usage errors (exit 2).
 pub fn parse_args(args: &[String]) -> Result<Parsed, String> {
     let mut path: Option<String> = None;
+    let mut hits: Option<String> = None;
     let mut offset: Option<u64> = None;
     let mut limit: Option<u64> = None;
     let mut line_cap: Option<u64> = None;
@@ -66,7 +76,7 @@ pub fn parse_args(args: &[String]) -> Result<Parsed, String> {
         };
         // Known flags decide their value handling; anything else errors
         // immediately without consuming the next argument.
-        let takes_value = matches!(flag, "--path" | "--offset" | "--limit" | "--line-cap");
+        let takes_value = matches!(flag, "--path" | "--offset" | "--limit" | "--line-cap" | "--hits");
         if !takes_value && inline.is_none() {
             return match flag {
                 "--serve" => Ok(Parsed::Serve),
@@ -88,13 +98,22 @@ pub fn parse_args(args: &[String]) -> Result<Parsed, String> {
             "--offset" => offset = Some(parse_count(flag, &value)?),
             "--limit" => limit = Some(parse_count(flag, &value)?),
             "--line-cap" => line_cap = Some(parse_count(flag, &value)?),
+            "--hits" => hits = Some(value),
             "--serve" | "--version" | "--help" | "-h" => return Err(format!("{flag} takes no value")),
             other => return Err(format!("unknown flag '{other}'")),
         }
         i += 1;
     }
     let path = path.ok_or_else(|| "missing required flag --path".to_string())?;
-    Ok(Parsed::Run(Run { path, offset, limit, line_cap }))
+    // Fused mode is a locator, not a pager: combining it with a window is a
+    // usage error rather than silently ignored paging.
+    if hits.is_some() && (offset.is_some() || limit.is_some()) {
+        return Err("--hits cannot combine with --offset/--limit".to_string());
+    }
+    if hits.as_deref() == Some("") {
+        return Err("--hits must be non-empty".to_string());
+    }
+    Ok(Parsed::Run(Run { path, offset, limit, line_cap, hits }))
 }
 
 /// Flag values must be integers ≥ 1 (the tool-level 0/negative semantics are

@@ -3,15 +3,16 @@
 Rust crate behind the `piread` tool: one invocation runs the whole text-read pipeline
 the built-in `read` performs in TypeScript (open → slice → render → truncate →
 binary-detect) and prints a single JSON envelope. Byte-for-byte parity with the built-in
-is enforced by `../../tests/piread-parity.test.mjs`; this crate owns the mechanics.
+is enforced by `../../tests/parity/piread-parity.test.mjs`; this crate owns the mechanics.
 
-- Spec: `docs/specs/2026-10-16-s6-piread-design.md` (S6)
-- Plan: `docs/specs/2026-10-16-s6-piread-plan.md`
+- Spec: `docs/specs/2026-10-16-s6-piread-design.md` (the specs archive is no longer in the tree; the design lives on in this file)
+- Plan: `docs/specs/2026-10-16-s6-piread-plan.md` (same)
 - Extension: `extensions/piread/index.ts`
-- Tests: `tests/cli.rs`, `tests/serve.rs`, `../../tests/piread-parity.test.mjs`
+- Tests: `tests/cli.rs`, `tests/serve.rs`, `../../tests/parity/piread-parity.test.mjs`
 - Bench: `../../benchmark/runs/piread-microbench-*.md`
 
-Status: shipped, default-on, opt out with `PI_NATIVE_READ=0`. Parity 150/150, gate
+Status: shipped, registers unconditionally, Rust is the only executor (no built-in
+route; the daemon → one-shot ladder is the whole ladder). Parity 150/150, gate
 241/241 at the time of writing.
 
 ---
@@ -19,8 +20,9 @@ Status: shipped, default-on, opt out with `PI_NATIVE_READ=0`. Parity 150/150, ga
 ## Build walkthrough — steps tried
 
 S6 was the first native-tool sub-project and established the pattern (individual
-registration, fail-open ladder, parity oracle, gate lock-ins) that `piedit` later
-reused. Steps below follow the spec plan and the commits in order.
+registration, parity oracle, gate lock-ins) that `piedit` later
+reused. The then-current fail-open ladder it also established has since been
+retired — see Status above. Steps below follow the spec plan and the commits in order.
 
 ### Step 0 — Baseline
 

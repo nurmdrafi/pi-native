@@ -13,7 +13,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use crate::envelope::{ErrorKind, OmissionWire, Truncation, TruncationKind};
+use crate::envelope::{ErrorKind, LocateWire, OmissionWire, Truncation, TruncationKind};
 use crate::ToolError;
 
 /// Built-in caps (`truncate.ts`): DEFAULT_MAX_LINES / DEFAULT_MAX_BYTES.
@@ -39,6 +39,9 @@ pub struct PipelineOutput {
     /// being printed: a stderr line surfaces in hosts that relay tool stderr,
     /// where `piread: compacted (...)` reads as noise, not information.
     pub compaction: Option<CompactionWire<'static>>,
+    /// Fused locate+read report, present only for `--hits` reads; `None`
+    /// leaves the envelope byte-identical to the default mode.
+    pub locate: Option<LocateWire>,
 }
 
 pub use crate::envelope::CompactionWire;
@@ -214,6 +217,7 @@ pub fn read_text(
         binary: segs.binary,
         total_bytes: segs.raw_seen,
         compaction: None,
+        locate: None,
     })
 }
 
@@ -389,19 +393,19 @@ impl HeadTruncator {
 /// `n` newlines yield `n + 1` segments; a file ending in `\n` (or an empty
 /// file) contributes a trailing empty segment. Also owns raw-byte counting
 /// and the 8 KiB NUL sniff.
-struct Segmenter<R: BufRead> {
+pub(crate) struct Segmenter<R: BufRead> {
     inner: R,
     /// Previous chunk ended with `\n`; starts true so an empty file yields
     /// its single `[""]` segment.
     last_ended_newline: bool,
     finished: bool,
-    raw_seen: u64,
+    pub(crate) raw_seen: u64,
     sniff_left: i64,
-    binary: bool,
+    pub(crate) binary: bool,
 }
 
 impl<R: BufRead> Segmenter<R> {
-    fn new(inner: R) -> Self {
+    pub(crate) fn new(inner: R) -> Self {
         Self {
             inner,
             last_ended_newline: true,
@@ -414,7 +418,7 @@ impl<R: BufRead> Segmenter<R> {
 
     /// Fills `buf` (reused) with the next segment's bytes, newline stripped.
     /// Returns Ok(false) after the last segment.
-    fn next(&mut self, buf: &mut Vec<u8>) -> Result<bool, ToolError> {
+    pub(crate) fn next(&mut self, buf: &mut Vec<u8>) -> Result<bool, ToolError> {
         if self.finished {
             return Ok(false);
         }
@@ -463,7 +467,7 @@ impl<R: BufRead> Segmenter<R> {
 }
 
 /// Node's `fsPromises.access(path, R_OK)` error messages, byte for byte.
-fn open_error(e: std::io::Error, resolved: &str) -> ToolError {
+pub(crate) fn open_error(e: std::io::Error, resolved: &str) -> ToolError {
     match e.kind() {
         std::io::ErrorKind::NotFound => ToolError {
             kind: ErrorKind::Enoent,
@@ -477,7 +481,7 @@ fn open_error(e: std::io::Error, resolved: &str) -> ToolError {
     }
 }
 
-fn read_error(e: std::io::Error) -> ToolError {
+pub(crate) fn read_error(e: std::io::Error) -> ToolError {
     if e.kind() == std::io::ErrorKind::IsADirectory {
         return ToolError {
             kind: ErrorKind::Eisdir,
@@ -516,7 +520,8 @@ fn to_fixed_1(x: f64) -> String {
 
 /// Resolve like the built-in's `resolveToCwd`: `~` expansion, then lexical
 /// normalization against the process cwd. (The built-in's macOS screenshot
-/// filename variants are covered by the extension's fail-open fallback.)
+/// filename variants are handled by the extension's `resolveToolPath`, which
+/// pre-resolves the path before dispatch.)
 pub fn resolve_path(raw: &str) -> String {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
     resolve_path_against(raw, &cwd.to_string_lossy())
@@ -763,7 +768,7 @@ mod tests {
         fn compacted_window_reports_absolute_omission_lines() {
             // C3: compact() speaks window-relative lines; the envelope must
             // publish absolute file lines so the gate needs no window math.
-            let body: String = (1..=120)
+            let body: String = (1..=220)
                 .map(|i| format!("line {i}"))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -779,12 +784,12 @@ mod tests {
             let c = out
                 .compaction
                 .as_ref()
-                .expect("61 lines exceed the 40-line compaction budget");
+                .expect("161 lines exceed the 100-line read budget");
             assert_eq!(c.omissions.len(), 1);
             let o = &c.omissions[0];
             assert!(
-                o.start_line >= 60 && o.end_line <= 120,
-                "gap {o:?} must be absolute within the 60..=120 window"
+                o.start_line >= 60 && o.end_line <= 220,
+                "gap {o:?} must be absolute within the 60..=220 window"
             );
             assert_eq!(o.end_line - o.start_line + 1, o.lines);
             assert!(out.content.starts_with("line 60"));

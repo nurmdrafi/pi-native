@@ -11,9 +11,12 @@
 use std::fmt;
 use std::process::ExitCode;
 
+#[path = "bounds.gen.rs"]
+mod bounds;
 mod cli;
 mod compress;
 mod envelope;
+mod locate;
 mod pipeline;
 mod procgroup;
 mod serve;
@@ -26,7 +29,7 @@ fn main() -> ExitCode {
     match parse_args(&argv) {
         Err(msg) => {
             eprintln!("piread: {msg}");
-            eprintln!("usage: piread --path <P> [--offset <N>] [--limit <N>]  (try --help)");
+            eprintln!("usage: piread --path <P> [--offset <N>] [--limit <N>] [--hits <S>]  (try --help)");
             ExitCode::from(2)
         }
         Ok(Parsed::Help) => {
@@ -40,7 +43,17 @@ fn main() -> ExitCode {
         Ok(Parsed::Serve) => serve::serve(),
         Ok(Parsed::Run(run)) => {
             let resolved = pipeline::resolve_path(&run.path);
-            match pipeline::read_text_compacted(&resolved, &run.path, run.offset, run.limit, run.line_cap) {
+            let read = match &run.hits {
+                Some(needle) => locate::read_hits(&resolved, &run.path, needle, run.line_cap),
+                None => pipeline::read_text_compacted(
+                    &resolved,
+                    &run.path,
+                    run.offset,
+                    run.limit,
+                    run.line_cap,
+                ),
+            };
+            match read {
                 Ok(out) => {
                     let json = success_envelope(
                         &out.content,
@@ -48,6 +61,7 @@ fn main() -> ExitCode {
                         out.binary,
                         out.total_bytes,
                         out.compaction.as_ref(),
+                        out.locate.as_ref(),
                     );
                     println!("{json}");
                     ExitCode::SUCCESS
@@ -157,5 +171,38 @@ mod tests {
         assert!(matches!(parse_args(&args(&["--serve"])).unwrap(), Parsed::Serve));
         // even alongside other flags (informational flags win)
         assert!(matches!(parse_args(&args(&["--path", "/x", "--version"])).unwrap(), Parsed::Version));
+    }
+
+    // ---- --hits: fused locate+read selector ----
+
+    #[test]
+    fn parses_hits_selector() {
+        let r = ok(&["--path", "/x", "--hits", "read_text"]);
+        assert_eq!(r.hits.as_deref(), Some("read_text"));
+        assert_eq!(r.offset, None);
+        assert_eq!(r.limit, None);
+    }
+
+    #[test]
+    fn hits_inline_form_and_line_cap_compose() {
+        let r = ok(&["--path", "/x", "--hits=sym", "--line-cap", "80"]);
+        assert_eq!(r.hits.as_deref(), Some("sym"));
+        assert_eq!(r.line_cap, Some(80));
+    }
+
+    #[test]
+    fn hits_rejects_offset_and_limit() {
+        assert!(parse_args(&args(&["--path", "/x", "--hits", "s", "--offset", "5"])).is_err());
+        assert!(parse_args(&args(&["--path", "/x", "--hits", "s", "--limit", "5"])).is_err());
+    }
+
+    #[test]
+    fn hits_rejects_empty_needle() {
+        assert!(parse_args(&args(&["--path", "/x", "--hits", ""])).is_err());
+    }
+
+    #[test]
+    fn hits_requires_a_value() {
+        assert!(parse_args(&args(&["--path", "/x", "--hits"])).is_err());
     }
 }

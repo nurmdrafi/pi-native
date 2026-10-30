@@ -55,6 +55,8 @@ struct Success<'a> {
     binary: bool,
     total_bytes: u64,
     compaction: Option<CompactionWire<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    locate: Option<&'a LocateWire>,
 }
 
 /// Head-tail compaction diagnostics carried in the success envelope
@@ -104,7 +106,24 @@ struct ToolErrorBody<'a> {
     message: &'a str,
 }
 
-/// Coarse failure family for observability; exact messages carry the detail.
+/// Fused locate+read report carried in the success envelope (`locate`),
+/// present only for `--hits` reads. `hits` holds ascending match line
+/// numbers the model can actually see — every hit inside a printed window,
+/// plus the footer pointers capped at `read.locate.pointers`; `hits_total`
+/// is the full match count; `windows` lists the printed windows (1-based,
+/// inclusive).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocateWire {
+    pub needle: String,
+    pub hits: Vec<u64>,
+    pub hits_total: u64,
+    pub windows: Vec<(u64, u64)>,
+    /// Whole-file line count (JS split semantics): the domain the printed
+    /// windows are complemented against for read-coverage indexing.
+    pub total_lines: u64,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum ErrorKind {
     #[serde(rename = "ENOENT")]
@@ -145,6 +164,7 @@ pub fn success_envelope(
     binary: bool,
     total_bytes: u64,
     compaction: Option<&CompactionWire<'_>>,
+    locate: Option<&LocateWire>,
 ) -> String {
     let mut buf = Vec::new();
     write_success_with_id(
@@ -155,6 +175,7 @@ pub fn success_envelope(
         binary,
         total_bytes,
         compaction,
+        locate,
     );
     String::from_utf8(buf).expect("success envelope is UTF-8")
 }
@@ -331,6 +352,7 @@ pub fn write_success_with_id(
     binary: bool,
     total_bytes: u64,
     compaction: Option<&CompactionWire<'_>>,
+    locate: Option<&LocateWire>,
 ) {
     buf.extend_from_slice(b"{");
     if let Some(id) = id {
@@ -381,6 +403,33 @@ pub fn write_success_with_id(
             write_bool(buf, c.partial);
             buf.push(b'}');
         }
+    }
+    if let Some(l) = locate {
+        buf.extend_from_slice(b",\"locate\":{\"needle\":");
+        write_json_str(buf, &l.needle);
+        buf.extend_from_slice(b",\"hits\":[");
+        for (i, h) in l.hits.iter().enumerate() {
+            if i > 0 {
+                buf.push(b',');
+            }
+            write_u64(buf, *h);
+        }
+        buf.extend_from_slice(b"],\"hitsTotal\":");
+        write_u64(buf, l.hits_total);
+        buf.extend_from_slice(b",\"windows\":[");
+        for (i, w) in l.windows.iter().enumerate() {
+            if i > 0 {
+                buf.push(b',');
+            }
+            buf.push(b'[');
+            write_u64(buf, w.0);
+            buf.push(b',');
+            write_u64(buf, w.1);
+            buf.push(b']');
+        }
+        buf.extend_from_slice(b"],\"totalLines\":");
+        write_u64(buf, l.total_lines);
+        buf.push(b'}');
     }
     buf.push(b'}');
 }
@@ -483,6 +532,13 @@ mod tests {
             }],
             partial: true,
         };
+        let locate = LocateWire {
+            needle: "read_\"text\"".into(),
+            hits: vec![3, 44],
+            hits_total: 2,
+            windows: vec![(1, 15), (32, 56)],
+            total_lines: 2500,
+        };
         for id in [None, Some(serde_json::json!({"nonce": 7, "tag": "\"x\n"}))] {
             let mut fast = Vec::new();
             write_success_with_id(
@@ -493,6 +549,7 @@ mod tests {
                 true,
                 123_456,
                 Some(&compaction),
+                Some(&locate),
             );
             let derived = serde_json::to_string(&Success {
                 id: id.as_ref(),
@@ -502,6 +559,7 @@ mod tests {
                 binary: true,
                 total_bytes: 123_456,
                 compaction: Some(compaction.clone()),
+                locate: Some(&locate),
             })
             .unwrap();
             assert_eq!(fast, derived.as_bytes());
@@ -520,7 +578,7 @@ mod tests {
             assert_eq!(fast, derived.as_bytes());
         }
         // untruncated success (truncation: null) via the one-shot wrapper
-        let plain = success_envelope("solo\n", None, false, 5, None);
+        let plain = success_envelope("solo\n", None, false, 5, None, None);
         let derived = serde_json::to_string(&Success {
             id: None,
             ok: true,
@@ -529,6 +587,7 @@ mod tests {
             binary: false,
             total_bytes: 5,
             compaction: None,
+            locate: None,
         })
         .unwrap();
         assert_eq!(plain, derived);

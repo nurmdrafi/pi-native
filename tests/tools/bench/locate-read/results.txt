@@ -1,0 +1,16 @@
+file                                           defs      A B      B B      C B      D B      E B A cl B cl C cl D cl E cl
+rust-tools/piread/src/pipeline.rs                51    45997     4544     4640     5270    17337    1    6    3    3    5
+rust-tools/piread/src/compress.rs                37    36922     7938     8034     8133    17446    1    6    3    3    5
+rust-tools/piread/src/serve.rs                   11     8452     7330     7434     7332    15484    1    4    3    3    5
+extensions/piread/index.ts                       76    29386     7547     7643     8196    15730    1    6    3    3    5
+extensions/permission-gate/rules/read-coverage.ts   91    23202    10436    10532    10272    14789    1    6    3    3    5
+extensions/permission-gate/rules/search-guard.ts   69    18467    10175    10271    10100    13707    1    6    3    3    5
+extensions/subagents/index.ts                   476   213031     9888     9984    10395   171379    3    6    3    3    4
+extensions/subagents/tmux.ts                     58    19247     5536     5640     5938    13276    1    4    3    3    5
+scripts/gen-bounds.mjs                           19     4979     6752     6856     6809    13524    1    4    3    3    4
+
+tasks=27 misses A=0 B=0 C=0 D=0 E=0
+bytes   A=   399683  B=    70146  C=    71034  D=    72445  E=   292672
+        B/A=0.18  C/A=0.18  D/A=0.18  E/A=0.73
+calls   A=       11  B=       48  C=       27  D=       27  E=       43
+ms      A=     40.8    B=    156.1    C=    138.1    D=     91.9    E=    157.4

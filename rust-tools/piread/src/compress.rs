@@ -32,9 +32,14 @@
 //! straight through instead of re-cutting it, so the bytes we save are bytes
 //! the model never pays for.
 
-/// Model-visible budget, matching the permission-gate H1 cap and pibash.
-pub const COMPRESS_MAX_LINES: usize = 40;
-pub const COMPRESS_MAX_BYTES: usize = 2048;
+/// Model-visible read budget, from the shared bounds table (`read.window`):
+/// 100 lines / 8 KB. It sits inside the permission-gate H1b read cap
+/// (300 lines / 8 KB `bash.read`), so a whole window passes straight through
+/// and a gap is only marked past it — a marker over <=60 lines costs the model
+/// a whole re-read turn to close (measured: 482 gap-aimed follow-up reads in
+/// 1756 calls over one day of transcripts).
+pub const COMPRESS_MAX_LINES: usize = crate::bounds::READ_WINDOW_LINES as usize;
+pub const COMPRESS_MAX_BYTES: usize = crate::bounds::READ_WINDOW_BYTES as usize;
 
 /// Marker inserted where content was dropped. Same prefix as pibash's
 /// `OMISSION_TAG`, so either tool's output is recognizable.
@@ -419,6 +424,34 @@ mod tests {
         assert_eq!(out.strategy, "none");
         assert_eq!(out.content, text);
         assert_eq!(out.omitted_chars, 0);
+    }
+
+    #[test]
+    fn small_gap_is_printed_not_marked() {
+        // Measured (.pi/read-ledger.jsonl): 92 of 151 gapped reads omitted
+        // <= 60 lines, and 57 later reads aimed inside a prior gap. A marker
+        // over such a gap trades ~60 printed lines for a whole re-read turn.
+        let text = (1..=90)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = compact(text.as_str(), COMPRESS_MAX_LINES, COMPRESS_MAX_BYTES);
+        assert_eq!(out.strategy, "none", "90 lines fit one printed window");
+        assert_eq!(out.content, text);
+        assert_eq!(out.omissions.len(), 0);
+    }
+
+    #[test]
+    fn past_the_budget_still_gaps() {
+        // The budget is the boundary, not a suggestion: beyond it the marker
+        // reappears (and H1b would head-truncate anyway).
+        let text = (1..=300)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = compact(text.as_str(), COMPRESS_MAX_LINES, COMPRESS_MAX_BYTES);
+        assert_eq!(out.strategy, "head-tail");
+        assert!(!out.omissions.is_empty());
     }
 
     #[test]
