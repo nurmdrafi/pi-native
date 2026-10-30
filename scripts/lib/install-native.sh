@@ -7,8 +7,8 @@
 # file. The kernel then refuses to map it — "load code signature error 2",
 # "Security policy would not allow process" — and the process is SIGKILLed
 # (137) before main() runs. The extension cannot tell that apart from a missing
-# binary: it just falls back, so the symptom shows up as native-tool fallback
-# churn on stderr, not as a build error. Re-signing after the copy
+# binary, so the symptom shows up as native-tool errors on stderr, not as a
+# build error. Re-signing after the copy
 # (adhoc is sufficient for a local, non-quarantined binary) restores it.
 #
 # Linux has no codesign and no such check: the guard is a no-op there.
