@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
-  BUDGET_BUILTIN_DEFAULTS,
   parseBudgetFrontmatter,
   resolveBudget,
   createSessionBudgetMeter,
@@ -29,6 +28,11 @@ describe("budget frontmatter parsing", () => {
       turns: 50,
       costUsd: 2.5,
     });
+  });
+
+  it("parses budget: none as an explicit exemption", () => {
+    const fm = "name: worker\nbudget: none\ntools: read";
+    assert.equal(parseBudgetFrontmatter(fm), "none");
   });
 
   it("returns undefined when no budget block exists", () => {
@@ -63,36 +67,40 @@ describe("budget frontmatter parsing", () => {
 });
 
 describe("budget resolution", () => {
-  it("falls back to builtin defaults when nothing is declared", () => {
-    assert.deepEqual(resolveBudget(undefined, undefined, undefined), BUDGET_BUILTIN_DEFAULTS);
+  it("is unenforced (null) when nothing is declared", () => {
+    assert.equal(resolveBudget(undefined, undefined, undefined), null);
   });
 
-  it("config defaults replace builtin defaults", () => {
+  it("enforces only dims declared in config", () => {
     const resolved = resolveBudget(undefined, undefined, { wallClockSec: 600 });
-    assert.equal(resolved.wallClockSec, 600);
-    assert.equal(resolved.turns, BUDGET_BUILTIN_DEFAULTS.turns);
+    assert.deepEqual(resolved, { wallClockSec: 600 });
   });
 
   it("role budget overrides config defaults", () => {
     const resolved = resolveBudget({ turns: 10 }, { turns: 100 });
-    assert.equal(resolved.turns, 10);
+    assert.equal(resolved?.turns, 10);
+    assert.equal((resolved as Record<string, unknown>).wallClockSec, undefined);
   });
 
   it("spawn override may lower but never raise past the ceiling", () => {
     const ceiling = resolveBudget({ turns: 40 }, { turns: 80 });
-    assert.equal(ceiling.turns, 40);
+    assert.equal(ceiling?.turns, 40);
     const lowered = resolveBudget({ turns: 40 }, { turns: 5 });
-    assert.equal(lowered.turns, 5);
+    assert.equal(lowered?.turns, 5);
   });
 
-  it("without a role ceiling the applicable default caps the spawn override", () => {
+  it("without a role ceiling the config default caps the spawn override", () => {
     const resolved = resolveBudget(undefined, { turns: 10_000 }, { turns: 100 });
-    assert.equal(resolved.turns, 100);
+    assert.equal(resolved?.turns, 100);
   });
 
-  it("spawn override without config still clamps to builtin defaults", () => {
+  it("spawn override without any ceiling becomes the ceiling", () => {
     const resolved = resolveBudget(undefined, { costUsd: 1_000 });
-    assert.equal(resolved.costUsd, BUDGET_BUILTIN_DEFAULTS.costUsd);
+    assert.deepEqual(resolved, { costUsd: 1_000 });
+  });
+
+  it("budget: none is unenforced even with config and spawn overrides", () => {
+    assert.equal(resolveBudget("none", { turns: 5 }, { turns: 60 }), null);
   });
 });
 
@@ -217,7 +225,6 @@ describe("loadout budget persistence", () => {
       });
       const loaded = readSubagentLoadout(sessionFile);
       assert.equal(loaded?.budget?.turns, 5);
-      assert.equal(loaded?.budget?.wallClockSec, BUDGET_BUILTIN_DEFAULTS.wallClockSec);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

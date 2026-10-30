@@ -19,18 +19,16 @@ export interface BudgetDims {
   costUsd?: number;
 }
 
-/** Fully resolved budget: every dimension finite. */
+/** Fully resolved budget: enforced dimensions are finite; absent dimensions
+ * have no ceiling. */
 export interface ResolvedBudget {
-  wallClockSec: number;
-  turns: number;
-  costUsd: number;
+  wallClockSec?: number;
+  turns?: number;
+  costUsd?: number;
 }
 
-export const BUDGET_BUILTIN_DEFAULTS: ResolvedBudget = {
-  wallClockSec: 1800,
-  turns: 60,
-  costUsd: 3,
-};
+/** Enforced budget: only declared dimensions, or null when unenforced. */
+export type EnforcedBudget = Partial<ResolvedBudget> | null;
 
 /** How long a budget-breached child has to exit on its own after the
  * interrupt before the pane is killed. */
@@ -53,6 +51,10 @@ function validateDim(dimension: Dimension, value: unknown, field: string): numbe
   return value;
 }
 
+/** A `budget: none` frontmatter value: an explicit exemption that beats
+ * config defaults and spawn overrides — the agent can never be budget-killed. */
+export const BUDGET_NONE = "none";
+
 /**
  * Parse a nested `budget:` block from agent-definition frontmatter:
  *
@@ -61,11 +63,14 @@ function validateDim(dimension: Dimension, value: unknown, field: string): numbe
  *     turns: 50
  *     costUsd: 2.5
  *
+ * or the scalar exemption `budget: none`.
+ *
  * Returns undefined when no block exists. Fails fast on unknown keys and
  * non-positive/non-numeric values — a typo must stop the spawn, not silently
  * disable the ceiling.
  */
-export function parseBudgetFrontmatter(frontmatter: string): BudgetDims | undefined {
+export function parseBudgetFrontmatter(frontmatter: string): BudgetDims | "none" | undefined {
+  if (/^budget:\s*none\s*$/m.test(frontmatter)) return BUDGET_NONE;
   const start = frontmatter.match(/^budget:\s*$/m);
   if (!start || start.index === undefined) return undefined;
 
@@ -94,25 +99,36 @@ export type BudgetDefaultsConfig = BudgetDims;
 
 /**
  * Resolve the effective budget. Per dimension:
- *   ceiling = role budget ?? config default ?? builtin default
- *   effective = spawn override ? min(override, ceiling) : ceiling
- * A spawn may lower a dimension, never raise it past the ceiling.
+ *   ceiling = role budget ?? config default (no builtin fallback)
+ *   effective = spawn override ? min(override, ceiling-or-override) : ceiling
+ * A spawn may lower a dimension, never raise it past a ceiling. With no
+ * ceiling and no override the dimension is unenforced. `budget: none` (role)
+ * returns null: nothing is enforced and spawn overrides are ignored.
  */
 export function resolveBudget(
-  role: BudgetDims | undefined,
+  role: BudgetDims | "none" | undefined,
   spawn: BudgetDims | undefined,
   config?: BudgetDefaultsConfig,
-): ResolvedBudget {
-  const resolved = {} as ResolvedBudget;
+): EnforcedBudget {
+  if (role === BUDGET_NONE) return null;
+  const resolved: Partial<ResolvedBudget> = {};
+  let any = false;
   for (const dimension of DIMENSIONS) {
-    const ceiling = role?.[dimension] ?? config?.[dimension] ?? BUDGET_BUILTIN_DEFAULTS[dimension];
+    const ceiling = role?.[dimension] ?? config?.[dimension];
     const override = spawn?.[dimension];
-    resolved[dimension] =
+    const effective =
       override === undefined
         ? ceiling
-        : Math.min(validateDim(dimension, override, `spawn budget.${dimension}`), ceiling);
+        : Math.min(
+            validateDim(dimension, override, `spawn budget.${dimension}`),
+            ceiling ?? override,
+          );
+    if (effective !== undefined) {
+      resolved[dimension] = effective;
+      any = true;
+    }
   }
-  return resolved;
+  return any ? (resolved as EnforcedBudget) : null;
 }
 
 export interface BudgetMeterState {
@@ -179,6 +195,7 @@ export interface BudgetBreach {
 /**
  * First breached dimension, wall clock before turns before cost, or null.
  * Comparison is >=: the limit is a ceiling, so reaching it is a breach.
+ * Undefined dimensions are unenforced and skipped.
  */
 export function checkBudgetExceeded(
   budget: ResolvedBudget,
@@ -186,13 +203,13 @@ export function checkBudgetExceeded(
   elapsedMs: number,
 ): BudgetBreach | null {
   const elapsedSec = Number((elapsedMs / 1000).toFixed(1));
-  if (elapsedSec >= budget.wallClockSec) {
+  if (budget.wallClockSec !== undefined && elapsedSec >= budget.wallClockSec) {
     return { dimension: "wallClockSec", value: elapsedSec, limit: budget.wallClockSec };
   }
-  if (meter.turns >= budget.turns) {
+  if (budget.turns !== undefined && meter.turns >= budget.turns) {
     return { dimension: "turns", value: meter.turns, limit: budget.turns };
   }
-  if (meter.costUsd >= budget.costUsd) {
+  if (budget.costUsd !== undefined && meter.costUsd >= budget.costUsd) {
     return { dimension: "costUsd", value: Number(meter.costUsd.toFixed(4)), limit: budget.costUsd };
   }
   return null;

@@ -333,9 +333,36 @@ export function sendInterrupt(surface: string): void {
 
 // ── Exit polling ──
 
+/** Whether the pane still exists: "alive", "gone" (tmux ran and reports no
+ * such pane — terminal, ids are never resurrected), or "unknown" (tmux
+ * itself unreachable — must not be treated as pane death). */
+export async function surfaceAlive(
+  surface: string,
+): Promise<"alive" | "gone" | "unknown"> {
+  try {
+    await execFileAsync("tmux", ["list-panes", "-t", surface, "-F", "#{pane_id}"]);
+    return "alive";
+  } catch (err) {
+    // Exit code 1 = tmux ran and could not find the pane.
+    if ((err as { code?: number | string })?.code === 1) return "gone";
+    return "unknown";
+  }
+}
+
+/** All live pane ids across every tmux session ("%N"), or null when tmux
+ * itself is unreachable (an outage is not a reap). */
+export async function listLiveSurfaces(): Promise<Set<string> | null> {
+  try {
+    const { stdout } = await execFileAsync("tmux", ["list-panes", "-a", "-F", "#{pane_id}"]);
+    return new Set(stdout.split("\n").map((l) => l.trim()).filter(Boolean));
+  } catch {
+    return null;
+  }
+}
+
 export interface PollResult {
   /** How the subagent exited */
-  reason: "done" | "sentinel" | "error";
+  reason: "done" | "sentinel" | "error" | "gone";
   /** Shell exit code (from sentinel). 0 for file-based exits. */
   exitCode: number;
   /** Error message if reason is "error" (auto-retry exhausted, provider overload, etc.) */
@@ -380,6 +407,7 @@ export async function pollForExit(
   },
 ): Promise<PollResult> {
   const start = Date.now();
+  let goneTicks = 0;
 
   for (;;) {
     if (signal.aborted) {
@@ -414,6 +442,7 @@ export async function pollForExit(
       if (match) {
         return { reason: "sentinel", exitCode: parseInt(match[1], 10) };
       }
+      goneTicks = 0;
     } catch {
       // Surface may have been destroyed — check if .exit file appeared in the meantime
       if (options.sessionFile) {
@@ -425,6 +454,13 @@ export async function pollForExit(
             return interpretExitSidecar(data);
           }
         } catch {}
+      }
+      // Pane destroyed with no exit record (group reap, external kill-pane,
+      // or the budget stopper's kill racing this poll): the pane is not coming
+      // back — report it instead of spinning forever on unreadable screens.
+      goneTicks = (await surfaceAlive(surface)) === "gone" ? goneTicks + 1 : 0;
+      if (goneTicks >= 2) {
+        return { reason: "gone", exitCode: -1 };
       }
     }
 

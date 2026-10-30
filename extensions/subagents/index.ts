@@ -25,6 +25,7 @@ import {
   sendInterrupt,
   shellEscape,
   readScreen,
+  listLiveSurfaces,
 } from "./tmux.ts";
 
 import {
@@ -56,7 +57,6 @@ import {
   loadStatusConfig,
 } from "./status.ts";
 import {
-  BUDGET_BUILTIN_DEFAULTS,
   BUDGET_GRACE_MS,
   checkBudgetExceeded,
   createBudgetStopper,
@@ -65,8 +65,10 @@ import {
   parseBudgetFrontmatter,
   type BudgetBreach,
   type BudgetDims,
-  type ResolvedBudget,
+  type EnforcedBudget,
 } from "./budget.ts";
+import { sweepRunningSubagents } from "./reconcile.ts";
+import { appendSubagentResult, drainSubagentResults, repoRootFor } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -137,7 +139,7 @@ const SubagentParams = Type.Object({
       },
       {
         description:
-          "Optional budget override. Values may only LOWER the effective ceiling (role budget, else config/builtin default) — never raise it. On breach the child is interrupted, then killed after a grace period; the result reports budget_exceeded.",
+          "Optional budget override. Values may only LOWER the effective ceiling (role budget, else config default); without a ceiling the override itself is the cap. On breach the child is interrupted, then killed after a grace period; the result reports budget_exceeded.",
       },
     ),
   ),
@@ -161,7 +163,7 @@ interface AgentDefaults {
   interactive?: boolean;
   systemPromptMode?: "append" | "replace";
   /** Per-role budget ceilings; undeclared dimensions fall back to config/builtin defaults. */
-  budget?: BudgetDims;
+  budget?: BudgetDims | "none";
   sessionMode?: SubagentSessionMode;
   cwd?: string;
   cli?: string;
@@ -603,6 +605,15 @@ function resolveResultPresentation(
   // resumes a finished one, so follow-ups always reference it.
   const sessionRef = `\n\nFollow up with subagent_message({ name: "${name}", message: "…" })`;
 
+  if (result.error === "pane_lost") {
+    // Pane vanished before the child could report (group reap, external
+    // kill). The session file survives; resume or inspect it directly.
+    return (
+      `Sub-agent "${name}" was lost before it could report — its pane vanished (reaped or killed).\n\n` +
+      `${result.summary}${sessionRef}`
+    );
+  }
+
   if (result.error === "budget_exceeded") {
     // Budget stop: the child was interrupted (killed after the grace period).
     // The session file is intact, so resume or a narrower re-spawn are both
@@ -677,8 +688,16 @@ interface RunningSubagent {
     error?: string;
   };
   abortController?: AbortController;
+  /** Working directory of the child — repo-root basis for the durable inbox. */
+  cwd?: string;
+  /** Session id of the spawning parent, for inbox drain routing. */
+  parentSessionId?: string | null;
+  /** Set once a result was delivered; guards sweep/watcher double-send. */
+  delivered?: boolean;
+  /** Reconciliation bookkeeping (owned by the sweep). */
+  reconcile?: { lastMtimeMs: number; lastSize: number; unchangedTicks: number };
   /** Resolved budget ceilings (always finite once attached). */
-  budget?: ResolvedBudget;
+  budget?: EnforcedBudget;
   /** Incremental meter over the child's session file. */
   budgetMeter?: ReturnType<typeof createSessionBudgetMeter>;
   /** Interrupt → grace → kill state machine for budget breaches. */
@@ -1183,6 +1202,15 @@ function startStatusRefresh(pi: ExtensionAPI) {
       }
     }
 
+    // Reconciliation sweep: finalize entries whose pane is gone or whose
+    // session file stalled — delivery must not depend on the poll loop.
+    sweepRunningSubagents({
+      runningSubagents,
+      listPanes: listLiveSurfaces,
+      finalize: (entry, kind) =>
+        deliverSubagentResult(pi, entry as RunningSubagent, synthesizeLostResult(entry as RunningSubagent, kind), kind),
+    }).catch(() => {});
+
     if (shouldRefreshWidget) updateWidget();
 
     if (transitionLines.length > 0) {
@@ -1228,6 +1256,8 @@ export const __test__ = {
   resolveRunningByName,
   uniqueRunningName,
   reservedNames,
+  synthesizeLostResult,
+  deliverSubagentResult,
   steerSubagent,
   handleSubagentSteer,
   resolveResultPresentation,
@@ -1396,6 +1426,8 @@ async function launchSubagent(
       cli: "claude",
       sentinelFile,
       interactive: effectiveInteractive,
+      cwd: effectiveCwd ?? process.cwd(),
+      parentSessionId: sessionId,
       ...budgetRuntimeFields(budget, surface, subagentSessionFile),
       statusState: createStatusState({
         source: "claude",
@@ -1540,6 +1572,8 @@ async function launchSubagent(
     launchScriptFile,
     activityFile,
     interactive: effectiveInteractive,
+    cwd: effectiveCwd ?? process.cwd(),
+    parentSessionId: sessionId,
     ...budgetRuntimeFields(budget, surface, subagentSessionFile),
     statusState: createStatusState({
       source: "pi",
@@ -1620,12 +1654,15 @@ function deliverPendingQuestion(running: RunningSubagent): void {
 }
 
 /** Budget-runtime fields shared by every RunningSubagent literal: the resolved
- * ceiling, an incremental session meter, and the interrupt→grace→kill stopper. */
+ * ceiling, an incremental session meter, and the interrupt→grace→kill stopper.
+ * A null budget (agent `budget: none`, nothing declared, or a resume after a
+ * budget-caused death) attaches nothing — the child can never be budget-killed. */
 function budgetRuntimeFields(
-  budget: ResolvedBudget,
+  budget: EnforcedBudget,
   surface: string,
   sessionFile: string,
 ): Pick<RunningSubagent, "budget" | "budgetMeter" | "budgetStopper"> {
+  if (!budget) return {};
   return {
     budget,
     budgetMeter: createSessionBudgetMeter(sessionFile),
@@ -1669,6 +1706,117 @@ function enforceBudget(running: RunningSubagent): void {
   if (breach) budgetStopper.onBreach(breach);
 }
 
+/** Synthesize a result for a child whose pane vanished or stalled: derived
+ * from the durable session file, never from the pane. A confirmed budget
+ * breach (stopper state or a fresh meter reading) wins over the loss kind,
+ * so a budget-killed child still reports budget_exceeded. */
+function synthesizeLostResult(
+  running: RunningSubagent,
+  kind: "pane_lost" | "stalled",
+): SubagentResult {
+  const { name, task, sessionFile, startTime } = running;
+  const fileExists = existsSync(sessionFile);
+  const lastText = fileExists ? findLastAssistantMessage(getNewEntries(sessionFile, 0)) : null;
+  const stats = fileExists ? summarizeSessionStats(sessionFile) : null;
+  const sessionId = fileExists ? getSessionId(sessionFile) : null;
+  const breach =
+    running.budgetStopper?.breached() ??
+    (running.budget && running.budgetMeter
+      ? checkBudgetExceeded(running.budget, running.budgetMeter.update(), Date.now() - startTime)
+      : null);
+  const lossLine =
+    kind === "pane_lost"
+      ? "Pane lost: the child's terminal pane disappeared (reaped or killed) before it could report."
+      : "Stalled: the child's session file stopped advancing; treated as dead.";
+  const summary =
+    (breach ? budgetBreachSummary(breach) : lossLine) +
+    (lastText ? `\n\nLast output:\n${lastText}` : "");
+  return {
+    name,
+    task,
+    summary,
+    sessionFile,
+    ...(sessionId ? { sessionId } : {}),
+    exitCode: -1,
+    elapsed: Math.floor((Date.now() - startTime) / 1000),
+    ...(breach
+      ? { error: "budget_exceeded", errorMessage: budgetBreachSummary(breach) }
+      : { error: "pane_lost" }),
+    ...(stats ? { stats } : {}),
+  };
+}
+
+/** Append a finished (or synthesized) result to the child's repo durable
+ * inbox — always BEFORE in-memory delivery, so the result survives pane,
+ * parent, or extension-process death. */
+function persistResultRecord(
+  running: RunningSubagent,
+  result: SubagentResult,
+  synthesized?: "pane_lost" | "stalled",
+): void {
+  appendSubagentResult({
+    id: `${running.id}:${result.exitCode}:${result.elapsed}`,
+    ts: Date.now(),
+    name: result.name,
+    task: result.task,
+    agent: running.agent,
+    sessionFile: result.sessionFile ?? running.sessionFile,
+    sessionId: result.sessionId,
+    parentSessionId: running.parentSessionId ?? null,
+    repoRoot: repoRootFor(running.cwd ?? process.cwd()),
+    summary: result.summary,
+    error: result.error,
+    errorMessage: result.errorMessage,
+    exitCode: result.exitCode,
+    elapsed: result.elapsed,
+    ...(result.stats ? { stats: result.stats } : {}),
+    ...(synthesized ? { synthesized } : {}),
+  });
+}
+
+/** Deliver a subagent result exactly once: durable inbox write first, then
+ * the in-memory steer to the parent, then entry cleanup. Idempotent per entry
+ * (the delivered flag) — the sweep and the watcher can race without the
+ * parent ever seeing two results. */
+function deliverSubagentResult(
+  pi: ExtensionAPI,
+  running: RunningSubagent,
+  result: SubagentResult,
+  synthesized?: "pane_lost" | "stalled",
+): void {
+  persistResultRecord(running, result, synthesized);
+  if (running.delivered) return;
+  running.delivered = true;
+  runningSubagents.delete(running.id);
+  try {
+    running.abortController?.abort();
+  } catch {}
+  try {
+    closeSurface(running.surface);
+  } catch {}
+  updateWidget();
+  pi.sendMessage(
+    {
+      customType: "subagent_result",
+      content: resolveResultPresentation(result, running.name),
+      display: true,
+      details: {
+        name: running.name,
+        task: running.task,
+        agent: running.agent,
+        exitCode: result.exitCode,
+        elapsed: result.elapsed,
+        sessionFile: result.sessionFile,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+        ...(result.stats ? { stats: result.stats } : {}),
+        ...(synthesized ? { synthesized } : {}),
+      },
+    },
+    { triggerTurn: true, deliverAs: "steer" },
+  );
+}
+
 async function watchSubagent(
   running: RunningSubagent,
   signal: AbortSignal,
@@ -1686,6 +1834,18 @@ async function watchSubagent(
         enforceBudget(running);
       },
     });
+
+    // The pane disappeared without an exit record (group reap, external
+    // kill-pane, or the budget stopper's kill racing the poll). The durable
+    // session file is the source of truth — synthesize, don't spin.
+    if (result.reason === "gone") {
+      const synthesized = synthesizeLostResult(running, "pane_lost");
+      try {
+        closeSurface(surface);
+      } catch {}
+      runningSubagents.delete(running.id);
+      return synthesized;
+    }
 
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
@@ -1803,11 +1963,52 @@ async function watchSubagent(
   }
 }
 
+/** Surface undelivered inbox records for this repo (skip the spawning
+ * parent — it already received the direct in-memory steer). */
+function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
+  try {
+    const c = ctx as { cwd?: string; sessionManager?: { getSessionId?(): string } } | undefined;
+    const cwd = c?.cwd ?? latestCtx?.cwd ?? process.cwd();
+    const sessionId =
+      c?.sessionManager?.getSessionId?.() ??
+      (latestCtx as unknown as { sessionManager?: { getSessionId?(): string } } | null)
+        ?.sessionManager?.getSessionId?.() ??
+      null;
+    for (const record of drainSubagentResults(repoRootFor(cwd), sessionId)) {
+      pi.sendMessage(
+        {
+          customType: "subagent_result",
+          content:
+            `Sub-agent "${record.name}" finished — recovered from the durable inbox (original parent gone):\n\n` +
+            `${record.summary}`,
+          display: true,
+          details: {
+            name: record.name,
+            task: record.task,
+            exitCode: record.exitCode,
+            elapsed: record.elapsed,
+            sessionFile: record.sessionFile,
+            ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+            ...(record.error ? { error: record.error } : {}),
+            fromInbox: true,
+          },
+        },
+        { triggerTurn: true, deliverAs: "steer" },
+      );
+    }
+  } catch {
+    // Inbox drain is best-effort; records stay on disk for the next drain.
+  }
+}
+
 export default function subagentsExtension(pi: ExtensionAPI) {
   latestPi = pi;
   // Capture the UI context for widget updates
   pi.on("session_start", (_event, ctx) => {
     latestCtx = ctx;
+    // Drain the repo's durable subagent-result inbox: entries whose spawning
+    // parent is gone wait there until some session in this repo wakes up.
+    drainResultInbox(pi, ctx);
     // pi runs multiple sessions in one process. A prior session's shutdown
     // aborts the shared module poll-abort controller; install a fresh one so
     // subagents spawned in this session aren't watched against a dead signal.
@@ -1836,6 +2037,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   });
 
   // Clean up on session shutdown
+  pi.on("turn_start", () => drainResultInbox(pi, latestCtx));
+
   pi.on("session_shutdown", (_event, _ctx) => {
     // Persist orphans before aborting: the dying session cannot receive the
     // detached steer, so the loss would otherwise be invisible. The next
@@ -2039,6 +2242,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         watchSubagent(running, watcherAbort.signal)
           .then((result) => {
             updateWidget(); // reflect removal from Map immediately
+
+            if (running.delivered) return; // sweep already finalized this entry
+            running.delivered = true;
+            persistResultRecord(running, result);
 
             const presentation = resolveResultPresentation(result, running.name);
 
@@ -2466,7 +2673,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           activityFile,
           interactive,
           ...budgetRuntimeFields(
-            loadout?.budget ?? BUDGET_BUILTIN_DEFAULTS,
+            // Resume is the recovery path: the loadout budget that killed the
+            // child would re-breach instantly against the re-metered session
+            // file, so resumes run unenforced.
+            null,
             surface,
             sessionPath,
           ),
@@ -2487,6 +2697,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           .then((result) => {
             updateWidget();
 
+            if (running.delivered) return; // sweep already finalized this entry
             const allEntries = getNewEntries(sessionPath, entryCountBefore);
             const summary = findLastAssistantMessage(allEntries) ??
               (result.errorMessage
@@ -2498,6 +2709,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
               { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId },
               name,
             );
+            running.delivered = true;
+            persistResultRecord(running, { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId });
 
             pi.sendMessage(
               {

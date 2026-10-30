@@ -7,6 +7,30 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.68.0] - 30-10-2026
+
+### Added
+
+- **Subagent result delivery across death.** A subagent killed by its budget or a destroyed tmux pane
+  still produces a final result: the parent synthesizes a lost result, delivers it idempotently, and
+  tmux exit polling distinguishes a destroyed pane (`reason: "gone"`, debounced over two ticks) from
+  a clean exit, with live-surface listings failing open during a tmux outage.
+- **Reconciliation sweep.** Each status tick finalizes subagents whose pane is gone or whose session
+  file has stalled for 180 ticks, so orphaned `running` entries settle instead of hanging forever.
+- **Durable per-repo result inbox.** Every finished subagent result is appended to
+  `<repo-root>/.pi/subagent-results.jsonl` before in-memory delivery and drained on
+  `session_start` and `turn_start`, so a parent crash or missed handoff cannot lose a result; a
+  parent skips records belonging to its own children.
+- **Per-repo read ledger.** Each read window (path, span, omissions, stat, sha256, session id) is
+  appended to `<repo-root>/.pi/read-ledger.jsonl`, rotated at 5 MiB with three archives;
+  `PI_READ_LEDGER=0` opts out.
+
+### Changed
+
+- **Budgets are opt-in.** Builtin budget defaults are gone: only dimensions declared in agent
+  `budget:` frontmatter or `budgetDefaults` config are enforced, an undeclared dimension is
+  unenforced, `budget: none` frontmatter exempts an agent outright, and resumed runs run unenforced.
+
 ## [1.67.0] - 29-10-2026
 
 ### Added

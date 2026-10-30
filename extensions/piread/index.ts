@@ -476,6 +476,8 @@ async function oneshotDispatch(
   }
 }
 
+import { appendReadRecord } from "./ledger.ts";
+
 export default function pireadExtension(pi: ExtensionAPI): void {
   // Load guard (D5 flip, 2026-10-17): default on; PI_NATIVE_READ=0 opts out.
   if (process.env.PI_NATIVE_READ === "0") return;
@@ -570,6 +572,18 @@ export default function pireadExtension(pi: ExtensionAPI): void {
       // text, so this costs nothing but a dispatch).
       return fallbackToBuiltin(toolCallId, params, signal, onUpdate, ctx, "binary");
     }
+
+    // Durable read ledger: index this read (path, omissions, stat/hash) in
+    // the repo's ledger BEFORE returning — best-effort, never fails the read.
+    appendReadRecord({
+      cwd: spawnCwd,
+      sessionId:
+        (ctx as { sessionManager?: { getSessionId?(): string } } | undefined)?.sessionManager
+          ?.getSessionId?.() ?? null,
+      file: resolvedPath,
+      params,
+      envelope,
+    });
 
     return {
       content: [{ type: "text", text: envelope.content }],

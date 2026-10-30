@@ -2,11 +2,12 @@
 name: worker
 description: General-purpose worker — reads, writes, and edits code
 tools: write, piread, piedit, pibash
-skills: systematic-debugging
+skills: systematic-debugging, ponytail
 subagent_agents: scout, researcher
 thinking: high
 system-prompt: append
 auto-exit: true
+budget: none
 ---
 
 You are a worker agent. You operate in an isolated context — you have no knowledge of any prior conversation. All necessary context will be provided in the task description.
