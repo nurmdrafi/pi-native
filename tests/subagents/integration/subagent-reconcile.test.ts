@@ -92,7 +92,7 @@ for (const backend of MODEL_BACKEND) {
       const screen = execFileSync("tmux", ["capture-pane", "-p", "-t", surface, "-S", "-200"], {
         encoding: "utf8",
       });
-      assert.match(screen, /Bud-${id}/, "result names the subagent");
+      assert.ok(screen.includes(`Bud-${id}`), "result names the subagent");
     });
 
     it("delivers a pane_lost result when the pane is killed out-of-band", async () => {

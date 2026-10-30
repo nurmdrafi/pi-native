@@ -243,6 +243,22 @@ describe("durable result inbox", () => {
     assert.deepEqual(drainSubagentResults(root, "another-session"), [], "drained once globally");
   });
 
+  it("skips a corrupt line instead of blinding the whole drain", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-corrupt-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    for (const id of ["v-1", "v-2"]) {
+      appendSubagentResult({ id, ts: Date.now(), name: "W", task: "t", sessionFile: "/tmp/v.jsonl", parentSessionId: null, repoRoot: root, summary: "done", exitCode: 0, elapsed: 1 });
+    }
+    // Simulate a crash mid-append: a truncated line at the tail.
+    const inbox = resultInboxPath(root);
+    writeFileSync(inbox, readFileSync(inbox, "utf8") + '{"id":"broken', "utf8");
+
+    const got = drainSubagentResults(root, "other-session");
+    assert.equal(got.length, 2, "valid records still surface past a corrupt line");
+    // A full drain compacts — which also drops the corrupt line.
+    assert.equal(readFileSync(inbox, "utf8"), "", "corrupt line cleaned by compaction");
+  });
+
   it("ignores inbox records from another repo root", () => {
     const other = mkdtempSync(join(tmpdir(), "reconcile-inbox-other-"));
     appendSubagentResult({

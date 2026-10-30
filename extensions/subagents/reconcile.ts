@@ -22,9 +22,10 @@
 import { statSync } from "node:fs";
 
 /** Ticks (status ticks, ~1s each) a session file may sit unchanged before the
- * child is considered stalled. Generous on purpose: a false stall delivers a
- * result while the child still works; a late stall only delays delivery. */
-export const STALL_TICKS = 180;
+ * child is considered stalled. Generous on purpose — one long tool call (a
+ * build, a test suite) legitimately writes nothing for many minutes, and a
+ * false stall kills live work; a late stall only delays delivery. */
+export const STALL_TICKS = 1800;
 
 export interface SweepEntry {
   id: string;

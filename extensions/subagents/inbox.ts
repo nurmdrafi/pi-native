@@ -73,8 +73,8 @@ export function appendSubagentResult(record: InboxRecord): void {
 }
 
 /** Records not yet drained for this repo, oldest first. The spawning parent's
- * own records are skipped (it received the direct in-memory steer); marking
- * them drained is still correct for other sessions. */
+ * own records are skipped (it received the direct in-memory steer) but stay
+ * claimable — another session in the repo still surfaces them. */
 export function drainSubagentResults(repoRoot: string, sessionId?: string | null): InboxRecord[] {
   const inboxPath = resultInboxPath(repoRoot);
   let records: InboxRecord[] = [];
@@ -88,7 +88,15 @@ export function drainSubagentResults(repoRoot: string, sessionId?: string | null
     records = raw
       .split("\n")
       .filter((line) => line.trim())
-      .map((line) => JSON.parse(line) as InboxRecord);
+      .flatMap((line) => {
+        // A corrupt line (crash mid-append) must not blind the whole drain:
+        // skip it — a later full-drain compaction rewrites the file without it.
+        try {
+          return [JSON.parse(line) as InboxRecord];
+        } catch {
+          return [];
+        }
+      });
   } catch {
     return [];
   }
