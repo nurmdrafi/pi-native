@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `budget:` frontmatter or `budgetDefaults` config are enforced, an undeclared dimension is
   unenforced, `budget: none` frontmatter exempts an agent outright, and resumed runs run unenforced.
 
+### Fixed
+
+- **Orphan notices fire once and the result inbox stays bounded.** Detached-subagent sidecars are dismissed after their one-time session-start notice (aged-out ones deleted on scan), a fully drained result inbox is compacted, and a sweep/delivery race can no longer append one result twice.
+
 ## [1.67.0] - 29-10-2026
 
 ### Added

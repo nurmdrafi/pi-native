@@ -157,6 +157,18 @@ describe("reconciliation sweep", () => {
     assert.equal(pi.sent.length, 1);
   });
 
+  it("persists exactly one inbox record when delivery races a sweep finalize", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-once-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const pi = fakePi();
+    const r = fakeRunning({ id: "dup-1", cwd: root });
+    const result = { name: "Worker-1", task: "verify the delivery gap fix", summary: "s", sessionFile: r.sessionFile, exitCode: 0, elapsed: 1 };
+    __test__.deliverSubagentResult(pi as never, r as never, result);
+    __test__.deliverSubagentResult(pi as never, r as never, result);
+    const lines = readFileSync(resultInboxPath(root), "utf8").split("\n").filter(Boolean);
+    assert.equal(lines.length, 1, "second delivery must not re-append");
+  });
+
   it("keeps live entries and counts a stalled session file only after the stall window", async () => {
     const dir = mkdtempSync(join(tmpdir(), "reconcile-stall-"));
     const sessionFile = writeSessionFixture(dir, "stall.jsonl");
@@ -191,6 +203,18 @@ describe("durable result inbox", () => {
     t.diagnostic(`git=${existsSync(join(dir, ".git"))} nested=${nested} dir=${dir}`);
     assert.equal(repoRootFor(nested), dir);
     assert.equal(resultInboxPath(repoRootFor(nested)), join(dir, ".pi", "subagent-results.jsonl"));
+  });
+
+  it("compacts the inbox once every record is drained", () => {
+    const root = mkdtempSync(join(tmpdir(), "reconcile-compact-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    for (const id of ["c-1", "c-2"]) {
+      appendSubagentResult({ id, ts: Date.now(), name: "W", task: "t", sessionFile: "/tmp/a.jsonl", parentSessionId: id === "c-1" ? "p1" : null, repoRoot: root, summary: "done", exitCode: 0, elapsed: 1 });
+    }
+    const got = drainSubagentResults(root, "other-session");
+    assert.equal(got.length, 2, "foreign records surfaced");
+    assert.equal(readFileSync(resultInboxPath(root), "utf8"), "", "inbox compacted after a full drain");
+    assert.deepEqual(drainSubagentResults(root, "third-session"), [], "nothing resurfaces after compaction");
   });
 
   it("appends before delivery and drains exactly once, skipping the parent", () => {

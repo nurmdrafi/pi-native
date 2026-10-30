@@ -14,7 +14,7 @@
  * in-memory steer). Records are addressed by id, so appends after a drain
  * are picked up by the next drain.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** One durable subagent result record. */
@@ -78,7 +78,12 @@ export function appendSubagentResult(record: InboxRecord): void {
 export function drainSubagentResults(repoRoot: string, sessionId?: string | null): InboxRecord[] {
   const inboxPath = resultInboxPath(repoRoot);
   let records: InboxRecord[] = [];
+  let readAtMs = 0;
+  let readAtSize = 0;
   try {
+    const st = statSync(inboxPath);
+    readAtMs = st.mtimeMs;
+    readAtSize = st.size;
     const raw = readFileSync(inboxPath, "utf8");
     records = raw
       .split("\n")
@@ -109,6 +114,21 @@ export function drainSubagentResults(repoRoot: string, sessionId?: string | null
     writeFileSync(statePath, JSON.stringify({ drained: nowSeen }), "utf8");
   } catch {
     // A failed state write only risks a duplicate surface later, never a loss.
+  }
+  // Once every record is drained the inbox is dead weight — compact it so the
+  // file cannot grow without bound. The mtime re-check refuses the rewrite if
+  // anything appended since the read: a lost append would be a lost result.
+  const surfaced = new Set(toSurface.map((r) => r.id));
+  if (records.every((r) => seen.has(r.id) || surfaced.has(r.id))) {
+    try {
+      const st = statSync(inboxPath);
+      if (st.mtimeMs === readAtMs && st.size === readAtSize) {
+        writeFileSync(inboxPath, "", "utf8");
+        unlinkSync(statePath);
+      }
+    } catch {
+      // Compaction is best-effort; the state file still prevents resurfacing.
+    }
   }
   return toSurface;
 }

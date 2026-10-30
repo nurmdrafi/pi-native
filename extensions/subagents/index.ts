@@ -77,8 +77,8 @@ import {
   type SubagentActivityState,
 } from "./activity.ts";
 import { SpawnQueue, resolveMaxConcurrent } from "./spawn-queue.ts";
-import { findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
-export { findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
+import { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
+export { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
 
 /** Absolute path to `pi-extension/subagents`. https://github.com/nodejs/node/issues/37845 */
 const SUBAGENTS_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1785,9 +1785,9 @@ function deliverSubagentResult(
   result: SubagentResult,
   synthesized?: "pane_lost" | "stalled",
 ): void {
-  persistResultRecord(running, result, synthesized);
-  if (running.delivered) return;
+  if (running.delivered) return; // sweep or watcher already finalized this entry
   running.delivered = true;
+  persistResultRecord(running, result, synthesized);
   runningSubagents.delete(running.id);
   try {
     running.abortController?.abort();
@@ -1809,6 +1809,7 @@ function deliverSubagentResult(
         elapsed: result.elapsed,
         sessionFile: result.sessionFile,
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+        ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
         ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
         ...(result.stats ? { stats: result.stats } : {}),
         ...(synthesized ? { synthesized } : {}),
@@ -2019,45 +2020,46 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       (globalThis as any)[POLL_ABORT_KEY] = new AbortController();
     }
 
-    // Surface subagents orphaned by a previous session in this project.
-    try {
-      const sessionDir = (ctx as any).sessionManager?.getSessionDir?.();
-      if (sessionDir) {
-        const pending = findPendingDetached(join(sessionDir, "artifacts"), Date.now());
-        if (pending.length > 0) {
-          ctx.ui.notify?.(
-            `${pending.length} subagent(s) detached mid-run by a previous session — ` +
-              `results recoverable from their session files (subagent-pending/ sidecars)`,
-            "warning",
-          );
-        }
-      }
-    } catch {
-      // Discovery is best-effort.
-    }
-
-    // Sync the persistent name registry into this session's view: a resumed
+    // Surface subagents orphaned by a previous session in this project, and
+    // sync the persistent name registry into this session's view: a resumed
     // parent must see its registered children so it resumes them by name
-    // instead of spawning replacements.
+    // instead of spawning replacements. One notice covers both — they usually
+    // describe the same orphans.
     try {
       const sm = (ctx as any).sessionManager;
       const sessionDir = sm?.getSessionDir?.();
       const sessionId = sm?.getSessionId?.();
+      const lines: string[] = [];
+      let severity: "info" | "warning" = "info";
+      let surfaced: ReturnType<typeof findPendingDetached> = [];
+      if (sessionDir) {
+        const pending = findPendingDetached(join(sessionDir, "artifacts"), Date.now());
+        if (pending.length > 0) {
+          severity = "warning";
+          lines.push(
+            `${pending.length} subagent(s) detached mid-run by a previous session — ` +
+              `results recoverable from their session files (subagent-pending/ sidecars)`,
+          );
+          surfaced = pending;
+        }
+      }
       if (sessionDir && sessionId) {
         const registered = listRegisteredSubagents(getArtifactDir(sessionDir, sessionId));
         if (registered.length > 0) {
           const missing = registered.filter((r) => !r.exists).length;
-          ctx.ui.notify?.(
+          lines.push(
             `${registered.length} subagent session(s) registered by an earlier run of this ` +
               `session: ${registered.map((r) => r.name).join(", ")}. Resume them by name ` +
               `(subagent_message) instead of spawning new subagents` +
               (missing > 0 ? ` — ${missing} session file(s) missing` : "") + ".",
-            "info",
           );
         }
       }
+      if (lines.length > 0) ctx.ui.notify?.(lines.join("\n"), severity);
+      // Warn once per orphan set: the sidecar's only duty was this notice.
+      if (surfaced.length > 0) dismissPendingDetached(surfaced);
     } catch {
-      // Registry sync is best-effort.
+      // Discovery and registry sync are best-effort.
     }
   });
 
@@ -2267,33 +2269,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         watchSubagent(running, watcherAbort.signal)
           .then((result) => {
             updateWidget(); // reflect removal from Map immediately
-
-            if (running.delivered) return; // sweep already finalized this entry
-            running.delivered = true;
-            persistResultRecord(running, result);
-
-            const presentation = resolveResultPresentation(result, running.name);
-
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: presentation,
-                display: true,
-                details: {
-                  name: running.name,
-                  task: running.task,
-                  agent: running.agent,
-                  exitCode: result.exitCode,
-                  elapsed: result.elapsed,
-                  sessionFile: result.sessionFile,
-                  ...(result.sessionId ? { sessionId: result.sessionId } : {}),
-                  ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-                  ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
-                  ...(result.stats ? { stats: result.stats } : {}),
-                },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
+            deliverSubagentResult(pi, running, result);
           })
           .catch((err) => {
             updateWidget();

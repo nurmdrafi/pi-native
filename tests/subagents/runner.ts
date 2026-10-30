@@ -2905,4 +2905,33 @@ describe("pending-detached persistence", () => {
     writeFileSync(join(pendingDir, "zz.json"), "{not json");
     assert.deepEqual(findPendingDetached(root, Date.now()), []);
   });
+
+  it("dismisses sidecars after they surface, so the warning fires once", () => {
+    const { writePendingDetachedSubagents, findPendingDetached, dismissPendingDetached } = subagentsModule;
+    const root = createTestDir();
+    const parent = join(root, "s3");
+    mkdirSync(parent, { recursive: true });
+    const now = Date.now();
+    const [file] = writePendingDetachedSubagents([
+      { id: "cc33", name: "worker-c", task: "t", surface: "%3", startTime: now, sessionFile: "/tmp/c.jsonl", parentArtifactDir: parent },
+    ] as any, now);
+    const found = findPendingDetached(root, now + 60_000);
+    assert.equal(found.length, 1);
+    dismissPendingDetached(found);
+    assert.ok(!existsSync(file), "sidecar deleted after surfacing");
+    assert.equal(findPendingDetached(root, now + 60_000).length, 0, "no re-warn on next session start");
+  });
+
+  it("deletes aged-out sidecars on scan", () => {
+    const { writePendingDetachedSubagents, findPendingDetached } = subagentsModule;
+    const root = createTestDir();
+    const parent = join(root, "s4");
+    mkdirSync(parent, { recursive: true });
+    const now = Date.now();
+    const [file] = writePendingDetachedSubagents([
+      { id: "dd44", name: "worker-d", task: "t", surface: "%4", startTime: now, sessionFile: "/tmp/d.jsonl", parentArtifactDir: parent },
+    ] as any, now);
+    assert.equal(findPendingDetached(root, now + 49 * 3600_000).length, 0, "aged out");
+    assert.ok(!existsSync(file), "aged-out sidecar deleted");
+  });
 });

@@ -11,7 +11,7 @@
  * Best-effort by design: shutdown and discovery must never throw.
  */
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const PENDING_DIR = "subagent-pending";
@@ -22,12 +22,13 @@ export const PENDING_MAX_AGE_MS = 48 * 3600_000;
 export interface PendingDetachedSubagent {
   id: string;
   name: string;
-  agent?: string;
   task: string;
   sessionFile: string;
   surface: string;
   startedAt: number;
   detachedAt: number;
+  /** Sidecar path — set on read by findPendingDetached, never persisted. */
+  file?: string;
 }
 
 type PendingEntry = Partial<PendingDetachedSubagent> & {
@@ -47,7 +48,6 @@ export function writePendingDetachedSubagents(entries: PendingEntry[], nowMs: nu
     const record: PendingDetachedSubagent = {
       id: e.id,
       name: e.name ?? e.id,
-      ...(e.agent ? { agent: e.agent } : {}),
       task: e.task ?? "",
       sessionFile: e.sessionFile ?? "",
       surface: e.surface ?? "",
@@ -92,17 +92,31 @@ export function findPendingDetached(
     }
     for (const f of files) {
       if (!f.endsWith(".json")) continue;
+      const file = join(artifactsRoot, s, PENDING_DIR, f);
       try {
         const record = JSON.parse(
-          readFileSync(join(artifactsRoot, s, PENDING_DIR, f), "utf8"),
+          readFileSync(file, "utf8"),
         ) as PendingDetachedSubagent;
-        if (typeof record.detachedAt !== "number" || nowMs - record.detachedAt > maxAgeMs) continue;
+        if (typeof record.detachedAt !== "number" || nowMs - record.detachedAt > maxAgeMs) {
+          // Aged out: it can never surface again — stop rescanning it.
+          try { unlinkSync(file); } catch {}
+          continue;
+        }
         if (!record.id || !record.name || typeof record.sessionFile !== "string") continue;
-        found.push(record);
+        found.push({ ...record, file });
       } catch {
         // Corrupt sidecar — ignore.
       }
     }
   }
   return found;
+}
+
+/** Delete sidecars after their one-time surface, so the next session start
+ * does not re-warn about orphans the user has already seen. Best-effort. */
+export function dismissPendingDetached(records: PendingDetachedSubagent[]): void {
+  for (const r of records) {
+    if (!r.file) continue;
+    try { unlinkSync(r.file); } catch {}
+  }
 }
