@@ -15,9 +15,11 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableHead,
+  TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtLatency } from "@/components/SubagentsTab";
+import { fmtLatency } from "@/lib/format";
 import type { SessionDetail } from "@/types";
 
 const tokenConfig = {
@@ -76,7 +78,9 @@ export function SessionDetailPanel({
     cost: b.cost,
     calls: b.calls,
   }));
-  const subagents = detail.subagents ?? { spawns: 0, messages: 0, lists: 0, errors: 0, avgLatencyMs: 0 };
+  const subagents =
+    detail.subagents ?? { spawns: 0, messages: 0, lists: 0, errors: 0, avgLatencyMs: 0, byAgent: [] };
+  const spawns = detail.subagentSpawns ?? [];
   const prompts = detail.prompts ?? [];
 
   return (
@@ -280,8 +284,60 @@ export function SessionDetailPanel({
               <MiniStat label="errors" value={String(subagents.errors)} />
               <MiniStat label="avg latency" value={fmtLatency(subagents.avgLatencyMs)} />
             </div>
+            {(subagents.byAgent ?? []).length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1 text-xs text-muted-foreground">per agent</div>
+                <ScrollArea className="h-36 rounded border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead scope="col">agent</TableHead>
+                        <TableHead scope="col" className="text-right">spawns</TableHead>
+                        <TableHead scope="col" className="text-right">messages</TableHead>
+                        <TableHead scope="col" className="text-right">errors</TableHead>
+                        <TableHead scope="col" className="text-right">avg latency</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(subagents.byAgent ?? []).map((a) => (
+                        <TableRow key={a.agent}>
+                          <TableCell className="font-mono text-xs">{a.agent}</TableCell>
+                          <TableCell className="text-right tabular-nums">{a.spawns}</TableCell>
+                          <TableCell className="text-right tabular-nums">{a.messages}</TableCell>
+                          <TableCell className="text-right tabular-nums">{a.errors}</TableCell>
+                          <TableCell className="text-right tabular-nums">{fmtLatency(a.avgLatencyMs)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </div>
+            )}
+            <div className="mt-3">
+              <div className="mb-1 text-xs text-muted-foreground">spawns — {spawns.length}</div>
+              {spawns.length > 0 ? (
+                <ScrollArea className="h-36 rounded border">
+                  <Table>
+                    <TableBody>
+                      {spawns.map((s) => (
+                        <TableRow key={s.id}>
+                          <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                            {s.ts ? s.ts.slice(11, 19) : "—"}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{s.agent}</TableCell>
+                          <TableCell className="font-mono text-xs">{s.name ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              ) : (
+                <div className="text-xs text-muted-foreground">no subagents spawned in this session</div>
+              )}
+            </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Derived from subagent, subagent_message and subagents_list tool calls joined with their results.
+              Derived from subagent, subagent_message and subagents_list tool calls joined with their
+              results and raw spawn arguments.
             </p>
           </TabsContent>
         </Tabs>

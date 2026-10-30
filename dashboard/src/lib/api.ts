@@ -12,8 +12,24 @@ export async function fetchDetail(sessionId: string): Promise<SessionDetail> {
   return res.json();
 }
 
-export function subscribeLive(onLive: (payload: LivePayload) => void): () => void {
+export interface LiveConnection {
+  close: () => void;
+}
+
+/** One SSE stream carries both snapshot refreshes and live turn events. */
+export function connect(
+  onSnapshot: (s: Snapshot) => void,
+  onLive: (p: LivePayload) => void,
+  onState: (connected: boolean) => void,
+): LiveConnection {
   const es = new EventSource("/api/stream");
+  es.addEventListener("snapshot", (e) => {
+    try {
+      onSnapshot(JSON.parse((e as MessageEvent).data));
+    } catch {
+      // Ignore malformed frames.
+    }
+  });
   es.addEventListener("live", (e) => {
     try {
       onLive(JSON.parse((e as MessageEvent).data));
@@ -21,5 +37,7 @@ export function subscribeLive(onLive: (payload: LivePayload) => void): () => voi
       // Ignore malformed frames.
     }
   });
-  return () => es.close();
+  es.onopen = () => onState(true);
+  es.onerror = () => onState(false);
+  return { close: () => es.close() };
 }

@@ -67,17 +67,34 @@ export interface TimelineBucket {
   calls: number;
 }
 
+export interface AgentBreakdown {
+  agent: string;
+  spawns: number;
+  messages: number;
+  errors: number;
+  avgLatencyMs: number;
+}
+
 export interface SubagentMetrics {
   spawns: number;
   messages: number;
   lists: number;
   errors: number;
   avgLatencyMs: number;
+  byAgent: AgentBreakdown[];
+}
+
+export interface SpawnRecord {
+  id: string;
+  ts: string | null;
+  agent: string;
+  name: string | null;
 }
 
 export interface GateRule {
   id: string;
   severity: string;
+  family: string | null;
 }
 
 export interface GateSummary {
@@ -85,6 +102,9 @@ export interface GateSummary {
   byFamily: Record<string, number>;
   rules: GateRule[];
   bySeverity: { error: number; warn: number; off: number };
+  familySeverity: Record<string, string | null>;
+  blocksByTool: Record<string, number>;
+  avoidedSpend: number;
 }
 
 export interface PromptItem {
@@ -158,6 +178,7 @@ export interface SessionDetail {
   timeline: TimelineBucket[];
   prompts: PromptItem[];
   subagents: SubagentMetrics;
+  subagentSpawns: SpawnRecord[];
 }
 
 export interface LiveTurnEvent {

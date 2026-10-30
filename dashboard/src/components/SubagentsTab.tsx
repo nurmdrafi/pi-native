@@ -17,19 +17,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StatCard } from "@/components/StatCard";
+import { fmtLatency, fmtMoney } from "@/lib/format";
 import type { Snapshot } from "@/types";
 
 const projectConfig = {
   spawns: { label: "spawns", color: "var(--chart-1)" },
   messages: { label: "messages", color: "var(--chart-2)" },
 } satisfies ChartConfig;
-
-export function fmtLatency(ms: number): string {
-  if (ms <= 0) return "–";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
-}
 
 export function SubagentsTab({ snapshot }: { snapshot: Snapshot }) {
   const agg = snapshot.aggregates.subagents;
@@ -94,6 +88,42 @@ export function SubagentsTab({ snapshot }: { snapshot: Snapshot }) {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-sm">per-agent breakdown</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(agg.byAgent ?? []).length === 0 ? (
+            <div className="text-xs text-muted-foreground">no named agents spawned yet</div>
+          ) : (
+            <ScrollArea className="h-56 rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">agent</TableHead>
+                    <TableHead scope="col" className="text-right">spawns</TableHead>
+                    <TableHead scope="col" className="text-right">messages</TableHead>
+                    <TableHead scope="col" className="text-right">errors</TableHead>
+                    <TableHead scope="col" className="text-right">avg latency</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(agg.byAgent ?? []).map((a) => (
+                    <TableRow key={a.agent}>
+                      <TableCell className="font-mono text-xs">{a.agent}</TableCell>
+                      <TableCell className="text-right tabular-nums">{a.spawns}</TableCell>
+                      <TableCell className="text-right tabular-nums">{a.messages}</TableCell>
+                      <TableCell className="text-right tabular-nums">{a.errors}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtLatency(a.avgLatencyMs)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-sm">sessions using subagents — {rows.length}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -105,13 +135,13 @@ export function SubagentsTab({ snapshot }: { snapshot: Snapshot }) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>session</TableHead>
-                    <TableHead>project</TableHead>
-                    <TableHead className="text-right">spawns</TableHead>
-                    <TableHead className="text-right">messages</TableHead>
-                    <TableHead className="text-right">lists</TableHead>
-                    <TableHead className="text-right">errors</TableHead>
-                    <TableHead className="text-right">avg latency</TableHead>
-                    <TableHead className="text-right">session cost</TableHead>
+                    <TableHead scope="col">project</TableHead>
+                    <TableHead scope="col" className="text-right">spawns</TableHead>
+                    <TableHead scope="col" className="text-right">messages</TableHead>
+                    <TableHead scope="col" className="text-right">lists</TableHead>
+                    <TableHead scope="col" className="text-right">errors</TableHead>
+                    <TableHead scope="col" className="text-right">avg latency</TableHead>
+                    <TableHead scope="col" className="text-right">session cost</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -128,7 +158,7 @@ export function SubagentsTab({ snapshot }: { snapshot: Snapshot }) {
                       <TableCell className="text-right tabular-nums">
                         {fmtLatency(s.subagents.avgLatencyMs)}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">${s.cost.toFixed(3)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMoney(s.cost, 3)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
