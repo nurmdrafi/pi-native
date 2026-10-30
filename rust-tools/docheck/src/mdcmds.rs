@@ -37,7 +37,14 @@ const KNOWN: &[&str] = &[
     "head", "tail", "ast-grep", "git", "npm", "npx", "node", "tvly", "pi", "fd", "awk", "tr",
     "chmod", "ls", "cat", "curl", "sh", "bash", "command", "skillcheck.sh",
 ];
-const FLAG_WAIVERS: &[&str] = &["git --hard", "git reset --hard", "curl --proto", "curl --tlsv1"];
+const FLAG_WAIVERS: &[&str] = &[
+    "git --hard",
+    "git reset --hard",
+    // subcommand flags the base `git --help` never lists
+    "git --porcelain",
+    "curl --proto",
+    "curl --tlsv1",
+];
 
 // ---------- pure parsers (JS parity: see scripts/doc-check.mjs) ----------
 

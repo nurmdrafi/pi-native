@@ -121,7 +121,7 @@ fn scan_env_vars(text: &str) -> Vec<String> {
 }
 
 fn allowlisted(var: &str) -> bool {
-    const ALLOW: [&str; 14] = [
+    const ALLOW: [&str; 17] = [
         "PI_SUBAGENT_ID",
         "PI_SUBAGENT_NAME",
         "PI_SUBAGENT_AGENT",
@@ -130,6 +130,9 @@ fn allowlisted(var: &str) -> bool {
         "PI_SUBAGENT_SESSION",
         "PI_SUBAGENT_ACTIVITY_FILE",
         "PI_SUBAGENT_SURFACE",
+        "PI_SUBAGENT_PARENT_SESSION",
+        "PI_SUBAGENT_START_MS",
+        "PI_SUBAGENT_TASK",
         "PI_CLAUDE_SENTINEL",
         "PI_DENY_TOOLS",
         "PI_SESSIONS_DIR",
@@ -358,6 +361,10 @@ fn check_env(root: &Path) -> Family {
     for d in dir_names(&root.join("skills")) {
         code_files.extend(walk_files(&root.join("skills").join(d).join("scripts")));
     }
+    // The dashboard server reads its own PI_DASH_* knobs and lives outside the
+    // extension/script trees above; without this its documented vars read as
+    // "documented but not found".
+    code_files.extend(walk_files(&root.join("dashboard").join("scripts")));
 
     let mut in_code: BTreeMap<String, String> = BTreeMap::new();
     for f in &code_files {
