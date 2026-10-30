@@ -13,6 +13,8 @@ npm/
 .pidx-state.bin
 # pidx scratch output (tests write here; never a source artifact)
 .pidx/
+# repo-local runtime state (read ledger, subagent result inbox)
+.pi/
 # cargo install --root metadata (rg/pidx rebuilds)
 .crates.toml
 .crates2.json
