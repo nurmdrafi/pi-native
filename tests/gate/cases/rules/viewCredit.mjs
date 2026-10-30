@@ -189,4 +189,45 @@ export const cases = [
       return credited(pi, f, "line 2", "L2");
     },
   ],
+  [
+    "VC: outline --show credits its header span for a later edit",
+    "pass",
+    async (pi) => {
+      const f = join(tmp, "vc-show.rs");
+      writeFileSync(
+        f,
+        "fn alpha() {\n    let a = 1;\n}\n\nfn target() {\n    let x = 2;\n}\n",
+      );
+      await runSearch(
+        pi,
+        `outline --show ${f} target`,
+        "5-7 fn target\nfn target() {\n    let x = 2;\n}\n",
+      );
+      return credited(pi, f, "    let x = 2;", "    let x = 20;");
+    },
+  ],
+  [
+    "VC: outline --show with an omission marker credits nothing unread",
+    "blocked",
+    async (pi) => {
+      const f = join(tmp, "vc-show-omitted.rs");
+      const body = Array.from(
+        { length: 250 },
+        (_, i) => `let v${i} = ${i};`,
+      ).join("\n");
+      writeFileSync(f, `fn big() {\n${body}\n}\n`);
+      await runSearch(
+        pi,
+        `outline --show ${f} big`,
+        "1-252 fn big\n... omitted 130 lines (lines 101-230) ...\n",
+      );
+      const r = await runEdit(pi, f, [
+        { oldText: "let v150 = 150;", newText: "let v150 = 999;" },
+      ]);
+      const note = noteOf(r);
+      return r.blocked || note.includes("Anchor Guard (Unread):")
+        ? { blocked: true }
+        : { blocked: false, reason: "omitted range was credited" };
+    },
+  ],
 ];
