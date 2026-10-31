@@ -25,6 +25,7 @@ import { SubagentsTab } from "@/components/SubagentsTab";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SessionDetailPanel } from "@/components/SessionDetail";
@@ -44,11 +45,28 @@ const formatDay = (day: string) =>
     day: "numeric",
   });
 
-/** Window for the day picked in the calendar; no day means the whole history.
- * The chosen day is bounded on both ends so its numbers stop at midnight. */
-function dayRange(day: string | null): DateRange {
-  if (!day) return { from: null, to: null };
-  const start = midnight(new Date(`${day}T00:00:00`));
+/** The date filter as the compact label the chrome shows. */
+const filterLabel = (filter: DateFilter) =>
+  filter.kind === "day"
+    ? formatDay(filter.day)
+    : filter.kind === "window"
+      ? `last ${filter.span} days`
+      : "show all";
+
+/** Window for the active date filter: all history, a rolling window anchored
+ * on today (re-anchored on every load), or one picked day. Both windows are
+ * bounded on both ends so their numbers stop at midnight. */
+function filterRange(filter: DateFilter): DateRange {
+  if (filter.kind === "all") return { from: null, to: null };
+  if (filter.kind === "window") {
+    const today = midnight(new Date());
+    const from = new Date(today);
+    from.setDate(from.getDate() - (filter.span - 1));
+    const to = new Date(today);
+    to.setDate(to.getDate() + 1);
+    return { from: from.toISOString(), to: new Date(to.getTime() - 1).toISOString() };
+  }
+  const start = midnight(new Date(`${filter.day}T00:00:00`));
   if (Number.isNaN(start.getTime())) return { from: null, to: null };
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
@@ -77,25 +95,51 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-/** Full routing state in the hash: the tab plus the date filter, so any view
- * is bookmarkable and survives reload. `#/gate?day=2026-10-30`. */
+/** The date filter the hash carries: all history (neither param present), a
+ * rolling window (`window=7d` / `window=30d`), or one picked day
+ * (`day=YYYY-MM-DD`). */
+type DateFilter =
+  | { kind: "all" }
+  | { kind: "window"; span: 7 | 30 }
+  | { kind: "day"; day: string };
+
+/** Full routing state in the hash: the tab plus the date filter and an
+ * optional drill-in target, so any view is bookmarkable and survives reload.
+ * `#/gate?day=2026-10-30`, `#/live?window=7d`, `#/overview?session=<id>`. */
 interface HashState {
   tab: TabId;
-  day: string | null;
+  date: DateFilter;
+  session: string | null;
 }
 
 function readHash(): HashState {
   const [path, query] = location.hash.replace(/^[#/]+/, "").split("?");
   const id = path.split("/")[0];
-  const day = new URLSearchParams(query ?? "").get("day");
+  const params = new URLSearchParams(query ?? "");
+  const day = params.get("day");
+  const window = params.get("window");
+  // A picked day wins over a rolling window; unknown values fall back to all
+  // history, so old and hand-edited hashes stay harmless.
+  const date: DateFilter =
+    day && /^\d{4}-\d{2}-\d{2}$/.test(day)
+      ? { kind: "day", day }
+      : window === "7d" || window === "30d"
+        ? { kind: "window", span: window === "7d" ? 7 : 30 }
+        : { kind: "all" };
   return {
     tab: (TABS.some((t) => t.id === id) ? id : "overview") as TabId,
-    day: day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null,
+    date,
+    session: params.get("session"),
   };
 }
 
-function writeHash(tab: TabId, day: string | null) {
-  const next = `/${tab}${day ? `?day=${day}` : ""}`;
+function writeHash(tab: TabId, date: DateFilter, session: string | null = null) {
+  const params = new URLSearchParams();
+  if (date.kind === "day") params.set("day", date.day);
+  else if (date.kind === "window") params.set("window", `${date.span}d`);
+  if (session) params.set("session", session);
+  const qs = params.toString();
+  const next = `/${tab}${qs ? `?${qs}` : ""}`;
   if (location.hash !== `#${next}`) location.hash = next;
 }
 
@@ -104,14 +148,14 @@ export default function App() {
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [{ tab: initTab, day: initDay }] = useState(readHash);
+  const [{ tab: initTab, date: initDate }] = useState(readHash);
   const [tab, setTab] = useState<TabId>(initTab);
   // Date window for every number on every tab: all history by default, or a
   // rolling window, today, or one picked day.
-  const [day, setDay] = useState<string | null>(initDay);
+  const [date, setDate] = useState<DateFilter>(initDate);
   const [dateOpen, setDateOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const range = useMemo(() => dayRange(day), [day]);
+  const range = useMemo(() => filterRange(date), [date]);
   // Sidebar collapse survives reloads; the layout only collapses on wide screens.
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try {
@@ -146,8 +190,12 @@ export default function App() {
   const [detail, setDetail] = useState<import("./types").SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // The session the dialog is fetching or showing; drives retries and keeps
+  // hash-driven opens from refetching an id that is already on screen.
+  const openSessionIdRef = useRef<string | null>(null);
 
   async function openSession(sessionId: string) {
+    openSessionIdRef.current = sessionId;
     setDetailLoading(true);
     setDetailError(null);
     try {
@@ -161,35 +209,57 @@ export default function App() {
   }
 
   function closeSessionDetail() {
+    openSessionIdRef.current = null;
     setDetail(null);
     setDetailError(null);
     setDetailLoading(false);
+    // A deep link put the session in the hash; closing the dialog clears it.
+    const cur = readHash();
+    if (cur.session) writeHash(cur.tab, cur.date, null);
   }
 
   useEffect(() => {
     const onHash = () => {
       const next = readHash();
       setTab(next.tab);
-      setDay(next.day);
+      setDate(next.date);
+      if (next.session && next.session !== openSessionIdRef.current) {
+        void openSession(next.session);
+      } else if (!next.session && openSessionIdRef.current) {
+        closeSessionDetail();
+      }
     };
+    // The initial call catches a `session=` deep link on load; later calls
+    // follow back/forward and in-app navigation alike.
+    onHash();
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   const goTo = useCallback(
     (id: TabId) => {
-      writeHash(id, day);
+      writeHash(id, date);
       setTab(id);
     },
-    [day],
+    [date],
   );
 
-  const pickDay = useCallback(
-    (next: string | null) => {
+  const pickDate = useCallback(
+    (next: DateFilter) => {
       writeHash(tab, next);
-      setDay(next);
+      setDate(next);
     },
     [tab],
+  );
+
+  // One drill-in mechanism for every tab: the session lands in the hash, the
+  // hashchange handler opens the shared detail dialog, and the URL stays
+  // shareable. Toggling the day or tab drops the param and closes the dialog.
+  const openSessionDeep = useCallback(
+    (sessionId: string) => {
+      writeHash(tab, date, sessionId);
+    },
+    [tab, date],
   );
 
   useEffect(() => {
@@ -225,6 +295,11 @@ export default function App() {
     fetchSnapshot(range)
       .then(setSnapshot)
       .catch((e: Error) => setError(e.message));
+  };
+
+  const retryDetail = () => {
+    const id = openSessionIdRef.current;
+    if (id) void openSession(id);
   };
 
   /** Pull a fresh snapshot for the current window on demand — the stream keeps
@@ -318,8 +393,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
-        <div className="flex h-12 items-center gap-3 px-4 lg:px-6">
-          <Radio className="size-4 text-foreground" aria-hidden />
+        <div className="flex h-12 items-center gap-2 px-3 sm:gap-3 sm:px-4 lg:px-6">
+          <TooltipProvider>
+          <Radio className="hidden size-4 text-foreground sm:block" aria-hidden />
           <Button
             variant="ghost"
             size="icon"
@@ -331,16 +407,24 @@ export default function App() {
             {sidebarOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
           </Button>
           <h1 className="text-[13px] font-semibold">pi sessions</h1>
-          <span
-            className="hidden text-xs text-muted-foreground sm:inline"
-            title={snapshot.serverStartedAt ? `server started ${snapshot.serverStartedAt}` : undefined}
-          >
-            {snapshot.aggregates.totals.sessions} sessions · indexed{" "}
-            {ageShort(now - Date.parse(snapshot.generatedAt))} ago
-            {snapshot.serverStartedAt
-              ? ` · server up ${ageShort(now - Date.parse(snapshot.serverStartedAt))}`
-              : ""}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="hidden text-xs text-muted-foreground sm:inline"
+                tabIndex={0}
+              >
+                {snapshot.aggregates.totals.sessions} sessions · indexed{" "}
+                {ageShort(now - Date.parse(snapshot.generatedAt))} ago
+                {snapshot.serverStartedAt
+                  ? ` · server up ${ageShort(now - Date.parse(snapshot.serverStartedAt))}`
+                  : ""}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              snapshot {snapshot.generatedAt}
+              {snapshot.serverStartedAt ? ` · server started ${snapshot.serverStartedAt}` : ""}
+            </TooltipContent>
+          </Tooltip>
           <Popover open={dateOpen} onOpenChange={setDateOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -350,26 +434,29 @@ export default function App() {
                 aria-label="date range"
               >
                 <CalendarIcon className="size-3.5" aria-hidden />
-                {day ? formatDay(day) : "show all"}
+                {filterLabel(date)}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0">
               <Calendar
                 mode="single"
-                selected={day ? midnight(new Date(`${day}T00:00:00`)) : undefined}
+                selected={
+                  date.kind === "day" ? midnight(new Date(`${date.day}T00:00:00`)) : undefined
+                }
                 onSelect={(picked) => {
-                  pickDay(picked ? toDay(picked) : null);
+                  pickDate(picked ? { kind: "day", day: toDay(picked) } : { kind: "all" });
                   setDateOpen(false);
                 }}
                 autoFocus
               />
-              <div className="flex items-center justify-between gap-2 border-t p-2">
+              <div className="grid grid-cols-2 gap-1 border-t p-2">
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs"
+                  aria-pressed={date.kind === "all"}
                   onClick={() => {
-                    pickDay(null);
+                    pickDate({ kind: "all" });
                     setDateOpen(false);
                   }}
                 >
@@ -379,12 +466,37 @@ export default function App() {
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs"
+                  aria-pressed={date.kind === "day" && date.day === toDay(new Date())}
                   onClick={() => {
-                    pickDay(toDay(new Date()));
+                    pickDate({ kind: "day", day: toDay(new Date()) });
                     setDateOpen(false);
                   }}
                 >
                   today
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  aria-pressed={date.kind === "window" && date.span === 7}
+                  onClick={() => {
+                    pickDate({ kind: "window", span: 7 });
+                    setDateOpen(false);
+                  }}
+                >
+                  last 7 days
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  aria-pressed={date.kind === "window" && date.span === 30}
+                  onClick={() => {
+                    pickDate({ kind: "window", span: 30 });
+                    setDateOpen(false);
+                  }}
+                >
+                  last 30 days
                 </Button>
               </div>
             </PopoverContent>
@@ -403,7 +515,7 @@ export default function App() {
             </PopoverTrigger>
             <PopoverContent className="w-60 p-2" align="end">
               <p className="px-2 pb-1.5 text-xs text-muted-foreground">
-                window: {day ? formatDay(day) : "all history"} ·{" "}
+                window: {filterLabel(date)} ·{" "}
                 {snapshot.aggregates.totals.sessions} sessions
               </p>
               <div className="grid gap-1">
@@ -442,26 +554,42 @@ export default function App() {
               </div>
             </PopoverContent>
           </Popover>
-          <span
-            className={`ml-auto inline-flex items-center gap-1.5 text-xs ${
-              connected ? "text-ok-foreground" : "text-muted-foreground"
-            }`}
-            role="status"
-          >
-            <span className={`size-1.5 rounded-full ${connected ? "bg-ok" : "bg-muted-foreground/50"}`} />
-            {connected ? "live" : "connecting"}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            onClick={refresh}
-            aria-label="refresh now"
-            title="refresh now"
-            disabled={refreshing}
-          >
-            <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={`ml-auto inline-flex items-center gap-1.5 text-xs ${
+                  connected ? "text-ok-foreground" : "text-muted-foreground"
+                }`}
+                role="status"
+                tabIndex={0}
+              >
+                <span
+                  className={`size-1.5 rounded-full ${
+                    connected ? "animate-pulse bg-ok" : "bg-muted-foreground/50"
+                  }`}
+                />
+                <span className="hidden sm:inline">{connected ? "live" : "connecting"}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {connected ? "receiving live updates" : "connecting to the live stream"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={refresh}
+                aria-label="refresh now"
+                disabled={refreshing}
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">refresh now</TooltipContent>
+          </Tooltip>
           <Button
             variant="ghost"
             size="icon"
@@ -488,6 +616,7 @@ export default function App() {
           >
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
+          </TooltipProvider>
         </div>
         {/* Mobile nav strip */}
         <nav aria-label="sections" className="flex gap-1 overflow-x-auto px-2 pb-2 lg:hidden">
@@ -544,14 +673,19 @@ export default function App() {
 
         <main className="min-w-0 p-4 lg:p-6">
           <ErrorBoundary key={tab} label={`${tab} tab`}>
-            {tab === "overview" && <OverviewTab snapshot={snapshot} />}
+            {tab === "overview" && <OverviewTab snapshot={snapshot} onOpenSession={openSessionDeep} />}
             {tab === "sessions" && <SessionsTab snapshot={snapshot} />}
             {tab === "subagents" && (
-              <SubagentsTab snapshot={snapshot} onOpenSession={openSession} />
+              <SubagentsTab snapshot={snapshot} onOpenSession={openSessionDeep} />
             )}
             {tab === "gate" && <GateTab snapshot={snapshot} />}
             {tab === "live" && (
-              <LiveTab snapshot={snapshot} feed={feed} connected={connected} />
+              <LiveTab
+                snapshot={snapshot}
+                feed={feed}
+                connected={connected}
+                onOpenSession={openSessionDeep}
+              />
             )}
           </ErrorBoundary>
         </main>
@@ -582,11 +716,24 @@ export default function App() {
             </div>
           )}
           {detailError && (
-            <div role="alert" className="mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              failed to load session detail: {detailError}
+            <div
+              role="alert"
+              className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              <span className="min-w-0 grow">failed to load session detail: {detailError}</span>
+              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={retryDetail}>
+                retry
+              </Button>
             </div>
           )}
-          {detail ? <SessionDetailPanel detail={detail} onClose={closeSessionDetail} /> : null}
+          {detail ? (
+            <SessionDetailPanel
+              key={detail.sessionId}
+              detail={detail}
+              onClose={closeSessionDetail}
+              onOpenSession={openSessionDeep}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

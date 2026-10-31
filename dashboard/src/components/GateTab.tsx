@@ -304,8 +304,18 @@ export function GateTab({ snapshot }: { snapshot: Snapshot }) {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard icon={ShieldAlert} label="total gate blocks" value={String(gate.total)} />
         <StatCard icon={Activity} label="blocks + warns" value={String(totalEvents)} />
-        <StatCard icon={OctagonAlert} label="error rules" value={String(gate.bySeverity.error)} />
-        <StatCard icon={TriangleAlert} label="warn rules" value={String(gate.bySeverity.warn)} />
+        <StatCard
+          icon={OctagonAlert}
+          label="error rules"
+          value={String(gate.bySeverity.error)}
+          valueClassName={gate.bySeverity.error > 0 ? "text-error-foreground" : undefined}
+        />
+        <StatCard
+          icon={TriangleAlert}
+          label="warn rules"
+          value={String(gate.bySeverity.warn)}
+          valueClassName={gate.bySeverity.warn > 0 ? "text-warn-foreground" : undefined}
+        />
         <StatCard icon={CircleSlash} label="off rules" value={String(gate.bySeverity.off)} />
         <StatCard
           icon={TriangleAlert}
@@ -462,7 +472,6 @@ export function GateTab({ snapshot }: { snapshot: Snapshot }) {
                     <TableHead scope="col">severity</TableHead>
                     <TableHead scope="col" className="text-right">blocks</TableHead>
                     <TableHead scope="col" className="text-right">warn</TableHead>
-                    <TableHead scope="col" className="text-right">blocks</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

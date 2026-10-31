@@ -5,7 +5,8 @@
  * dashboard/tests/dashboard.test.mjs. No server, no process state beyond the
  * mtime-keyed raw-file cache.
  */
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import { metrics as gateMetrics } from "../../tests/tools/audit/gate-metrics.mjs";
 
 // ── Pure data layer ────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ export function summarizeSession(extract) {
   const lastTs = timestamps[timestamps.length - 1] ?? null;
   const durationSec =
     firstTs && lastTs ? Math.round((new Date(lastTs) - new Date(firstTs)) / 1000) : 0;
+  const latencyPool = readSessionSignals(extract.path).turnDurations.map((d) => d.durationMs);
   const pct1 = (n, d) => (d === 0 ? 0 : Math.round((n / d) * 1000) / 10);
 
   // Agent-quality metrics reuse the gate-metrics audit extractor (same pidx
@@ -73,10 +75,13 @@ export function summarizeSession(extract) {
     blocksByTool[name] = (blocksByTool[name] ?? 0) + 1;
   }
 
+  const kindInfo = sessionKindInfo(extract.path);
   return {
     sessionId: extract.sessionId,
     project: extract.project,
     path: extract.path,
+    kind: kindInfo.kind,
+    parentSession: kindInfo.parentSession,
     turns: turns.length,
     cost: Number(cost.toFixed(6)),
     models,
@@ -91,6 +96,10 @@ export function summarizeSession(extract) {
     cacheHitRate: pct1(cacheReadTokens, cacheTotal),
     reasoningShare: pct1(reasoningTokens, reasoningTokens + outputTokens),
     durationSec,
+    turnLatency: {
+      p50Ms: percentileMs(latencyPool, 0.5),
+      p95Ms: percentileMs(latencyPool, 0.95),
+    },
     tokensPerTurn: turns.length > 0 ? Math.round((inputTokens + outputTokens + reasoningTokens + cacheReadTokens) / turns.length) : 0,
     avgTurnCost: turns.length > 0 ? Number((cost / turns.length).toFixed(6)) : 0,
     compactions: typeof extract.compactions === "number" ? extract.compactions : 0,
@@ -151,6 +160,74 @@ export function readSubagentArgs(sessionFile) {
   } catch {
     return new Map();
   }
+}
+
+/**
+ * Session kind for a raw session file, cached by mtime like readSubagentArgs:
+ * "subagent" when the seeded line-1 header ({type:"session", ...}) carries a
+ * non-empty parentSession path, or when a <file>.loadout.json sidecar sits
+ * beside the file; "main" otherwise, including missing or unreadable files.
+ * parentSession is the header value's basename, null when not carried.
+ */
+const sessionKindCache = new Map();
+
+/** Parsed first line of a session file, or null. Bounded read: session files
+ * can be large and only the header line matters here. */
+function readSessionHeader(sessionFile) {
+  let fd;
+  try {
+    fd = openSync(sessionFile, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(65536);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const text = buf.toString("utf8", 0, n);
+    const nl = text.indexOf("\n");
+    try {
+      return JSON.parse(nl === -1 ? text : text.slice(0, nl));
+    } catch {
+      return null;
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function sessionKindInfo(sessionFile) {
+  if (!sessionFile) return { kind: "main", parentSession: null };
+  try {
+    const { mtimeMs } = statSync(sessionFile);
+    const hit = sessionKindCache.get(sessionFile);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.info;
+    const header = readSessionHeader(sessionFile);
+    const parentPath =
+      header?.type === "session" &&
+      typeof header.parentSession === "string" &&
+      header.parentSession !== ""
+        ? header.parentSession
+        : null;
+    let sidecar = false;
+    try {
+      statSync(`${sessionFile}.loadout.json`);
+      sidecar = true;
+    } catch {
+      sidecar = false;
+    }
+    const info = {
+      kind: parentPath || sidecar ? "subagent" : "main",
+      parentSession: parentPath ? basename(parentPath) : null,
+    };
+    sessionKindCache.set(sessionFile, { mtimeMs, info });
+    return info;
+  } catch {
+    return { kind: "main", parentSession: null };
+  }
+}
+
+export function sessionKind(sessionFile) {
+  return sessionKindInfo(sessionFile).kind;
 }
 
 /** Nearest-rank percentile of a latency pool in ms. Null unless the pool
@@ -516,6 +593,7 @@ export function attributeSession(s, extract, fromMs = null, toMs = null) {
   let cost = 0;
   let turns = 0;
   const byDay = {};
+  const byDayCounts = {};
   for (const t of extract?.turns ?? []) {
     const ms = effMs(t?.ts);
     if (!inWindow(ms)) continue;
@@ -524,19 +602,24 @@ export function attributeSession(s, extract, fromMs = null, toMs = null) {
     turns += 1;
     const day = new Date(ms).toISOString().slice(0, 10);
     byDay[day] = (byDay[day] ?? 0) + c;
+    (byDayCounts[day] ??= { turns: 0, calls: 0 }).turns += 1;
   }
   const toolCalls = {};
   const callsTotal = {};
   for (const call of extract?.calls ?? []) {
     callsTotal[call.name] = (callsTotal[call.name] ?? 0) + 1;
-    if (inWindow(effMs(call?.ts))) toolCalls[call.name] = (toolCalls[call.name] ?? 0) + 1;
+    const callMs = effMs(call?.ts);
+    if (inWindow(callMs)) {
+      toolCalls[call.name] = (toolCalls[call.name] ?? 0) + 1;
+      (byDayCounts[new Date(callMs).toISOString().slice(0, 10)] ??= { turns: 0, calls: 0 }).calls += 1;
+    }
   }
   const toolCosts = {};
   for (const [name, lifetime] of Object.entries(s?.toolCosts ?? {})) {
     if (!(toolCalls[name] > 0)) continue;
     toolCosts[name] = Number((lifetime * (toolCalls[name] / (callsTotal[name] ?? 0))).toFixed(6));
   }
-  return { cost, turns, byDay, toolCalls, toolCosts };
+  return { cost, turns, byDay, byDayCounts, toolCalls, toolCosts };
 }
 
 /** A per-session summary clipped to a date window: cost, turns, tool calls
@@ -558,6 +641,9 @@ export function sessionRangeView(s, extract, fromMs = null, toMs = null) {
 
 export function aggregateSessions(sessions, opts = {}) {
   const byDay = {};
+  const byDayCounts = {};
+  const projectDayMap = new Map();
+  const durations = [];
   const byProjectMap = new Map();
   const blocksByFamily = {};
   const gateByDay = {};
@@ -591,12 +677,28 @@ export function aggregateSessions(sessions, opts = {}) {
   for (const s of sessions) {
     const extract = extractById.get(s.sessionId);
     const attr = extract ? attributeSession(s, extract, opts.from ?? null, opts.to ?? null) : null;
+    const pd = projectDayMap.get(s.project) ?? new Map();
     if (attr) {
-      for (const [day, c] of Object.entries(attr.byDay)) byDay[day] = (byDay[day] ?? 0) + c;
+      for (const [day, c] of Object.entries(attr.byDay)) {
+        byDay[day] = (byDay[day] ?? 0) + c;
+        pd.set(day, (pd.get(day) ?? 0) + c);
+      }
+      for (const [day, n] of Object.entries(attr.byDayCounts ?? {})) {
+        const cur = byDayCounts[day] ?? { turns: 0, calls: 0 };
+        cur.turns += n.turns ?? 0;
+        cur.calls += n.calls ?? 0;
+        byDayCounts[day] = cur;
+      }
     } else if (s.firstTs) {
       const day = s.firstTs.slice(0, 10);
       byDay[day] = (byDay[day] ?? 0) + s.cost;
+      pd.set(day, (pd.get(day) ?? 0) + s.cost);
+      const cur = byDayCounts[day] ?? { turns: 0, calls: 0 };
+      cur.turns += s.turns;
+      cur.calls += s.toolCalls;
+      byDayCounts[day] = cur;
     }
+    projectDayMap.set(s.project, pd);
     // A bounded window attributes only in-window turns/calls; unbounded keeps
     // the lifetime totals, which are exact for the whole-history view.
     const cost = attr && bounded ? attr.cost : s.cost;
@@ -626,6 +728,7 @@ export function aggregateSessions(sessions, opts = {}) {
     if (s.durationSec > 0) {
       durationSum += s.durationSec;
       durationCount += 1;
+      durations.push(s.durationSec);
     }
     const sa = s.subagents ?? { spawns: 0, messages: 0, lists: 0, errors: 0, avgLatencyMs: 0 };
     subagents.spawns += sa.spawns;
@@ -707,6 +810,71 @@ export function aggregateSessions(sessions, opts = {}) {
   for (const [tool, count] of Object.entries(blocksByTool)) {
     avoidedSpend += count * (toolAvgCost[tool] ?? globalAvgCost);
   }
+  // ── Raw-derived aggregates ────────────────────────────────────────────
+  // Tool errors: extract results joined back to their calls by id (the same
+  // join subagentMetrics uses), counted over the window's calls. Per-model
+  // token mix: one groupby over the window's turns, summing tokens no
+  // aggregate summed before (cacheWrite included). Turn latency and
+  // compaction days come from the raw session files through the cached
+  // signal reader; a bounded window drops events it cannot place inside it.
+  const errByTool = new Map();
+  let errCalls = 0;
+  let toolErrors = 0;
+  const mixByModel = new Map();
+  const latencies = [];
+  const compactionDays = {};
+  const inScopeMs = (ts, fallbackMs) => {
+    const t = ts != null ? Date.parse(ts) : Number.NaN;
+    const ms = Number.isFinite(t) ? t : fallbackMs;
+    if (!Number.isFinite(ms)) return null;
+    if (opts.from != null && ms < opts.from) return null;
+    if (opts.to != null && ms >= opts.to) return null;
+    return ms;
+  };
+  const finite = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  for (const s of sessions) {
+    const extract = extractById.get(s.sessionId);
+    if (!extract) continue;
+    const lastMs = s?.lastTs ? Date.parse(s.lastTs) : Number.NaN;
+    const errById = new Map((extract.results ?? []).map((r) => [r.id, r.err === true]));
+    for (const call of extract.calls ?? []) {
+      if (inScopeMs(call?.ts, lastMs) == null) continue;
+      errCalls += 1;
+      const e = errByTool.get(call.name) ?? { tool: call.name, errors: 0, calls: 0 };
+      e.calls += 1;
+      if (errById.get(call.id) === true) {
+        e.errors += 1;
+        toolErrors += 1;
+      }
+      errByTool.set(call.name, e);
+    }
+    for (const t of extract.turns ?? []) {
+      if (inScopeMs(t?.ts, lastMs) == null) continue;
+      const model = t.model ?? "unknown";
+      const m =
+        mixByModel.get(model) ??
+        { model, turns: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+      m.turns += 1;
+      m.input += finite(t.usage?.input);
+      m.output += finite(t.usage?.output);
+      m.reasoning += finite(t.usage?.reasoning);
+      m.cacheRead += finite(t.usage?.cacheRead);
+      m.cacheWrite += finite(t.usage?.cacheWrite);
+      m.cost += turnCost(t);
+      mixByModel.set(model, m);
+    }
+    const signals = readSessionSignals(extract.path);
+    for (const d of signals.turnDurations) {
+      if (inScopeMs(d.ts, Number.NaN) == null) continue;
+      latencies.push(d.durationMs);
+    }
+    for (const ts of signals.compactionTs) {
+      const ms = inScopeMs(ts, Number.NaN);
+      if (ms == null) continue;
+      const day = new Date(ms).toISOString().slice(0, 10);
+      compactionDays[day] = (compactionDays[day] ?? 0) + 1;
+    }
+  }
   // Aggregate latency percentiles: summaries carry no per-message pool, so
   // each session contributes its mean latency weighted by its message count
   // (message-weighted session means — the per-message pooling happens in
@@ -757,6 +925,23 @@ export function aggregateSessions(sessions, opts = {}) {
     .map((p) => ({ ...p, cost: Number(p.cost.toFixed(6)) }))
     .sort((a, b) => b.cost - a.cost);
   for (const day of Object.keys(byDay)) byDay[day] = Number(byDay[day].toFixed(6));
+  const compactionsByDay = Object.entries(compactionDays)
+    .map(([day, count]) => ({ day, count }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const modelTokenMix = [...mixByModel.values()]
+    .map((m) => ({ ...m, cost: Number(m.cost.toFixed(6)) }))
+    .sort((a, b) => b.cost - a.cost || a.model.localeCompare(b.model));
+  // Project-by-day cross product: rows follow byProject's cost-desc order,
+  // days ascend, every cell is that project's attributed cost that day.
+  const projectDays = [...new Set([...projectDayMap.values()].flatMap((pd) => [...pd.keys()]))].sort();
+  const projectDay = {
+    projects: byProject.map((p) => p.project),
+    days: projectDays,
+    cells: byProject.map((p) => {
+      const pd = projectDayMap.get(p.project) ?? new Map();
+      return projectDays.map((day) => Number((pd.get(day) ?? 0).toFixed(6)));
+    }),
+  };
   return {
     byDay,
     byProject,
@@ -768,6 +953,25 @@ export function aggregateSessions(sessions, opts = {}) {
     blocksPerSession: sessions.length > 0 ? Number((blocksTotal / sessions.length).toFixed(2)) : 0,
     repeatPct: pct1(repeats, totals.toolCalls),
     avgDurationSec: durationCount > 0 ? Math.round(durationSum / durationCount) : 0,
+    duration: {
+      p50Sec: percentileMs(durations, 0.5),
+      p95Sec: percentileMs(durations, 0.95),
+    },
+    turnLatency: {
+      p50Ms: percentileMs(latencies, 0.5),
+      p95Ms: percentileMs(latencies, 0.95),
+    },
+    errors: {
+      toolErrors,
+      toolErrorRate: errCalls > 0 ? Number((toolErrors / errCalls).toFixed(4)) : 0,
+      byTool: [...errByTool.values()]
+        .map((e) => ({ ...e, rate: e.calls > 0 ? Number((e.errors / e.calls).toFixed(4)) : 0 }))
+        .sort((a, b) => b.errors - a.errors || b.calls - a.calls || a.tool.localeCompare(b.tool)),
+    },
+    byDayCounts,
+    compactionsByDay,
+    projectDay,
+    modelTokenMix,
     subagents: {
       spawns: subagents.spawns,
       messages: subagents.messages,
@@ -1133,6 +1337,55 @@ export function gateSummary(blocksByFamily = {}, rules = {}, extra = {}) {
   };
 }
 
+/** Raw-file signals the extracts cannot carry: assistant-turn durationMs
+ * (with the response id that joins it back to extract turns — pidx stamps
+ * turn ts differently, so the response id is the only stable join) and
+ * compaction-event timestamps. Cached by stat like the other raw readers —
+ * the dashboard polls every few seconds. Empty pools when the file is
+ * missing or unreadable. */
+const sessionSignalsCache = new Map();
+export function readSessionSignals(sessionFile) {
+  if (!sessionFile) return { turnDurations: [], compactionTs: [] };
+  let st;
+  try {
+    st = statSync(sessionFile);
+  } catch {
+    return { turnDurations: [], compactionTs: [] };
+  }
+  const hit = sessionSignalsCache.get(sessionFile);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.signals;
+  const turnDurations = [];
+  const compactionTs = [];
+  try {
+    for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+      if (line.trim() === "") continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (entry?.type === "compaction") {
+        if (typeof entry.timestamp === "string") compactionTs.push(entry.timestamp);
+        continue;
+      }
+      const m = entry?.message;
+      if (entry?.type !== "message" || m?.role !== "assistant") continue;
+      if (typeof m.durationMs !== "number") continue;
+      turnDurations.push({
+        rid: typeof m.responseId === "string" ? m.responseId : null,
+        ts: typeof m.timestamp === "string" ? m.timestamp : typeof entry.timestamp === "string" ? entry.timestamp : null,
+        durationMs: m.durationMs,
+      });
+    }
+  } catch {
+    // keep whatever parsed before the read failed
+  }
+  const signals = { turnDurations, compactionTs };
+  sessionSignalsCache.set(sessionFile, { mtimeMs: st.mtimeMs, size: st.size, signals });
+  return signals;
+}
+
 /** User-prompt previews read from a raw session file (local only, capped). */
 export function readPrompts(sessionFile, cap = 200) {
   let content;
@@ -1166,6 +1419,7 @@ export function readPrompts(sessionFile, cap = 200) {
     const tsRaw = m.timestamp;
     prompts.push({
       ts: typeof tsRaw === "number" ? new Date(tsRaw).toISOString() : tsRaw ?? null,
+      text: raw,
       preview: raw.replace(/\s+/g, " ").trim().slice(0, 120),
     });
   }
@@ -1240,6 +1494,33 @@ export function subagentSpawnList(extract, cap = 50) {
 
 export function detailFor(extract) {
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  // Per-call cost: a turn's cost shared evenly across its calls (rid join),
+  // same attribution rule as summarizeSession's toolCosts; unmatched calls 0.
+  const calls = extract.calls ?? [];
+  const costByRid = new Map();
+  const callsByRid = new Map();
+  for (const c of calls) {
+    if (!c.rid) continue;
+    callsByRid.set(c.rid, (callsByRid.get(c.rid) ?? 0) + 1);
+  }
+  for (const t of extract.turns ?? []) {
+    const cost = t.usage?.cost?.total;
+    if (typeof cost !== "number" || cost === 0 || !t.rid || !callsByRid.has(t.rid)) continue;
+    costByRid.set(t.rid, (costByRid.get(t.rid) ?? 0) + cost);
+  }
+  const callCost = (rid) => {
+    if (!rid) return 0;
+    const total = costByRid.get(rid);
+    const n = callsByRid.get(rid);
+    return total === undefined || !n ? 0 : Number((total / n).toFixed(6));
+  };
+  // Raw durationMs joined to extract turns by response id — the only stable
+  // join, since pidx stamps extract turn ts differently from message ts.
+  const durByRid = new Map(
+    readSessionSignals(extract.path).turnDurations
+      .filter((d) => d.rid)
+      .map((d) => [d.rid, d.durationMs]),
+  );
   return {
     sessionId: extract.sessionId,
     project: extract.project,
@@ -1255,12 +1536,14 @@ export function detailFor(extract) {
       cacheWrite: num(t.usage?.cacheWrite),
       totalTokens: num(t.usage?.totalTokens),
       cost: num(t.usage?.cost?.total),
+      ...(durByRid.has(t.rid) && { durationMs: durByRid.get(t.rid) }),
     })),
-    calls: (extract.calls ?? []).map((c) => ({
+    calls: calls.map((c) => ({
       name: c.name,
       ts: c.ts,
       cmd: c.cmd ?? null,
       path: c.path ?? null,
+      cost: callCost(c.rid),
     })),
     timeline: sessionTimeline(extract),
     prompts: readPrompts(extract.path),

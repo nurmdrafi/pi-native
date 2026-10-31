@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { StatCard } from "@/components/StatCard";
 import { basename, fmtCount, fmtLatency, fmtMoney } from "@/lib/format";
+import type { SubagentResult, SnapshotWithFeeds } from "@/types-feeds";
 import type { Snapshot } from "@/types";
 
 /* subagent-helpers:begin — pure, dependency-free functions. Extracted
@@ -121,11 +122,30 @@ export function sessionsForAgent(
   }
   return out.sort((a, b) => b.spawns + b.messages - (a.spawns + a.messages));
 }
+
+/** Exit-code tone for a durable outcome row: a nonzero exit or an error
+ * message warns, a clean zero stays neutral, a missing code is muted. */
+export function outcomeTone(
+  exitCode: number | null,
+  error: string | null,
+): "warn" | "neutral" | "muted" {
+  if (error != null || (exitCode != null && exitCode !== 0)) return "warn";
+  if (exitCode === 0) return "neutral";
+  return "muted";
+}
+
+/** Epoch ms as a terse UTC "MM-DD HH:mm" stamp; a dash when unknown. */
+export function fmtEpochMs(ts: number | null): string {
+  if (ts == null || !Number.isFinite(ts)) return "—";
+  return new Date(ts).toISOString().slice(5, 16).replace("T", " ");
+}
 /* subagent-helpers:end */
 
+/** Spawns and messages are different meanings: spawns are counts (chart-3),
+ * messages are the traffic volume (chart-1) — distinct hues, no opacity code. */
 const projectConfig = {
   spawns: { label: "spawns", color: "var(--chart-3)" },
-  messages: { label: "messages", color: "var(--chart-3)" },
+  messages: { label: "messages", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
 const timelineConfig = {
@@ -255,6 +275,51 @@ function AgentSessionList({
   );
 }
 
+/** Amber only speaks for a failure: clean exits keep foreground ink and
+ * unknown codes stay muted. */
+const OUTCOME_TONES = {
+  warn: "text-warn-foreground",
+  neutral: "text-foreground",
+  muted: "text-muted-foreground",
+} as const;
+
+/** One durable subagent outcome: summary truncated with the full text on
+ * hover, an error line under it when the run failed. */
+function OutcomeRow({ result }: { result: SubagentResult }) {
+  const tone = OUTCOME_TONES[outcomeTone(result.exitCode, result.error)];
+  return (
+    <TableRow>
+      <TableCell
+        className="whitespace-nowrap font-mono text-xs text-muted-foreground"
+        title={result.ts != null ? new Date(result.ts).toISOString() : undefined}
+      >
+        {fmtEpochMs(result.ts)}
+      </TableCell>
+      <TableCell className="font-mono text-xs">{result.name ?? "—"}</TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground">{result.agent ?? "—"}</TableCell>
+      <TableCell className={`text-right tabular-nums text-xs ${tone}`} title={result.error ?? undefined}>
+        {result.exitCode ?? "—"}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-xs">
+        {result.elapsedMs != null ? fmtLatency(result.elapsedMs) : "—"}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-xs">
+        {result.costUsd != null ? fmtMoney(result.costUsd, 3) : "—"}
+      </TableCell>
+      <TableCell className="max-w-[320px] text-xs">
+        <div className="truncate" title={result.summary ?? undefined}>
+          {result.summary ?? "—"}
+        </div>
+        {result.error && (
+          <div className="truncate text-warn-foreground/90" title={result.error}>
+            {result.error}
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
 export function SubagentsTab({
   snapshot,
   onOpenSession,
@@ -264,6 +329,8 @@ export function SubagentsTab({
 }) {
   const agg = snapshot.aggregates.subagents;
   const aggRate = errorRate(agg.errors, agg.messages);
+  // Newest outcome first; feeds keep the inbox in append (chronological) order.
+  const recentOutcomes = ((snapshot as SnapshotWithFeeds).subagentResults ?? []).slice().reverse();
   const [sort, setSort] = useState<AgentSort>({ key: "spawns", dir: "desc" });
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const agents = useMemo(
@@ -341,6 +408,41 @@ export function SubagentsTab({
         />
       </div>
 
+      {recentOutcomes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-[13px] font-medium">
+              recent outcomes
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {recentOutcomes.length} finished · durable result inbox
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="max-h-80 rounded-md">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">time</TableHead>
+                    <TableHead scope="col">name</TableHead>
+                    <TableHead scope="col">agent</TableHead>
+                    <TableHead scope="col" className="text-right">exit</TableHead>
+                    <TableHead scope="col" className="text-right">elapsed</TableHead>
+                    <TableHead scope="col" className="text-right">cost</TableHead>
+                    <TableHead scope="col">summary</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recentOutcomes.map((r) => (
+                    <OutcomeRow key={r.id ?? `${r.ts}-${r.name}`} result={r} />
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-[13px] font-medium">subagent activity by project</CardTitle>
@@ -364,7 +466,7 @@ export function SubagentsTab({
                 <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={40} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Bar dataKey="spawns" stackId="a" fill="var(--color-spawns)" fillOpacity={0.9} radius={[0, 0, 0, 0]} />
-                <Bar dataKey="messages" stackId="a" fill="var(--color-messages)" fillOpacity={0.55} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="messages" stackId="a" fill="var(--color-messages)" fillOpacity={0.8} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ChartContainer>
           )}

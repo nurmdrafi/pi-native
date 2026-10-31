@@ -29,6 +29,7 @@ import {
   spendSummary,
   summarizeSession,
 } from "./data.mjs";
+import { readChildren, readRegistries, readSubagentResults } from "./feeds.mjs";
 // ── Config (defaults are the README environment table) ──────
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** pidx binary the snapshot is built with (`npm run bootstrap` installs it). */
@@ -61,6 +62,49 @@ function readGateRules() {
   } catch {
     return {};
   }
+}
+
+/** Live child-agent and result feeds for the snapshot. feeds.mjs never throws
+ * on unreadable files, but a permission error on the tree root can — the
+ * snapshot must survive that, so degrade to empty arrays. */
+function readFeeds() {
+  try {
+    return {
+      children: readChildren(SESSIONS_DIR),
+      subagentResults: readSubagentResults(REPO_ROOT),
+    };
+  } catch (err) {
+    console.error(`feeds read failed: ${err?.message}`);
+    return { children: [], subagentResults: [] };
+  }
+}
+
+/** Parent and spawned-children lineage for the session detail, joined from
+ * the spawner name registries: a registry's owner (the artifact dir name) is
+ * the parent session, its entries name that parent's children. Exported for
+ * tests; sessionsDir defaults to the configured tree. */
+export function lineageFor(sessionId, sessionsDir = SESSIONS_DIR) {
+  const lineage = { parent: null, children: [] };
+  try {
+    for (const { sessionId: spawnerId, entries } of readRegistries(sessionsDir)) {
+      for (const [name, entry] of Object.entries(entries ?? {})) {
+        if (entry == null || typeof entry !== "object") continue;
+        if (entry.sessionId === sessionId) {
+          lineage.parent ??= { sessionId: spawnerId, name };
+        }
+        if (spawnerId === sessionId && typeof entry.sessionId === "string") {
+          lineage.children.push({
+            name,
+            sessionId: entry.sessionId,
+            sessionFile: typeof entry.sessionFile === "string" ? entry.sessionFile : null,
+          });
+        }
+      }
+    }
+  } catch {
+    // An unreadable tree yields no lineage rather than a broken detail.
+  }
+  return lineage;
 }
 
 function runPidx() {
@@ -121,6 +165,10 @@ async function findActiveFiles() {
 /** Open SSE responses with the date window they asked for; a null bound means
  * unbounded, so the default client sees the whole history. */
 const sseClients = new Map();
+
+/** Snapshots built by the last cycle, keyed by range: lets GET /api/sessions
+ * reuse the 5s poll's work instead of recomputing per request. */
+let lastSnapshots = null;
 
 function broadcast(event, data) {
   for (const res of sseClients.keys()) {
@@ -199,6 +247,11 @@ export function snapshotFor(base, range) {
       }),
     },
     active: base.active,
+    // Live subagent feeds ride the same cycle; the guards keep older base
+    // builders (and any feeds failure upstream) at empty arrays instead of
+    // breaking the snapshot payload.
+    children: Array.isArray(base.children) ? base.children : [],
+    subagentResults: Array.isArray(base.subagentResults) ? base.subagentResults : [],
   };
 }
 
@@ -244,7 +297,17 @@ async function cycle(tailers) {
     a.project = projectByDir.get(dirname(a.path)) ?? a.project;
   }
   const sessions = raw.map(summarizeSession);
-  const base = { raw, sessions, active, generatedAt: new Date().toISOString() };
+  // Feeds are read after the tailers so a slow disk walk never delays the
+  // live broadcast, and never breaks the cycle when they fail.
+  const feeds = readFeeds();
+  const base = {
+    raw,
+    sessions,
+    active,
+    children: feeds.children,
+    subagentResults: feeds.subagentResults,
+    generatedAt: new Date().toISOString(),
+  };
   // One snapshot per distinct date window among the open streams: the window
   // is client state, so the payload cannot be shared.
   const byRange = new Map([[rangeKey({ from: null, to: null }), { from: null, to: null }]]);
@@ -255,6 +318,7 @@ async function cycle(tailers) {
     const snapshot = built.get(rangeKey(range));
     res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
   }
+  lastSnapshots = { built, at: Date.now() };
   return base;
 }
 
@@ -373,13 +437,34 @@ async function main() {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(detailFor(raw)));
+      const detail = detailFor(raw);
+      // Lineage is one registry join; attach only when it found something so
+      // older payloads (and feeds failures) stay untouched.
+      const lineage = lineageFor(id);
+      if (lineage.parent || lineage.children.length > 0) detail.lineage = lineage;
+      res.end(JSON.stringify(detail));
       return;
     }
     if (req.url?.startsWith("/api/sessions")) {
-      const base = await cycle(tailers);
-      const snapshot = snapshotFor(base, parseRange(req.url));
-      res.writeHead(200, { "content-type": "application/json" });
+      const range = parseRange(req.url);
+      const key = rangeKey(range);
+      const fresh =
+        lastSnapshots &&
+        Date.now() - lastSnapshots.at < POLL_MS &&
+        lastSnapshots.built.has(key);
+      let snapshot;
+      let cache;
+      if (fresh) {
+        snapshot = lastSnapshots.built.get(key);
+        cache = "hit";
+      } else {
+        const base = await cycle(tailers);
+        snapshot = lastSnapshots?.built.has(key)
+          ? lastSnapshots.built.get(key)
+          : snapshotFor(base, range);
+        cache = "miss";
+      }
+      res.writeHead(200, { "content-type": "application/json", "x-snapshot-cache": cache });
       res.end(JSON.stringify(snapshot));
       return;
     }

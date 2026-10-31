@@ -1,5 +1,6 @@
-import { X } from "lucide-react";
-import { Area, AreaChart, Bar, CartesianGrid, ComposedChart, Line, LineChart, XAxis, YAxis } from "recharts";
+import { Fragment, useState } from "react";
+import { ArrowDown, ArrowUpDown, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Area, Bar, CartesianGrid, ComposedChart, Line, LineChart, XAxis, YAxis } from "recharts";
 import { errorRate, errorRateLabel } from "@/components/SubagentsTab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,17 +22,37 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { sortedSkillRows } from "@/lib/burn";
-import { fmtLatency, fmtMoney } from "@/lib/format";
+import { basename, fmtCount, fmtLatency, fmtMoney } from "@/lib/format";
 import type { SessionDetail } from "@/types";
+import type {
+  DetailWithLineage,
+  PromptWithText,
+  SessionLineage,
+  TurnWithDuration,
+} from "@/types-feeds";
 
-/** Token counts are one meaning — one hue, depth by opacity. */
+/** Each token series is its own meaning, so each carries its own ramp hue:
+ * input chart-1 (primary volume), output chart-2 (secondary series),
+ * reasoning chart-4 (model mix), cache read chart-3 (raw counts). The cache
+ * family keeps one hue — cache write rides chart-3 at a lower fill opacity —
+ * and the turn total overlays chart-1 as a dashed line instead of stacking
+ * (it already contains the buckets). chart-5 stays reserved for blocks — red
+ * must never read as a token error. */
 const tokenConfig = {
-  input: { label: "input", color: "var(--chart-3)" },
-  output: { label: "output", color: "var(--chart-3)" },
-  reasoning: { label: "reasoning", color: "var(--chart-3)" },
+  input: { label: "input", color: "var(--chart-1)" },
+  output: { label: "output", color: "var(--chart-2)" },
+  reasoning: { label: "reasoning", color: "var(--chart-4)" },
   cacheRead: { label: "cache read", color: "var(--chart-3)" },
+  cacheWrite: { label: "cache write", color: "var(--chart-3)" },
+  totalTokens: { label: "total", color: "var(--chart-1)" },
 } satisfies ChartConfig;
-const TOKEN_FILL = { input: 0.5, output: 0.38, reasoning: 0.26, cacheRead: 0.15 } as const;
+/** One shared depth: the hues separate the stacks, opacity only quiets them. */
+const TOKEN_FILL_OPACITY = 0.72;
+/** The cache-write bucket sits under the same hue as cache read, so a lower
+ * fill keeps the two buckets readable when they stack. */
+const CACHE_WRITE_FILL_OPACITY = 0.45;
+/** Stacked buckets; the turn total is deliberately not among them. */
+const STACKED_TOKEN_KEYS = ["input", "output", "reasoning", "cacheRead", "cacheWrite"] as const;
 
 const costConfig = { cumulative: { label: "cumulative $", color: "var(--chart-1)" } } satisfies ChartConfig;
 const toolConfig = {
@@ -42,6 +63,87 @@ const timelineConfig = {
   cost: { label: "cost ($)", color: "var(--chart-1)" },
   calls: { label: "tool calls", color: "var(--chart-3)" },
 } satisfies ChartConfig;
+
+/** A parent or child reference in the lineage line: a real link when the
+ * host provides a handler, plain monospace text otherwise. */
+function LineageLink({
+  name,
+  sessionId,
+  onOpenSession,
+}: {
+  name: string | null;
+  sessionId: string;
+  onOpenSession?: (sessionId: string) => void;
+}) {
+  const short = sessionId.slice(0, 8);
+  const label = name ? `${name} (${short})` : short;
+  return onOpenSession ? (
+    <button
+      type="button"
+      onClick={() => onOpenSession(sessionId)}
+      title={`open ${sessionId}`}
+      className="rounded-sm font-mono text-[11px] text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      {label}
+    </button>
+  ) : (
+    <span className="font-mono text-[11px]" title={sessionId}>
+      {label}
+    </span>
+  );
+}
+
+/** The header lineage line: "child of <parent>" when this session was
+ * spawned, "spawned n: <children>" when it spawned — from the registry join
+ * the detail endpoint attaches. Hidden when the join found neither. */
+function LineageRow({
+  lineage,
+  onOpenSession,
+}: {
+  lineage: SessionLineage;
+  onOpenSession?: (sessionId: string) => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+      <span>lineage</span>
+      {lineage.parent && (
+        <>
+          <span>child of</span>
+          <LineageLink
+            name={lineage.parent.name}
+            sessionId={lineage.parent.sessionId}
+            onOpenSession={onOpenSession}
+          />
+        </>
+      )}
+      {lineage.parent && lineage.children.length > 0 && <span aria-hidden>·</span>}
+      {lineage.children.length > 0 && (
+        <>
+          <span>spawned {lineage.children.length}:</span>
+          {lineage.children.map((c, i) => (
+            <Fragment key={`${c.sessionId}-${i}`}>
+              {i > 0 && <span aria-hidden>,</span>}
+              <LineageLink name={c.name} sessionId={c.sessionId} onOpenSession={onOpenSession} />
+            </Fragment>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Turn-chart tooltip label: names the turn and appends its wall-clock
+ * duration only when the raw-file join produced one — absent stays silent
+ * rather than showing a fake 0s. */
+function turnTooltipLabel(
+  label: unknown,
+  payload: ReadonlyArray<{ payload?: { turn?: number; durationMs?: number } }>,
+) {
+  const point = payload?.[0]?.payload;
+  if (!point) return label == null ? "" : String(label);
+  const dur = point.durationMs != null ? ` · ${fmtLatency(point.durationMs)}` : "";
+  return `turn ${point.turn ?? label}${dur}`;
+}
 
 function MiniStat({ label, value, error }: { label: string; value: string; error?: boolean }) {
   return (
@@ -59,21 +161,48 @@ function MiniStat({ label, value, error }: { label: string; value: string; error
 export function SessionDetailPanel({
   detail,
   onClose,
+  onOpenSession,
 }: {
   detail: SessionDetail;
   onClose?: () => void;
+  onOpenSession?: (sessionId: string) => void;
 }) {
+  // Calls tab: cost column sorts desc-first (expensive calls surface first);
+  // the toggle flips to ascending. Order resets per session.
+  const [callsSort, setCallsSort] = useState<"desc" | "asc">("desc");
+  // Prompts tab: one disclosure per prompt — the row shows the preview, the
+  // expanded body the full text (falling back to the preview when the raw
+  // read missed and only the extract preview shipped).
+  const [openPrompts, setOpenPrompts] = useState<Set<number>>(() => new Set());
+  const togglePrompt = (i: number) =>
+    setOpenPrompts((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  const sortedCalls = [...detail.calls].sort((a, b) =>
+    callsSort === "desc" ? b.cost - a.cost : a.cost - b.cost,
+  );
+
   let running = 0;
-  const costCurve = detail.turns.map((t) => {
+  const turns = detail.turns as TurnWithDuration[];
+  const costCurve = turns.map((t) => {
     running += t.cost;
-    return { turn: t.i, cumulative: Number(running.toFixed(6)) };
+    return {
+      turn: t.i,
+      cumulative: Number(running.toFixed(6)),
+      ...(t.durationMs != null && { durationMs: t.durationMs }),
+    };
   });
-  const tokens = detail.turns.map((t) => ({
+  const tokens = turns.map((t) => ({
     turn: t.i,
     input: t.input,
     output: t.output,
     reasoning: t.reasoning,
     cacheRead: t.cacheRead,
+    cacheWrite: t.cacheWrite,
+    totalTokens: t.totalTokens,
   }));
   const toolCounts = new Map<string, number>();
   for (const c of detail.calls) toolCounts.set(c.name, (toolCounts.get(c.name) ?? 0) + 1);
@@ -90,13 +219,16 @@ export function SessionDetailPanel({
   const subagents =
     detail.subagents ?? { spawns: 0, messages: 0, lists: 0, errors: 0, avgLatencyMs: 0, byAgent: [] };
   const spawns = detail.subagentSpawns ?? [];
-  const prompts = detail.prompts ?? [];
+  const prompts = (detail.prompts ?? []) as PromptWithText[];
+  const lineage = (detail as DetailWithLineage).lineage;
   const gate = detail.summary.agent;
   const gateFamilies = Object.entries(gate.blocksByFamily ?? {}).sort((a, b) => b[1] - a[1]);
   const gateTagList = Object.entries(detail.summary.gateTags ?? {}).sort(
     (a, b) => b[1].block + b[1].warn - (a[1].block + a[1].warn),
   );
   const gateTools = Object.entries(detail.summary.blocksByTool ?? {}).sort((a, b) => b[1] - a[1]);
+  const isSubagent = detail.summary.kind === "subagent";
+  const parentName = detail.summary.parentSession ? basename(detail.summary.parentSession) : null;
 
   return (
     <Card className="flex h-full flex-col">
@@ -120,11 +252,31 @@ export function SessionDetailPanel({
           <span>{detail.summary.turns} turns</span>
           <span>{fmtMoney(detail.summary.cost, 2)} total</span>
           <span>cache {detail.summary.cacheHitRate}%</span>
+          {typeof detail.summary.tokensPerTurn === "number" && detail.summary.tokensPerTurn > 0 && (
+            <span>{fmtCount(detail.summary.tokensPerTurn)} tokens/turn</span>
+          )}
+          {typeof detail.summary.avgTurnCost === "number" && detail.summary.avgTurnCost > 0 && (
+            <span>{fmtMoney(detail.summary.avgTurnCost, 4)}/turn</span>
+          )}
         </div>
-        {(detail.compactions > 0 ||
+        {lineage && (lineage.parent || lineage.children.length > 0) && (
+          <LineageRow lineage={lineage} onOpenSession={onOpenSession} />
+        )}
+        {(isSubagent ||
+          detail.compactions > 0 ||
           detail.summary.agent.maxFailureStreak > 1 ||
           detail.summary.agent.blocks > 0) && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {isSubagent && (
+              <Badge
+                variant="outline"
+                className="gap-1.5 border py-0 text-[11px] font-medium border-border bg-muted text-muted-foreground"
+                title={parentName ? `subagent of ${parentName}` : undefined}
+              >
+                <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden />
+                subagent
+              </Badge>
+            )}
             {detail.compactions > 0 && (
               <Badge variant="outline">{detail.compactions} compaction{detail.compactions > 1 ? "s" : ""}</Badge>
             )}
@@ -140,14 +292,16 @@ export function SessionDetailPanel({
       <CardContent className="min-h-0 flex-1">
         <Tabs defaultValue="charts" className="flex h-full flex-col">
           <TabsList className="shrink-0 self-start">
-            <TabsTrigger value="charts">charts</TabsTrigger>
-            <TabsTrigger value="timeline">timeline</TabsTrigger>
-            <TabsTrigger value="tools">tools</TabsTrigger>
-            <TabsTrigger value="calls">calls</TabsTrigger>
-            <TabsTrigger value="skills">skills</TabsTrigger>
+            <TabsTrigger value="charts">charts ({detail.turns.length})</TabsTrigger>
+            <TabsTrigger value="timeline">timeline ({timeline.length})</TabsTrigger>
+            <TabsTrigger value="tools">tools ({tools.length})</TabsTrigger>
+            <TabsTrigger value="calls">calls ({detail.calls.length})</TabsTrigger>
+            <TabsTrigger value="skills">skills ({skillRows.length})</TabsTrigger>
             <TabsTrigger value="prompts">prompts ({prompts.length})</TabsTrigger>
-            <TabsTrigger value="subagents">subagents</TabsTrigger>
-            <TabsTrigger value="gate">gate</TabsTrigger>
+            {!isSubagent && (
+              <TabsTrigger value="subagents">subagents ({subagents.spawns})</TabsTrigger>
+            )}
+            <TabsTrigger value="gate">gate ({gate.blocks})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="charts" className="mt-3 min-h-0 flex-1">
@@ -159,7 +313,11 @@ export function SessionDetailPanel({
                     <CartesianGrid vertical={false} />
                     <XAxis dataKey="turn" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
                     <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={52} />
-                    <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent indicator="line" labelFormatter={turnTooltipLabel} />
+                      }
+                    />
                     <Line dataKey="cumulative" type="monotone" stroke="var(--color-cumulative)" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ChartContainer>
@@ -167,24 +325,36 @@ export function SessionDetailPanel({
               <div>
                 <div className="mb-1 text-xs text-muted-foreground">tokens per turn</div>
                 <ChartContainer config={tokenConfig} className="h-44 w-full">
-                  <AreaChart data={tokens}>
+                  <ComposedChart data={tokens}>
                     <CartesianGrid vertical={false} />
                     <XAxis dataKey="turn" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
                     <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={52} />
-                    <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
-                    {(["input", "output", "reasoning", "cacheRead"] as const).map((key) => (
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent indicator="line" labelFormatter={turnTooltipLabel} />
+                      }
+                    />
+                    {STACKED_TOKEN_KEYS.map((key) => (
                       <Area
                         key={key}
                         dataKey={key}
                         type="monotone"
                         stackId="t"
                         fill={`var(--color-${key})`}
-                        fillOpacity={TOKEN_FILL[key]}
+                        fillOpacity={key === "cacheWrite" ? CACHE_WRITE_FILL_OPACITY : TOKEN_FILL_OPACITY}
                         stroke={`var(--color-${key})`}
                         strokeWidth={1.5}
                       />
                     ))}
-                  </AreaChart>
+                    <Line
+                      dataKey="totalTokens"
+                      type="monotone"
+                      stroke="var(--color-totalTokens)"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 2"
+                      dot={false}
+                    />
+                  </ComposedChart>
                 </ChartContainer>
               </div>
             </div>
@@ -250,8 +420,29 @@ export function SessionDetailPanel({
             </div>
             <ScrollArea className="h-64 rounded border">
               <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="font-medium">tool</TableHead>
+                    <TableHead className="font-medium">command</TableHead>
+                    <TableHead className="font-medium">time</TableHead>
+                    <TableHead className="font-medium" aria-sort={callsSort === "desc" ? "descending" : "ascending"}>
+                      <button
+                        type="button"
+                        onClick={() => setCallsSort(callsSort === "desc" ? "asc" : "desc")}
+                        className="inline-flex items-center gap-1 text-xs hover:text-foreground"
+                      >
+                        cost
+                        {callsSort === "desc" ? (
+                          <ArrowDown className="size-3" aria-hidden />
+                        ) : (
+                          <ArrowUpDown className="size-3" aria-hidden />
+                        )}
+                      </button>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
                 <TableBody>
-                  {detail.calls.map((c, i) => (
+                  {sortedCalls.map((c, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-mono text-xs">{c.name}</TableCell>
                       <TableCell className="max-w-[280px] truncate font-mono text-xs text-muted-foreground" title={c.cmd ?? c.path ?? ""}>
@@ -259,6 +450,9 @@ export function SessionDetailPanel({
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                         {c.ts ? c.ts.slice(11, 19) : ""}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
+                        {c.cost != null ? fmtMoney(c.cost, 4) : "—"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -306,14 +500,35 @@ export function SessionDetailPanel({
             ) : (
               <ScrollArea className="h-64 rounded border">
                 <div className="divide-y">
-                  {prompts.map((p, i) => (
-                    <div key={i} className="flex gap-3 p-2">
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                        {p.ts ? p.ts.slice(11, 19) : "--:--:--"}
-                      </span>
-                      <span className="text-xs">{p.preview}</span>
-                    </div>
-                  ))}
+                  {prompts.map((p, i) => {
+                    const open = openPrompts.has(i);
+                    const full = (p.text && p.text.trim()) || p.preview;
+                    return (
+                      <div key={i}>
+                        <button
+                          type="button"
+                          onClick={() => togglePrompt(i)}
+                          aria-expanded={open}
+                          className="flex w-full items-start gap-2 p-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/60"
+                        >
+                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                            {p.ts ? p.ts.slice(11, 19) : "--:--:--"}
+                          </span>
+                          {open ? (
+                            <ChevronDown className="mt-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden />
+                          ) : (
+                            <ChevronRight className="mt-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-xs">{p.preview}</span>
+                        </button>
+                        {open && (
+                          <div className="max-h-48 overflow-y-auto whitespace-pre-wrap border-t bg-muted/30 px-2 py-1.5 font-mono text-[11px] leading-relaxed">
+                            {full}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </ScrollArea>
             )}
@@ -321,7 +536,7 @@ export function SessionDetailPanel({
 
           <TabsContent value="gate" className="mt-3 min-h-0 flex-1">
             <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-              <MiniStat label="blocks" value={String(gate.blocks)} />
+              <MiniStat label="blocks" value={String(gate.blocks)} error={gate.blocks > 0} />
               <MiniStat label="repeat w/o change" value={String(gate.repeatWithoutChange)} />
               <MiniStat label="failure streak calls" value={String(gate.failureStreakCalls)} />
               <MiniStat label="max streak" value={String(gate.maxFailureStreak)} />
@@ -376,6 +591,7 @@ export function SessionDetailPanel({
             </div>
           </TabsContent>
 
+          {!isSubagent && (
           <TabsContent value="subagents" className="mt-3 min-h-0 flex-1">
             <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
               <MiniStat label="spawns" value={String(subagents.spawns)} />
@@ -463,6 +679,7 @@ export function SessionDetailPanel({
               results and raw spawn arguments.
             </p>
           </TabsContent>
+          )}
         </Tabs>
       </CardContent>
     </Card>

@@ -2,6 +2,11 @@ export interface SessionSummary {
   sessionId: string;
   project: string;
   path: string;
+  /** Lineage: "main" sessions run standalone; "subagent" sessions were
+   * spawned by a parent session, named (basename) in `parentSession` — null
+   * for main sessions. */
+  kind: "main" | "subagent";
+  parentSession: string | null;
   turns: number;
   cost: number;
   models: string[];
@@ -180,6 +185,24 @@ export interface PromptItem {
   preview: string;
 }
 
+/** Volume counts for one day of the byDay cost series. */
+export interface DayCountMetrics {
+  turns: number;
+  calls: number;
+}
+
+/** Per-model token totals behind the cost mix. */
+export interface ModelTokenRollup {
+  model: string;
+  turns: number;
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+}
+
 export interface Aggregates {
   byDay: Record<string, number>;
   byProject: ProjectRollup[];
@@ -196,6 +219,29 @@ export interface Aggregates {
   alerts: CostAlert[];
   subagents: SubagentMetrics;
   gate: GateSummary;
+  /** Median / p95 session duration in seconds; null when fewer than two
+   * timed sessions. Absent on older snapshots. */
+  duration?: { p50Sec: number | null; p95Sec: number | null };
+  /** Median / p95 turn latency in ms; null when fewer than two sampled
+   * turns. Absent on older snapshots. */
+  turnLatency?: { p50Ms: number | null; p95Ms: number | null };
+  /** Tool-call error rollup. toolErrorRate and each byTool rate are
+   * fractions (0–1), not percents. Absent on older snapshots. */
+  errors?: {
+    toolErrors: number;
+    toolErrorRate: number;
+    byTool: { tool: string; errors: number; calls: number; rate: number }[];
+  };
+  /** Daily volume behind byDay's costs. Absent on older snapshots. */
+  byDayCounts?: Record<string, DayCountMetrics>;
+  /** Context-window compactions per day, days ascending. Absent on older
+   * snapshots. */
+  compactionsByDay?: { day: string; count: number }[];
+  /** Project-by-day cost grid: cells[projectIndex][dayIndex]. Absent on
+   * older snapshots. */
+  projectDay?: { projects: string[]; days: string[]; cells: number[][] };
+  /** Per-model token totals. Absent on older snapshots. */
+  modelTokenMix?: ModelTokenRollup[];
 }
 
 export interface ActiveSession {
@@ -236,6 +282,9 @@ export interface CallDetail {
   ts: string;
   cmd: string | null;
   path: string | null;
+  /** Turn cost shared evenly across the turn's calls (rid join); 0 when the
+   * call never matched a billed turn. */
+  cost: number;
 }
 
 export interface SessionDetail {

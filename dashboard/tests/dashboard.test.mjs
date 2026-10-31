@@ -16,6 +16,7 @@ import {
   gateSummary,
   readPrompts,
   readSubagentArgs,
+  sessionKind,
   sessionTimeline,
   spendSummary,
   subagentMetrics,
@@ -223,10 +224,31 @@ describe("detailFor", () => {
       totalTokens: 117,
       cost: 0.25,
     });
-    assert.deepEqual(d.calls[0], { name: "pibash", ts: "2026-10-29T10:00:05Z", cmd: "ls", path: null });
+    assert.deepEqual(d.calls[0], { name: "pibash", ts: "2026-10-29T10:00:05Z", cmd: "ls", path: null, cost: 0.25 });
     assert.equal(d.compactions, 2);
     assert.deepEqual(d.skills, { ponytail: 1 });
     assert.deepEqual(d.usageByModel, { m1: { turns: 1, costTotal: 0.25 } });
+  });
+
+  it("attributes turn cost to calls by rid, shared and orphan-safe", () => {
+    const d = detailFor({
+      v: 2,
+      sessionId: "d3",
+      project: "/p",
+      path: "/x",
+      turns: [
+        { rid: "a", ts: "2026-10-29T10:00:00Z", model: "m1", usage: { cost: { total: 0.4 } } },
+        { rid: "b", ts: "2026-10-29T10:01:00Z", model: "m1" },
+      ],
+      calls: [
+        { name: "piread", ts: "2026-10-29T10:00:01Z", rid: "a", cmd: "x", path: null },
+        { name: "pibash", ts: "2026-10-29T10:00:02Z", rid: "a", cmd: "y", path: null },
+        { name: "piedit", ts: "2026-10-29T10:00:03Z", rid: "zz", cmd: "z", path: null },
+      ],
+    });
+    assert.equal(d.calls[0].cost, 0.2);
+    assert.equal(d.calls[1].cost, 0.2);
+    assert.equal(d.calls[2].cost, 0);
   });
 
   it("tolerates missing turns usage, calls, compactions, skills", () => {
@@ -556,6 +578,89 @@ describe("readSubagentArgs", () => {
 
   it("returns an empty map for a missing file", () => {
     assert.equal(readSubagentArgs(join(tmpdir(), "no-such-file.jsonl")).size, 0);
+  });
+});
+
+describe("sessionKind", () => {
+  const extractOver = (path) => ({
+    v: 2,
+    sessionId: "k1",
+    project: "/proj/k",
+    path,
+    turns: [{ rid: "r1", ts: "2026-10-29T10:00:00Z", model: "m1", usage: {} }],
+    usage: {},
+    calls: [],
+  });
+
+  it("marks a seeded child session subagent and reports its parent basename", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dash-kind-"));
+    const file = join(dir, "session.jsonl");
+    writeFileSync(
+      file,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "k1",
+          timestamp: "2026-10-31T09:48:45.296Z",
+          cwd: "/tmp/x",
+          parentSession: "/sess/parent-dir/2026-10-31T09-48-38-449Z_parent-id.jsonl",
+        }),
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "ok" } }),
+        "",
+      ].join("\n"),
+    );
+    try {
+      assert.equal(sessionKind(file), "subagent");
+      const s = summarizeSession(extractOver(file));
+      assert.equal(s.kind, "subagent");
+      assert.equal(s.parentSession, "2026-10-31T09-48-38-449Z_parent-id.jsonl");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a session subagent when only a loadout sidecar marks it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dash-kind-"));
+    const file = join(dir, "session.jsonl");
+    writeFileSync(
+      file,
+      JSON.stringify({ type: "session", version: 3, id: "k2", timestamp: "2026-10-31T09:48:45.296Z", cwd: "/tmp/x" }) + "\n",
+    );
+    writeFileSync(`${file}.loadout.json`, JSON.stringify({ agent: "scout" }));
+    try {
+      assert.equal(sessionKind(file), "subagent");
+      const s = summarizeSession(extractOver(file));
+      assert.equal(s.kind, "subagent");
+      assert.equal(s.parentSession, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a plain session main", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dash-kind-"));
+    const file = join(dir, "session.jsonl");
+    writeFileSync(
+      file,
+      JSON.stringify({ type: "session", version: 3, id: "k3", timestamp: "2026-10-31T09:48:45.296Z", cwd: "/tmp/x" }) + "\n",
+    );
+    try {
+      assert.equal(sessionKind(file), "main");
+      const s = summarizeSession(extractOver(file));
+      assert.equal(s.kind, "main");
+      assert.equal(s.parentSession, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to main for a missing or unreadable session file", () => {
+    assert.equal(sessionKind(join(tmpdir(), "dash-kind-missing.jsonl")), "main");
+    assert.equal(sessionKind(tmpdir()), "main"); // directory: unreadable as a session file
+    const s = summarizeSession(extractOver(join(tmpdir(), "dash-kind-missing.jsonl")));
+    assert.equal(s.kind, "main");
+    assert.equal(s.parentSession, null);
   });
 });
 

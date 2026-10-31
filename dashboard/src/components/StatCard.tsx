@@ -16,6 +16,7 @@ export function StatCard({
   hint,
   href,
   valueClassName,
+  hintClassName,
 }: {
   icon: LucideIcon;
   label: string;
@@ -25,6 +26,9 @@ export function StatCard({
   /** State tint for the value (e.g. text-error-foreground); colors carry
    * state, so only pass one when the metric is in that state. */
   valueClassName?: string;
+  /** State tint for the hint line (e.g. a warn trend); same rule — the text
+   * carries the fact, the tint only carries the state. */
+  hintClassName?: string;
 }) {
   const card = (
     <Card className="h-full">
@@ -41,7 +45,14 @@ export function StatCard({
         >
           {value}
         </div>
-        <div className="mt-1 truncate text-xs text-muted-foreground">{hint ?? "\u00a0"}</div>
+        <div
+          className={cn(
+            "mt-1 truncate text-xs text-muted-foreground",
+            hintClassName,
+          )}
+        >
+          {hint ?? "\u00a0"}
+        </div>
       </CardContent>
     </Card>
   );
