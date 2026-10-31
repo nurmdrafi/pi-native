@@ -144,7 +144,12 @@ function resolveToolPath(input: string, cwd: string): string {
 
 /** Read-tool params (schema: path + optional 1-based offset/limit + optional
  * `hits` fused locate+read selector — exclusive with offset/limit). */
-type ReadParams = { path: string; offset?: number; limit?: number; hits?: string };
+type ReadParams = {
+  path: string;
+  offset?: number | null;
+  limit?: number | null;
+  hits?: string | null;
+};
 
 /** Structural shape of the built-in read result — the only contract piread rebuilds. */
 type ReadResult = {
@@ -486,8 +491,6 @@ async function oneshotDispatch(
   }
 }
 
-import { appendReadRecord } from "./ledger.ts";
-
 export default function pireadExtension(pi: ExtensionAPI): void {
   announceNativeTool("piread", fileURLToPath(import.meta.url));
 
@@ -508,10 +511,27 @@ export default function pireadExtension(pi: ExtensionAPI): void {
     onUpdate: unknown,
     ctx: unknown,
   ): Promise<ReadResult> => {
-    const { path, offset, limit, hits } = params;
+    const { path, offset: rawOffset, limit: rawLimit, hits: rawHits } = params;
     if (typeof path !== "string") {
       throw new Error("piread: path must be a string");
     }
+    // JSON null is the wire form of an omitted optional parameter (the
+    // advertised schema offers null wherever a key may be left out);
+    // normalize it once so the guards and every dispatch rung below see a
+    // single absence shape.
+    const absent = <T>(v: T | null | undefined): T | undefined =>
+      v === null ? undefined : v;
+    const offset = absent(rawOffset);
+    const limit = absent(rawLimit);
+    const rawNeedle = absent(rawHits);
+    // A client that serializes JSON null into this string parameter sends the
+    // literal "null" (or "undefined") — an absent selector, not a needle.
+    // Reading it as a selector rejected every paged read as a fused+offset
+    // misuse and searched for the word "null" when sent alone.
+    const hits =
+      typeof rawNeedle === "string" && /^(?:null|undefined)$/i.test(rawNeedle.trim())
+        ? undefined
+        : rawNeedle;
     // Fused-mode screening mirrors the CLI contract: a nonsense needle is a
     // usage error, and combining `hits` with paging would silently turn a
     // locate into a paged read — reject both up front instead of dispatching.
@@ -568,18 +588,6 @@ export default function pireadExtension(pi: ExtensionAPI): void {
         typeof message === "string" && message ? message : "piread: native read failed",
       );
     }
-    // Durable read ledger: index this read (path, omissions, stat/hash) in
-    // the repo's ledger BEFORE returning — best-effort, never fails the read.
-    appendReadRecord({
-      cwd: spawnCwd,
-      sessionId:
-        (ctx as { sessionManager?: { getSessionId?(): string } } | undefined)?.sessionManager
-          ?.getSessionId?.() ?? null,
-      file: resolvedPath,
-      params,
-      envelope,
-    });
-
     return {
       content: [{ type: "text", text: envelope.content }],
       details: {
@@ -605,6 +613,12 @@ export default function pireadExtension(pi: ExtensionAPI): void {
   // `hits` fused locate+read selector (default reads stay byte-identical).
   pi.registerTool({
     ...definition,
+    // The spread's display renderer is typed against the built-in's
+    // params; the null-widened optionals below no longer unify with that
+    // nested identity (the same dual-copy problem the execute cast below
+    // bridges). The member stays the built-in's renderer verbatim — it
+    // renders results and never reads the args shape — so re-assert it.
+    renderResult: definition.renderResult as never,
     name: "piread",
     label: "piread",
     description:
@@ -616,14 +630,25 @@ export default function pireadExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
       offset: Type.Optional(
-        Type.Number({ description: "Line number to start reading from (1-indexed)" }),
+        Type.Union([
+          Type.Number({ description: "Line number to start reading from (1-indexed)" }),
+          Type.Null(),
+        ]),
       ),
-      limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+      limit: Type.Optional(
+        Type.Union([
+          Type.Number({ description: "Maximum number of lines to read" }),
+          Type.Null(),
+        ]),
+      ),
       hits: Type.Optional(
-        Type.String({
-          description:
-            "Fused locate+read: return merged context windows around every line containing this string (literal, case-sensitive). Cannot combine with offset/limit.",
-        }),
+        Type.Union([
+          Type.String({
+            description:
+              "Fused locate+read: return merged context windows around every line containing this string (literal, case-sensitive). Cannot combine with offset/limit.",
+          }),
+          Type.Null(),
+        ]),
       ),
     }),
     execute: execute as typeof definition.execute,

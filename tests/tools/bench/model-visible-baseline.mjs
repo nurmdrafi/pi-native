@@ -40,7 +40,7 @@ const { createReadTool, createBashTool, createEditTool } = await import(
   join(pkgLink, "dist", "index.js"),
 );
 
-const native = (name) => import(`../extensions/${name}/index.ts`);
+const native = (name) => import(`../../../extensions/${name}/index.ts`);
 const pireadExt = (await native("piread")).default;
 const pibashExt = (await native("pibash")).default;
 const pieditExt = (await native("piedit")).default;

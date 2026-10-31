@@ -43,7 +43,11 @@ test("schema exposes optional hits alongside the paging params", () => {
   assert.ok(props.path, "path kept");
   assert.ok(props.offset, "offset kept");
   assert.ok(props.limit, "limit kept");
-  assert.equal(props.hits?.type, "string", "hits is an optional string");
+  assert.deepEqual(
+    (props.hits?.anyOf ?? []).map((s) => s.type),
+    ["string", "null"],
+    "hits is an optional string that also accepts null",
+  );
 });
 
 test("fused read serves rg-shaped numbered windows via the daemon", async () => {
@@ -83,6 +87,23 @@ test("hits combined with paging params is rejected up front", async () => {
   const withLimit = await call({ path: FILE, hits: "target", limit: 5 });
   assert.ok(!withLimit.ok, "limit+hits must reject");
   assert.match(withLimit.err, /cannot combine/);
+});
+
+// A client that serializes JSON null into a string parameter sends the
+// literal "null" — that is an absent selector, not a needle to search for.
+// Reading it as a selector turned every paged read into a rejected call.
+test("a null-serialized hits value is absent, not a needle", async () => {
+  const paged = await call({ path: FILE, offset: 1, limit: 5, hits: "null" });
+  assert.ok(paged.ok, `paging must not reject: ${paged.err ?? ""}`);
+  assert.match(paged.r.content[0].text, /(^|\n)line 0/);
+
+  const alone = await call({ path: FILE, hits: "NULL" });
+  assert.ok(alone.ok, `plain read must not reject: ${alone.err ?? ""}`);
+  assert.ok(
+    !/no lines matching/.test(alone.r.content[0].text),
+    "a null-serialized selector must not search for the text 'NULL'",
+  );
+  assert.match(alone.r.content[0].text, /(^|\n)(?:1:)?line 0/);
 });
 
 test("empty hits is a usage error", async () => {

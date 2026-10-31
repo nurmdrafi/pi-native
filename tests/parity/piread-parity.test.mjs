@@ -200,10 +200,18 @@ add("registration: individual name/label, schema keeps the built-in params verba
   const actual = shape(wrapped.parameters);
   const expected = shape(sdkDefinition.parameters);
   assert.deepEqual(actual.properties.path, expected.properties.path);
-  assert.deepEqual(actual.properties.offset, expected.properties.offset);
-  assert.deepEqual(actual.properties.limit, expected.properties.limit);
+  // Sanctioned deviation: each optional param accepts explicit JSON null —
+  // the wire form of an omitted key — so offset/limit are the built-in's
+  // schema unioned with null; path stays shape-equal verbatim.
+  const nullExtended = (schema) => ({ anyOf: [schema, { type: "null" }] });
+  assert.deepEqual(actual.properties.offset, nullExtended(expected.properties.offset));
+  assert.deepEqual(actual.properties.limit, nullExtended(expected.properties.limit));
   assert.deepEqual(Object.keys(actual.properties), ["path", "offset", "limit", "hits"]);
-  assert.equal(actual.properties.hits.type, "string", "hits is a string param");
+  assert.deepEqual(
+    actual.properties.hits.anyOf?.map((s) => s.type),
+    ["string", "null"],
+    "hits is a string param that also accepts null",
+  );
   assert.deepEqual(actual.required ?? [], expected.required ?? []);
   assert.deepStrictEqual(wrapped.outputSchema, sdkDefinition.outputSchema);
   assert.deepStrictEqual(wrapped.constrainedSampling, sdkDefinition.constrainedSampling);

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-16T20:52:18.675Z",
+  "generatedAt": "2026-10-31T07:42:20.557Z",
   "rows": [
     {
       "name": "read small (4ln)",
@@ -21,9 +21,9 @@
       "name": "read mid200 (full)",
       "tool": "piread",
       "native": {
-        "bytes": 6580,
-        "tokens": 1645,
-        "words": 1400,
+        "bytes": 3159,
+        "tokens": 790,
+        "words": 680,
         "rejected": false
       },
       "builtin": {
@@ -85,9 +85,9 @@
       "name": "read ~300ln",
       "tool": "piread",
       "native": {
-        "bytes": 12343,
-        "tokens": 3086,
-        "words": 1701,
+        "bytes": 3701,
+        "tokens": 926,
+        "words": 510,
         "rejected": false
       },
       "builtin": {
@@ -101,9 +101,9 @@
       "name": "read ~1000ln",
       "tool": "piread",
       "native": {
-        "bytes": 41275,
-        "tokens": 10319,
-        "words": 5688,
+        "bytes": 4208,
+        "tokens": 1052,
+        "words": 580,
         "rejected": false
       },
       "builtin": {
@@ -117,9 +117,9 @@
       "name": "read ~1922ln",
       "tool": "piread",
       "native": {
-        "bytes": 51188,
-        "tokens": 12797,
-        "words": 7052,
+        "bytes": 4172,
+        "tokens": 1043,
+        "words": 571,
         "rejected": false
       },
       "builtin": {
@@ -133,9 +133,9 @@
       "name": "read ~1000ln (repeat)",
       "tool": "piread",
       "native": {
-        "bytes": 41275,
-        "tokens": 10319,
-        "words": 5688,
+        "bytes": 4208,
+        "tokens": 1052,
+        "words": 580,
         "rejected": false
       },
       "builtin": {
@@ -451,9 +451,9 @@
   ],
   "totals": {
     "native": {
-      "bytes": 161666,
-      "tokens": 40424,
-      "words": 23027
+      "bytes": 28453,
+      "tokens": 7121,
+      "words": 4419
     },
     "builtin": {
       "bytes": 272872,

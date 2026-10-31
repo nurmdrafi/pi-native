@@ -91,3 +91,21 @@ unfalsifiable.
 `native failure:` / `native error:` cases; the corpus matrix moved pathological
 params to `rejects pathological params:`; the cross-rung check asserts the
 missing-binary rung rejects.
+
+## piread — explicit JSON `null` in optional params
+
+**What.** Explicit `null` for `offset`, `limit`, or `hits` behaves exactly
+like an omitted key, and the declared schema offers `null` as an accepted
+alternative for each optional. The string forms `"null"`/`"undefined"` in
+`hits` also stay an absent selector, not a needle. A `null` alongside a real
+value composes (`{offset: null, limit: 2}` is the same window as
+`{limit: 2}`).
+
+**Why.** The wire schema advertises `anyOf: [T, null]` wherever a parameter
+may be omitted, so clients legitimately send `null`; treating it as a type
+error rejected those calls instead of reading the file.
+
+**Affected assertions.** The registration lock-in compares `offset`/`limit`
+to the built-in's schema unioned with `null`; `hits` pins
+`anyOf: ["string", "null"]`; the null-params suite pins
+omitted-vs-`null` equivalence end to end.
