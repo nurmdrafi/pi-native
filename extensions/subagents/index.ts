@@ -1096,12 +1096,7 @@ function applySandboxToParts(
     // the sandbox. PI_SUBAGENT_EXTRA_EXTENSIONS (colon-separated paths)
     // overrides; default re-enables the permission-gate extension when present
     // so sandboxed subagents keep the parent session's context-economy guards.
-    const extraExts = (
-      process.env.PI_SUBAGENT_EXTRA_EXTENSIONS ?? join(homedir(), ".pi", "agent", "extensions", "permission-gate.ts")
-    )
-      .split(":")
-      .map((p) => p.trim())
-      .filter(Boolean);
+    const extraExts = defaultExtraExtensions();
     for (const extPath of extraExts) {
       if (!extPaths.has(extPath) && existsSync(extPath)) parts.push("-e", shellEscape(extPath));
     }
@@ -1109,6 +1104,22 @@ function applySandboxToParts(
       parts.push("-e", shellEscape(extPath));
     }
   }
+}
+
+/** Extra global extensions re-enabled inside a sandboxed child when
+ * PI_SUBAGENT_EXTRA_EXTENSIONS (colon-separated paths) does not override.
+ * The permission gate ships as an extension DIRECTORY
+ * (<agent-home>/extensions/permission-gate with index.ts inside); the
+ * extension loader resolves a directory argument to its index.ts. A ".ts"
+ * suffix here points at a file that does not exist in a directory-based
+ * layout, silently dropping the gate from every allowlisted spawn. */
+function defaultExtraExtensions(): string[] {
+  return (
+    process.env.PI_SUBAGENT_EXTRA_EXTENSIONS ?? join(homedir(), ".pi", "agent", "extensions", "permission-gate")
+  )
+    .split(":")
+    .map((p) => p.trim())
+    .filter(Boolean);
 }
 
 function buildPiPromptArgs(params: {
@@ -1765,6 +1776,7 @@ export const __test__ = {
   resolveEffectiveInteractive,
   buildSubagentToolAllowlist,
   applySandboxToParts,
+  defaultExtraExtensions,
   buildPiPromptArgs,
   formatWidgetRightLabel,
   observeRunningSubagent,

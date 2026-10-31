@@ -3,7 +3,7 @@ import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import * as subagentsModule from "../../extensions/subagents/index.ts";
@@ -1357,6 +1357,60 @@ describe("subagent discovery", () => {
   it("buildSubagentToolAllowlist returns null without an explicit tool restriction", () => {
     assert.equal(testApi.buildSubagentToolAllowlist(undefined), null);
     assert.equal(testApi.buildSubagentToolAllowlist(""), null);
+  });
+
+  it("default extra-extension path is the permission-gate directory, not a .ts file", () => {
+    const paths = testApi.defaultExtraExtensions();
+    assert.ok(
+      Array.isArray(paths) && paths.length === 1,
+      `expected exactly one default extra extension, got ${JSON.stringify(paths)}`,
+    );
+    assert.ok(!paths[0].endsWith(".ts"), `dead .ts default leaked: ${paths[0]}`);
+    assert.equal(paths[0], join(homedir(), ".pi", "agent", "extensions", "permission-gate"));
+  });
+
+  it("applySandboxToParts re-enables the gate directory form in sandboxed launch args", () => {
+    const saved = process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
+    delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
+    try {
+      withTempDir((d) => {
+        const parts: string[] = [];
+        testApi.applySandboxToParts(
+          parts,
+          {
+            agent: "worker",
+            toolAllowlist: "read",
+            model: null,
+            thinking: null,
+            systemPromptMode: null,
+            identity: null,
+            spawnable: null,
+            autoExit: false,
+            cwd: null,
+            agentDir: null,
+          },
+          { artifactDir: d, name: "worker" },
+        );
+        const gateArgs = parts
+          .map((p, i) => (parts[i - 1] === "-e" ? p : null))
+          .filter((p): p is string => !!p && p.includes("permission-gate"));
+        for (const arg of gateArgs) {
+          assert.ok(!arg.includes("permission-gate.ts"), `dead .ts default leaked into launch args: ${arg}`);
+        }
+        // The gate ships as a directory in this layout; only assert the -e
+        // push where that directory actually exists.
+        const gateDir = join(homedir(), ".pi", "agent", "extensions", "permission-gate");
+        if (existsSync(gateDir)) {
+          assert.ok(
+            gateArgs.some((a) => a.replace(/'/g, "") === gateDir),
+            `expected -e ${gateDir} in launch args`,
+          );
+        }
+      });
+    } finally {
+      if (saved === undefined) delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
+      else process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = saved;
+    }
   });
 
   it("applySandboxToParts replays model, identity, and default-deny tool restriction", () => {
