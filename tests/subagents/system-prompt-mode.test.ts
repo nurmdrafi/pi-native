@@ -2,6 +2,10 @@
  * Smoke tests for the systemPromptMode feature.
  * Tests: frontmatter parsing, identity routing, CLI flag generation.
  */
+// Scrub inherited child-identity env and redirect the durable inbox BEFORE any
+// extension import loads — every invocation style must get the same isolation.
+import "./test-env.ts";
+
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

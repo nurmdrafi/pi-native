@@ -2,6 +2,10 @@
  * Registry sync: a (re)started spawner session must see its registered
  * subagents so it resumes them by name instead of spawning replacements.
  */
+// Scrub inherited child-identity env and redirect the durable inbox BEFORE any
+// extension import loads — every invocation style must get the same isolation.
+import "./test-env.ts";
+
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
