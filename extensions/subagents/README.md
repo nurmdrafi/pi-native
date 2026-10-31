@@ -52,7 +52,9 @@ nothing can be delivered to the dying session. Each orphan is persisted as a
 `subagent-pending/<id>.json` sidecar under the parent session's artifacts dir
 (name, session file, surface, timestamps); the next session in the same project
 surfaces them at start. The child keeps running in its tmux pane — its result
-lands in its session file, recoverable via `subagent_message`.
+lands in its session file, recoverable via `subagent_message`. That session
+also adopts the orphans: live panes are re-watched and their results
+delivered; dead ones finalize as `pane_lost`.
 
 ## How a spawn works
 
@@ -67,6 +69,40 @@ lands in its session file, recoverable via `subagent_message`.
    in the parent polls for it (or a `.exit` sidecar on error) and delivers the
    child's final assistant message back to the parent as a steer message.
 
+## Steering and resume
+
+`subagent_message({ name, message })` steers a running child — delivered at
+its next turn boundary — or, by the same name, resumes a finished session.
+Resume replays the sandbox snapshot recorded at spawn (tools, model, identity,
+nested-spawn allowlist); it is refused without the snapshot rather than
+relaunching unrestricted, and a name still running is steered instead of
+resumed (two processes on one session file would corrupt it). Both paths are
+fire-and-forget: the result arrives later as a steer message. Resumed and
+auto-restarted runs are not re-budgeted.
+
+## Pane recovery
+
+Any pane touch can fail with tmux `can't find pane` — a reaped window, an
+externally killed pane, a stale cached pane id. Each lifecycle step self-heals:
+
+- **split origin** — a `split-window` whose from-pane is dead resets the cached
+  agents-session pane id and re-splits once from a live pane (`tmux.ts`
+  `createSurfaceSplit`);
+- **delivery** — spawn and resume deliver the launch script by replacing the
+  pane process; on pane loss one replacement surface is created and the script
+  redelivered exactly once; a second loss fails the call with retry guidance
+  (`index.ts` `deliverLaunchScript`);
+- **steer** — a message that hits a lost pane waits up to 5 s (200 ms steps)
+  for the watcher to restart the child or finalize the entry, then delivers to
+  the replacement pane; otherwise it errors, and a resend resolves to resume
+  (`index.ts` `steerSubagent`);
+- **watch** — on pane loss the watcher attempts exactly one automatic restart:
+  a fresh pane resumes the durable session file with the spawn-time sandbox
+  snapshot replayed (pi-CLI auto-exit children only, never after a budget
+  breach). A refused or failed restart synthesizes a `pane_lost` result from
+  the session file; a confirmed budget breach reports `budget_exceeded`
+  instead (`index.ts` `watchSubagent`, `restartLostPane`).
+
 ## Headless / print-mode parents (2026-10 fixes)
 
 A `pi -p` parent exits as soon as its turn ends. Children are independent
@@ -79,7 +115,7 @@ is gone); recover it from the child's session file:
 - A resumed parent (`pi --session <parent-file> "…"`) can read it, or steer it
   in manually between markers.
 
-History — three defects fixed 2026-10-10, all reproducing only outside the
+History — four defects fixed 2026-10-10, all reproducing only outside the
 TUI:
 
 | symptom | root cause | fix |
@@ -98,13 +134,13 @@ the pre-typing delay and is unnecessary for `respawn-pane` delivery.
 | --- | --- |
 | model says it has no `subagent` tool | tools gated — `PI_SUBAGENTS=1`, `/subagents on`, or a `/subagents <agent> <task>` spawn |
 | `Install tmux (…)` result | tmux binary missing |
-| spawn fails, `can't find pane` | stale `pi-agents` state — `tmux kill-session -t pi-agents` and retry |
+| spawn fails, `can't find pane` | rare — split and delivery self-heal (see Pane recovery); persistent failures mean stale `pi-agents` state — `tmux kill-session -t pi-agents` and retry |
 | child result missing after a headless run | expected on parent exit — see recovery above; the child kept running in `pi-agents` |
 
 ## Tests
 
 ```sh
-node --test tests/subagents/test.ts          # unit, mocked tmux
+npm run test:subagents                      # unit, mocked tmux
 node tests/subagents/system-prompt-mode.test.ts
 npm run typecheck
 ```
