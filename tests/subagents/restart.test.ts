@@ -415,6 +415,43 @@ describe("sweep wiring (finalizeLostSubagent)", () => {
   });
 });
 
+describe("stalled finalize gate", () => {
+  it("restarts a stalled child only after recovery was attempted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "restart-stallgate-"));
+    const sessionFile = writeSessionFixture(dir);
+    writeLoadoutFixture(sessionFile, dir);
+    const pi = fakePi();
+    const f = fakeRestartDeps();
+    const recovered = fakeRunning({
+      sessionFile,
+      cwd: dir,
+      stallRecovery: { nudgedAt: Date.now() - 5_000 },
+    });
+
+    __test__.finalizeLostSubagent(pi as never, recovered as never, "stalled", f.deps);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(f.created.length, 1, "one restart for a recovery-failed stall");
+    assert.equal(pi.sent.length, 0, "no delivery — the replacement pane is watched");
+    assert.equal(recovered.restart?.respawnedAt != null, true, "respawn recorded");
+  });
+
+  it("delivers immediately when the stall never went through recovery", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "restart-stallraw-"));
+    const sessionFile = writeSessionFixture(dir);
+    const pi = fakePi();
+    const f = fakeRestartDeps();
+    // Sweep-found stall with no recovery state: deliver, do not restart.
+    const swept = fakeRunning({ sessionFile, cwd: dir });
+
+    __test__.finalizeLostSubagent(pi as never, swept as never, "stalled", f.deps);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(f.created, [], "no restart beyond the gate");
+    assert.equal(pi.sent.length, 1, "loss delivered");
+  });
+});
+
 describe("synthesizeLostResult restart note", () => {
   it("notes a respawned pane when the loss follows a restart", () => {
     const dir = mkdtempSync(join(tmpdir(), "restart-note-"));

@@ -2,7 +2,7 @@
  * Non-blocking spawn queue.
  *
  * Defect: the spawn tool awaited `spawnQueue.acquire()` inside the tool
- * execute. With the cap (default 3) reached, spawn #4+ blocked the parent's
+ * execute. With the cap (default 5) reached, spawn #6+ blocked the parent's
  * whole turn for the remaining runtime of the oldest child — minutes —
  * despite the tool being documented fire-and-forget.
  *
@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 
 import { __surfaceTest__ } from "../../extensions/subagents/tmux.ts";
 
-// Cap defaults to 3 (PI_SUBAGENT_MAX_CONCURRENT unset — the runner preloads
+// Cap defaults to 5 (PI_SUBAGENT_MAX_CONCURRENT unset — the runner preloads
 // the extension before this file's module scope runs, so pinning it here
 // would not take effect; the tests fill the default cap instead).
 delete process.env.PI_SUBAGENT_ALLOWED;
@@ -39,7 +39,7 @@ const subagentsExtension = subagentsModule.default;
 
 const savedEnv: Record<string, string | undefined> = {};
 
-function fakeTmux() {
+function fakeTmux(opts: { failSplitFrom?: number } = {}) {
   let splits = 0;
   const runner = (args: string[]): string => {
     switch (args[0]) {
@@ -50,6 +50,9 @@ function fakeTmux() {
       case "list-panes":
         return "%70";
       case "split-window":
+        if (opts.failSplitFrom !== undefined && splits >= opts.failSplitFrom) {
+          throw new Error(`fake tmux: split-window #${splits + 1} refused`);
+        }
         splits += 1;
         return `%${100 + splits}`;
       default:
@@ -144,7 +147,7 @@ afterEach(async () => {
 });
 
 describe("non-blocking spawn queue", () => {
-  it("spawn #4 returns immediately as queued while the cap is held, then launches on release", async () => {
+  it("spawn #6 returns immediately as queued while the cap is held, then launches on release", async () => {
     const { agentDir, ctx } = freshRoot("worker");
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const fake = fakeTmux();
@@ -153,19 +156,19 @@ describe("non-blocking spawn queue", () => {
     subagentsExtension(pi as never);
     const tool = tools.find((t) => t.name === "subagent") as { execute: Function };
 
-    for (const n of ["nb-one", "nb-two", "nb-three"]) {
+    for (const n of ["nb-one", "nb-two", "nb-three", "nb-four", "nb-five"]) {
       const r = await tool.execute(`tc-${n}`, { agent: "worker", task: "hold", name: n }, undefined, undefined, ctx);
       assert.match(r.content[0].text, /launched/i);
     }
-    assert.equal(fake.splits(), 3, "default cap filled with three panes");
+    assert.equal(fake.splits(), 5, "default cap filled with five panes");
 
     const t0 = Date.now();
-    const fourth = await tool.execute("tc4", { agent: "worker", task: "work", name: "nb-four" }, undefined, undefined, ctx);
+    const sixth = await tool.execute("tc6", { agent: "worker", task: "work", name: "nb-six" }, undefined, undefined, ctx);
     const elapsed = Date.now() - t0;
-    assert.match(fourth.content[0].text, /queued/i, "spawn past the cap reports queued, never blocks");
+    assert.match(sixth.content[0].text, /queued/i, "spawn past the cap reports queued, never blocks");
     assert.ok(elapsed < 2000, `execute returned in ${elapsed}ms, not the oldest child's runtime`);
-    assert.ok(!runningNames().has("nb-four"), "queued spawn has not launched yet");
-    assert.equal(fake.splits(), 3, "still only three panes");
+    assert.ok(!runningNames().has("nb-six"), "queued spawn has not launched yet");
+    assert.equal(fake.splits(), 5, "still only five panes");
 
     // Slot frees when #1's watcher settles: abort it — the watcher rejects,
     // releases, and the drain hook launches the queued spawn.
@@ -188,24 +191,111 @@ describe("non-blocking spawn queue", () => {
     subagentsExtension(pi as never);
     const tool = tools.find((t) => t.name === "subagent") as { execute: Function };
 
-    for (const n of ["fifo-a", "fifo-b", "fifo-c"]) {
+    for (const n of ["fifo-a", "fifo-b", "fifo-c", "fifo-d", "fifo-e"]) {
       await tool.execute(`tc-${n}`, { agent: "worker", task: "hold", name: n }, undefined, undefined, ctx);
     }
-    await tool.execute("tc-d", { agent: "worker", task: "first", name: "fifo-d" }, undefined, undefined, ctx);
-    await tool.execute("tc-e", { agent: "worker", task: "second", name: "fifo-e" }, undefined, undefined, ctx);
+    await tool.execute("tc-f", { agent: "worker", task: "first", name: "fifo-f" }, undefined, undefined, ctx);
+    await tool.execute("tc-g", { agent: "worker", task: "second", name: "fifo-g" }, undefined, undefined, ctx);
     assert.equal(__test__.pendingSpawns.length, 2, "two entries waiting");
 
     const names = () => [...__test__.runningSubagents.values()].map((r) => r.name);
     const holder = [...__test__.runningSubagents.values()].find((r) => r.name === "fifo-a");
     assert.ok(holder, "fifo-a holds a slot before its abort");
     holder.abortController?.abort();
-    assert.ok(await waitUntil(() => names().includes("fifo-d")), "first queued entry launches");
-    assert.ok(!names().includes("fifo-e"), "second queued entry still waiting — one slot only");
+    assert.ok(await waitUntil(() => names().includes("fifo-f")), "first queued entry launches");
+    assert.ok(!names().includes("fifo-g"), "second queued entry still waiting — one slot only");
 
-    const d = [...__test__.runningSubagents.values()].find((r) => r.name === "fifo-d");
-    assert.ok(d, "fifo-d is running before its abort");
+    const d = [...__test__.runningSubagents.values()].find((r) => r.name === "fifo-f");
+    assert.ok(d, "fifo-f is running before its abort");
     d.abortController?.abort();
-    assert.ok(await waitUntil(() => names().includes("fifo-e")), "second queued entry launches next");
-    assert.ok(await waitUntil(() => !names().includes("fifo-d")), "fifo-d finalized");
+    assert.ok(await waitUntil(() => names().includes("fifo-g")), "second queued entry launches next");
+    assert.ok(await waitUntil(() => !names().includes("fifo-f")), "fifo-f finalized");
+  });
+
+  it("reports a queued spawn whose launch fails instead of losing it silently", async () => {
+    const { agentDir, ctx } = freshRoot("worker");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    // Splits work for the five holders; the queued spawn's split (6th) fails.
+    const fake = fakeTmux({ failSplitFrom: 5 });
+    __surfaceTest__.setTmuxRunner(fake.runner);
+    const { pi, tools, messages } = fakePi();
+    subagentsExtension(pi as never);
+    const tool = tools.find((t) => t.name === "subagent") as { execute: Function };
+
+    for (const n of ["drain-a", "drain-b", "drain-c", "drain-d", "drain-e"]) {
+      await tool.execute(`tc-${n}`, { agent: "worker", task: "hold", name: n }, undefined, undefined, ctx);
+    }
+    const sixth = await tool.execute(
+      "tc-f",
+      { agent: "worker", task: "work", name: "drain-lost" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(sixth.content[0].text, /queued/i);
+
+    // The failure of a queued launch must surface as a reported result, never
+    // as an unhandled rejection escaping the drain hook.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const holder = [...__test__.runningSubagents.values()].find((r) => r.name === "drain-a");
+      assert.ok(holder, "drain-a holds a slot before its abort");
+      holder.abortController?.abort();
+
+      type SentResult = { content: { customType?: string; content?: string }; options?: { deliverAs?: string } };
+      const sent = messages as SentResult[];
+      const reportOf = () =>
+        sent.find(
+          (m) => m.content?.customType === "subagent_result" && /drain-lost/.test(m.content?.content ?? ""),
+        );
+      assert.ok(
+        await waitUntil(() => reportOf() !== undefined),
+        `queued launch failure reported to the parent, got: ${JSON.stringify(sent.map((m) => m.content?.content))}`,
+      );
+      const report = reportOf()!;
+      assert.match(report.content.content ?? "", /failed to launch/i);
+      assert.equal(report.options?.deliverAs, "steer");
+
+      await new Promise((r) => setTimeout(r, 300)); // an escaping rejection fires on a later tick
+      assert.equal(unhandled.length, 0, `rejection escaped the drain hook: ${unhandled.map(String).join("; ")}`);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("contains a watcher error report whose send channel rejects (stale module after reload)", async () => {
+    const { agentDir, ctx } = freshRoot("worker");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const fake = fakeTmux();
+    __surfaceTest__.setTmuxRunner(fake.runner);
+    const { pi, tools } = fakePi();
+    subagentsExtension(pi as never);
+    const tool = tools.find((t) => t.name === "subagent") as { execute: Function };
+
+    await tool.execute("tc-w", { agent: "worker", task: "hold", name: "stale-watch" }, undefined, undefined, ctx);
+    const running = [...__test__.runningSubagents.values()].find((r) => r.name === "stale-watch");
+    assert.ok(running, "watched spawn is running");
+
+    // Simulate /reload: the host replaced this module but its old watcher
+    // keeps polling, and sends on the dead ExtensionAPI handle reject.
+    (pi as unknown as { sendMessage: () => Promise<void> }).sendMessage = () =>
+      Promise.reject(new Error("stale extension handle"));
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      running.abortController?.abort(); // watcher rejects -> its catch reports -> the report send rejects
+      await new Promise((r) => setTimeout(r, 2500)); // one watcher poll tick + report settle
+      assert.equal(
+        unhandled.length,
+        0,
+        `failed error report escaped to the host: ${unhandled.map(String).join("; ")}`,
+      );
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });

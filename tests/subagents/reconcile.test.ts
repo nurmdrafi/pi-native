@@ -223,6 +223,50 @@ describe("reconciliation sweep", () => {
     await sweepRunningSubagents(deps);
     assert.equal(finalized, 1, "stall window elapsed without advance finalizes");
   });
+
+  it("never stalls a claude entry whose seeded session file cannot change", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "reconcile-claude-"));
+    const sessionFile = writeSessionFixture(dir, "claude.jsonl");
+    const claude = fakeRunning({ id: "run-claude", cli: "claude", sessionFile, cwd: dir, surface: "%111111" });
+    const map = new Map([[claude.id, claude]]);
+    const finalized: string[] = [];
+    const deps: SweepDeps = {
+      runningSubagents: map,
+      listPanes: async () => new Set(["%111111"]),
+      finalize: (r, kind) => {
+        finalized.push(kind);
+        map.delete(r.id);
+      },
+    };
+
+    // Far past the stall window: the seeded file is static, so an unchanged
+    // mtime says nothing about the child — it must never look stalled.
+    for (let i = 0; i < STALL_TICKS + 5; i++) {
+      await sweepRunningSubagents(deps);
+    }
+    assert.deepEqual(finalized, [], "live claude child never swept as stalled");
+    assert.equal(map.size, 1, "entry kept");
+  });
+
+  it("still finalizes a claude entry when its pane is gone", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "reconcile-claude-gone-"));
+    const sessionFile = writeSessionFixture(dir, "claude-gone.jsonl");
+    const claude = fakeRunning({ id: "run-claude-gone", cli: "claude", sessionFile, cwd: dir, surface: "%424242" });
+    const map = new Map([[claude.id, claude]]);
+    const finalized: string[] = [];
+    const deps: SweepDeps = {
+      runningSubagents: map,
+      listPanes: async () => new Set(["%111111"]),
+      finalize: (r, kind) => {
+        finalized.push(kind);
+        map.delete(r.id);
+      },
+    };
+
+    await sweepRunningSubagents(deps);
+    assert.deepEqual(finalized, ["pane_lost"], "pane check still applies to claude");
+    assert.equal(map.size, 0);
+  });
 });
 
 describe("durable result inbox", () => {

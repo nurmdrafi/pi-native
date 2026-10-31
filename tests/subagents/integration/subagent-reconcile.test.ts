@@ -79,7 +79,7 @@ for (const backend of MODEL_BACKEND) {
       startPi(surface, env.dir, task);
 
       // Child must be up and inside the long sleep before the wall-clock
-      // budget (25s) breaches: interrupt, 30s grace, then kill.
+      // budget (25s) breaches: interrupt, 10s grace, then kill.
       await waitForFile(startFile, PI_TIMEOUT, /START/);
       await waitForScreen(
         surface,

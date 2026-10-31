@@ -5,11 +5,11 @@
  * exhaust it (429 storms) and every run slows to retry backoff. Acquire a
  * slot before launching a child, release when its watcher settles.
  *
- * `PI_SUBAGENT_MAX_CONCURRENT` sets the cap (default 3); values < 1 mean
+ * `PI_SUBAGENT_MAX_CONCURRENT` sets the cap (default 5); values < 1 mean
  * unlimited. FIFO wakeup on release.
  */
 
-export function resolveMaxConcurrent(raw: string | undefined, fallback = 3): number {
+export function resolveMaxConcurrent(raw: string | undefined, fallback = 5): number {
   if (raw == null || raw.trim() === "") return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? Math.floor(n) : fallback;

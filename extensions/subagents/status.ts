@@ -3,7 +3,39 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BudgetDims } from "./budget.ts";
 
-export const SNAPSHOT_STALLED_AFTER_MS = 60_000;
+/** Default heartbeat-age threshold for a phase-"active" child with no
+ *  activity-file write (ms). Deliberately long: agent profiles wrap commands
+ *  in timeouts, so silence this deep is anomalous, while one long-but-healthy
+ *  tool call must not surface a false stall. */
+export const DEFAULT_STALL_ACTIVE_MS = 600_000;
+/** Default watchdog for a child still "starting" or with a missing/invalid/
+ *  wrong-id snapshot (ms). Slow boots were false-positiving at 60s, so the
+ *  window is now minutes. */
+export const DEFAULT_STALL_START_MS = 180_000;
+
+export interface StallThresholds {
+  activeMs: number;
+  startMs: number;
+}
+
+function positiveMsFromEnv(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return raw != null && raw !== "" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Phase-aware stall thresholds, read from the environment at call time so a
+ *  running host picks up overrides without a reload:
+ *   PI_SUBAGENT_STALL_ACTIVE_MS (default 600_000) — phase "active" silence.
+ *   PI_SUBAGENT_STALL_START_MS  (default 180_000) — "starting"/problem states. */
+export function resolveStallThresholds(
+  env: { [key: string]: string | undefined } = process.env,
+): StallThresholds {
+  return {
+    activeMs: positiveMsFromEnv(env.PI_SUBAGENT_STALL_ACTIVE_MS, DEFAULT_STALL_ACTIVE_MS),
+    startMs: positiveMsFromEnv(env.PI_SUBAGENT_STALL_START_MS, DEFAULT_STALL_START_MS),
+  };
+}
+
 export const DEFAULT_STATUS_LINE_LIMIT = 4;
 export const MAX_STATUS_NAME_LENGTH = 72;
 export const MAX_STATUS_LINE_LENGTH = 120;
@@ -342,21 +374,25 @@ export function forceStatusAfterInterrupt(state: SubagentStatusState, now: numbe
   };
 }
 
-function classifyProblemState(state: SubagentStatusState, now: number): Pick<StatusSnapshot, "kind" | "statusLabel"> {
+function classifyProblemState(
+  state: SubagentStatusState,
+  now: number,
+  thresholds: StallThresholds,
+): Pick<StatusSnapshot, "kind" | "statusLabel"> {
   const problemLabel = snapshotProblemLabel(state.snapshotState);
   const hasValidSnapshot = state.lastActivityAtMs != null;
 
   if (!hasValidSnapshot) {
     const referenceMs = state.firstObservationAtMs ?? state.startTimeMs;
     const elapsedMs = Math.max(0, now - referenceMs);
-    return elapsedMs >= SNAPSHOT_STALLED_AFTER_MS
+    return elapsedMs >= thresholds.startMs
       ? { kind: "stalled", statusLabel: problemLabel }
       : { kind: "starting", statusLabel: null };
   }
 
   const problemSinceMs = state.snapshotProblemSinceMs ?? now;
   const problemMs = Math.max(0, now - problemSinceMs);
-  if (problemMs >= SNAPSHOT_STALLED_AFTER_MS) return { kind: "stalled", statusLabel: problemLabel };
+  if (problemMs >= thresholds.startMs) return { kind: "stalled", statusLabel: problemLabel };
 
   const lastHealthyKind = state.activeNow
     ? "active"
@@ -368,7 +404,11 @@ function classifyProblemState(state: SubagentStatusState, now: number): Pick<Sta
   return { kind: lastHealthyKind, statusLabel: problemLabel };
 }
 
-export function classifyStatus(state: SubagentStatusState, now: number): StatusSnapshot {
+export function classifyStatus(
+  state: SubagentStatusState,
+  now: number,
+  thresholds: StallThresholds = resolveStallThresholds(),
+): StatusSnapshot {
   const elapsedMs = Math.max(0, now - state.startTimeMs);
   const elapsedText = formatElapsedDuration(elapsedMs);
 
@@ -396,8 +436,14 @@ export function classifyStatus(state: SubagentStatusState, now: number): StatusS
 
   if (state.snapshotState === "present") {
     if (state.phase === "active" || state.activeNow) {
-      kind = "active";
+      // Heartbeat-age liveness: a child mid-activity is healthy only while its
+      // activity snapshot keeps advancing. A pane can render while the child
+      // is frozen; the heartbeat age is what exposes it.
+      const lastHeartbeatMs = state.lastActivityAtMs ?? state.firstObservationAtMs ?? state.startTimeMs;
+      const silentMs = Math.max(0, now - lastHeartbeatMs);
+      kind = silentMs >= thresholds.activeMs ? "stalled" : "active";
     } else if (state.phase === "waiting") {
+      // The child waits on the parent — healthy idle, never a stall.
       kind = "waiting";
     } else if (state.phase === "done") {
       kind = "waiting";
@@ -405,11 +451,11 @@ export function classifyStatus(state: SubagentStatusState, now: number): StatusS
     } else {
       const referenceMs = state.firstObservationAtMs ?? state.startTimeMs;
       const elapsedSinceObservationMs = Math.max(0, now - referenceMs);
-      kind = elapsedSinceObservationMs >= SNAPSHOT_STALLED_AFTER_MS ? "stalled" : "starting";
+      kind = elapsedSinceObservationMs >= thresholds.startMs ? "stalled" : "starting";
       statusLabel = null;
     }
   } else {
-    const classified = classifyProblemState(state, now);
+    const classified = classifyProblemState(state, now, thresholds);
     kind = classified.kind;
     statusLabel = classified.statusLabel;
   }
@@ -445,12 +491,13 @@ export function classifyStatus(state: SubagentStatusState, now: number): StatusS
 export function advanceStatusState(
   state: SubagentStatusState,
   now: number,
+  thresholds: StallThresholds = resolveStallThresholds(),
 ): {
   nextState: SubagentStatusState;
   snapshot: StatusSnapshot;
   transition: SubagentStatusTransition;
 } {
-  const snapshot = classifyStatus(state, now);
+  const snapshot = classifyStatus(state, now, thresholds);
   const transition =
     state.currentKind !== "stalled" && snapshot.kind === "stalled"
       ? "stalled"

@@ -777,12 +777,15 @@ describe("status.ts", () => {
     });
   });
 
-  it("keeps a missing snapshot as starting until the fixed watchdog threshold", () => {
+  it("keeps a missing snapshot as starting until the slow-boot watchdog threshold", () => {
     let state = createStatusState({ source: "pi", startTimeMs: 0 });
     state = observeStatus(state, { snapshot: "missing" }, 1_000);
 
+    // A slow boot is not a stall: 60s was false-positiving; the window is now
+    // minutes, so a child still starting at 60-179s stays starting.
     assert.equal(classifyStatus(state, 60_999).kind, "starting");
-    const stalled = classifyStatus(state, 61_000);
+    assert.equal(classifyStatus(state, 180_999).kind, "starting");
+    const stalled = classifyStatus(state, 181_000);
     assert.equal(stalled.kind, "stalled");
     assert.equal(stalled.statusLabel, null);
   });
@@ -821,6 +824,60 @@ describe("status.ts", () => {
     const snapshot = classifyStatus(state, 240_000);
     assert.equal(snapshot.kind, "waiting");
     assert.equal(snapshot.waitingDurationText, "3m");
+
+    // The child waits on the parent — however long, it is never stalled.
+    assert.equal(classifyStatus(state, 10_000_000).kind, "waiting");
+  });
+
+  it("ages an active phase to stalled once heartbeats stop advancing", () => {
+    let state = createStatusState({ source: "pi", startTimeMs: 0 });
+    state = observeStatus(state, {
+      snapshot: "present",
+      updatedAt: 5_000,
+      sequence: 1,
+      phase: "active",
+      active: true,
+      activeScope: "tool",
+      activeSince: 5_000,
+      activityLabel: "bash",
+      latestEvent: "tool_execution_start",
+    }, 5_000);
+
+    // Long-but-normal tool call: the snapshot is old, yet under the threshold.
+    assert.equal(classifyStatus(state, 604_999).kind, "active");
+    // Silence past the threshold means the child froze mid-activity.
+    assert.equal(classifyStatus(state, 605_000).kind, "stalled");
+  });
+
+  it("honors the stall threshold env overrides at call time", () => {
+    const savedActive = process.env.PI_SUBAGENT_STALL_ACTIVE_MS;
+    const savedStart = process.env.PI_SUBAGENT_STALL_START_MS;
+    try {
+      process.env.PI_SUBAGENT_STALL_ACTIVE_MS = "5000";
+      process.env.PI_SUBAGENT_STALL_START_MS = "7000";
+
+      let state = createStatusState({ source: "pi", startTimeMs: 0 });
+      state = observeStatus(state, {
+        snapshot: "present",
+        updatedAt: 1_000,
+        sequence: 1,
+        phase: "active",
+        active: true,
+        activeScope: "tool",
+        activeSince: 1_000,
+        latestEvent: "tool_execution_start",
+      }, 1_000);
+      assert.equal(classifyStatus(state, 5_999).kind, "active");
+      assert.equal(classifyStatus(state, 6_000).kind, "stalled");
+
+      let booting = createStatusState({ source: "pi", startTimeMs: 0 });
+      booting = observeStatus(booting, { snapshot: "missing" }, 500);
+      assert.equal(classifyStatus(booting, 7_499).kind, "starting");
+      assert.equal(classifyStatus(booting, 7_500).kind, "stalled");
+    } finally {
+      restoreEnvVar("PI_SUBAGENT_STALL_ACTIVE_MS", savedActive);
+      restoreEnvVar("PI_SUBAGENT_STALL_START_MS", savedStart);
+    }
   });
 
   it("uses elapsed-only fallback for claude-backed subagents", () => {
@@ -835,19 +892,19 @@ describe("status.ts", () => {
     let state = createStatusState({ source: "pi", startTimeMs: 0 });
     state = observeStatus(state, { snapshot: "missing" }, 1_000);
 
-    let advanced = advanceStatusState(state, 95_000);
+    let advanced = advanceStatusState(state, 181_000);
     assert.equal(advanced.transition, "stalled");
     assert.equal(advanced.snapshot.kind, "stalled");
 
     state = observeStatus(advanced.nextState, {
       snapshot: "present",
-      updatedAt: 96_000,
+      updatedAt: 182_000,
       sequence: 1,
       phase: "waiting",
-      waitingSince: 96_000,
+      waitingSince: 182_000,
       latestEvent: "agent_end",
-    }, 96_000);
-    advanced = advanceStatusState(state, 97_000);
+    }, 182_000);
+    advanced = advanceStatusState(state, 183_000);
     assert.equal(advanced.transition, "recovered");
     assert.equal(advanced.snapshot.kind, "waiting");
   });

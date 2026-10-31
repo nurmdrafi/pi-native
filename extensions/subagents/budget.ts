@@ -32,7 +32,7 @@ export type EnforcedBudget = Partial<ResolvedBudget> | null;
 
 /** How long a budget-breached child has to exit on its own after the
  * interrupt before the pane is killed. */
-export const BUDGET_GRACE_MS = 30_000;
+export const BUDGET_GRACE_MS = 10_000;
 
 const DIMENSIONS = ["wallClockSec", "turns", "costUsd"] as const;
 type Dimension = (typeof DIMENSIONS)[number];

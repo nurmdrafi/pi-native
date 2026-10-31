@@ -302,6 +302,65 @@ describe("resume error containment", () => {
   });
 });
 
+// ── steer delivery: raw multiplexer stderr never reaches the model ──
+
+describe("steer error sanitization", () => {
+  const realErr = (target: string) =>
+    // Mirrors the execFile shape tmux failures produce in steerSubagent.
+    Object.assign(
+      new Error(`Command failed: tmux send-keys -t ${target} -l hi\ncan't find pane: ${target}\n`),
+      { code: 1, stderr: `can't find pane: ${target}\n` },
+    );
+
+  afterEach(() => {
+    __test__.runningSubagents.clear();
+  });
+
+  it("drops raw tmux stderr from the heal-timeout error, keeping pane id and guidance", async () => {
+    const running = { id: "steer-1", name: "steer-me", task: "t", surface: "%5" } as never;
+    __test__.runningSubagents.set("steer-1", running);
+    const send = () => {
+      throw realErr("%5");
+    };
+
+    const result = (await __test__.steerSubagent(running, "hi", send, {
+      healWaitMs: 0,
+      stepMs: 1,
+    })) as { error?: string };
+
+    assert.ok(result.error, "steer reports failure");
+    assert.match(result.error, /Failed to deliver message to subagent "steer-me"/, "operation context");
+    assert.match(result.error, /%5/, "target pane id survives");
+    assert.match(result.error, /retry/i, "retry guidance survives");
+    assert.match(result.error, /resume/i, "resume guidance survives");
+    assert.doesNotMatch(result.error, /Command failed/, "no raw argv dump");
+    assert.doesNotMatch(result.error, /can't find pane/, "no raw stderr");
+  });
+
+  it("drops raw tmux stderr from non-healable delivery errors, keeping the tmux subcommand", async () => {
+    const running = { id: "steer-2", name: "steer-me", task: "t", surface: "%6" } as never;
+    __test__.runningSubagents.set("steer-2", running);
+    const send = () => {
+      throw Object.assign(new Error("Command failed: tmux send-keys -t %6 -l hi\nopen terminal failed\n"), {
+        code: 1,
+        stderr: "open terminal failed\n",
+      });
+    };
+
+    const result = (await __test__.steerSubagent(running, "hi", send, {
+      healWaitMs: 0,
+      stepMs: 1,
+    })) as { error?: string };
+
+    assert.ok(result.error, "steer reports failure");
+    assert.match(result.error, /Failed to deliver message to subagent "steer-me"/, "operation context");
+    assert.match(result.error, /%6/, "target pane id survives");
+    assert.match(result.error, /send-keys/, "tmux subcommand context survives");
+    assert.doesNotMatch(result.error, /Command failed/, "no raw argv dump");
+    assert.doesNotMatch(result.error, /open terminal failed/, "no raw stderr");
+  });
+});
+
 // ── durable inbox drain: stale dead-parent records must not task-steer ──
 
 describe("inbox drain delivery", () => {

@@ -747,6 +747,11 @@ interface RunningSubagent {
   /** Pane-loss restart bookkeeping: set when the single restart attempt
    *  began; `respawnedAt` added once a replacement pane is actually running. */
   restart?: { attemptedAt: number; respawnedAt?: number };
+  /** Stalled-child recovery bookkeeping (owned by the stall recovery path):
+   *  `nudgedAt` when the health-check nudge was sent; `exhaustedAt` once the
+   *  grace window lapsed without resumed activity. Survives recovery — a
+   *  child that stalls again skips the nudge and goes straight to restart. */
+  stallRecovery?: { nudgedAt: number; exhaustedAt?: number };
   /** tmux wait-for channel the pane signals when its launch script ends; the
    *  watcher parks on it between ticks so completion wakes it immediately
    *  instead of on the next interval tick. */
@@ -757,7 +762,7 @@ interface RunningSubagent {
 const runningSubagents = new Map<string, RunningSubagent>();
 
 /** Caps simultaneous children: parallel spawns share one provider quota and
- * 429-storm it. `PI_SUBAGENT_MAX_CONCURRENT` (default 3, <1 = unlimited). */
+ * 429-storm it. `PI_SUBAGENT_MAX_CONCURRENT` (default 5, <1 = unlimited). */
 const spawnQueue = new SpawnQueue(resolveMaxConcurrent(process.env.PI_SUBAGENT_MAX_CONCURRENT));
 
 /** Spawns accepted while the cap was reached, waiting FIFO for a slot. The
@@ -771,6 +776,46 @@ interface PendingSpawn {
   reservedName: string | null;
 }
 const pendingSpawns: PendingSpawn[] = [];
+
+/** Send through `pi` while containing a failure of the channel itself: after
+ *  a /reload this module instance is replaced but its watchers keep polling,
+ *  and sends on the dead ExtensionAPI handle reject. That rejection must
+ *  never escape as an unhandled rejection the host renders above the input
+ *  editor — log a diagnostic and stop. */
+function sendMessageContained(
+  pi: ExtensionAPI,
+  message: Parameters<ExtensionAPI["sendMessage"]>[0],
+  options: Parameters<ExtensionAPI["sendMessage"]>[1],
+): void {
+  const diagnostic = (reportErr: unknown) =>
+    console.error(
+      `[pi-subagents] message could not be delivered (extension reloaded? channel gone): ` +
+        `${reportErr instanceof Error ? reportErr.message : String(reportErr)}`,
+    );
+  try {
+    Promise.resolve(pi.sendMessage(message, options)).catch(diagnostic);
+  } catch (reportErr) {
+    diagnostic(reportErr);
+  }
+}
+
+/** Report a queued spawn that failed while leaving the queue — the sync
+ *  throw and the async launch rejection share one message so neither path is
+ *  silent (a queued spawn must never vanish without a result). */
+function reportQueuedLaunchFailure(pi: ExtensionAPI, entry: PendingSpawn, err: unknown): void {
+  sendMessageContained(
+    pi,
+    {
+      customType: "subagent_result",
+      content: `Sub-agent "${entry.params.name}" failed to launch while leaving the queue: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      display: true,
+      details: { name: entry.params.name, task: entry.params.task, error: String(err) },
+    },
+    { triggerTurn: true, deliverAs: "steer" },
+  );
+}
 
 /** Launch queued spawns as slots free; called from the queue's drain hook.
  *  One launch failure must not strand the rest — report as a steer and keep
@@ -787,20 +832,16 @@ function drainPendingSpawns(): void {
       break;
     }
     try {
-      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName);
+      // launchReservedSpawn is async and never throws synchronously: attach
+      // the failure report to the promise, or a rejected queued launch dies as
+      // an unhandled rejection with no result anywhere. It releases its slot
+      // itself before re-throwing, so only the report is needed here.
+      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName).catch(
+        (err: unknown) => reportQueuedLaunchFailure(pi, next, err),
+      );
     } catch (err) {
       spawnQueue.release();
-      pi?.sendMessage(
-        {
-          customType: "subagent_result",
-          content: `Sub-agent "${next.params.name}" failed to launch while leaving the queue: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-          display: true,
-          details: { name: next.params.name, task: next.params.task, error: String(err) },
-        },
-        { triggerTurn: true, deliverAs: "steer" },
-      );
+      reportQueuedLaunchFailure(pi, next, err);
     }
   }
 }
@@ -1201,6 +1242,19 @@ const STEER_HEAL_STEP_MS = 200;
  * finalizing the entry (a pane_lost result is delivered). Wait briefly for
  * either outcome instead of stranding the message on a pane being replaced.
  */
+/** Describe a failed tmux call for model-facing error text without relaying
+ *  its raw output: execFile errors read `Command failed: tmux <argv>…\n<stderr>`
+ *  and embedding them verbatim leaks multiplexer noise (`can't find pane: %N`)
+ *  into the conversation. Keep the subcommand and the target pane instead;
+ *  errors that are not tmux-shaped pass through unchanged. */
+function describeTmuxFailure(error: unknown, surface: string): string {
+  if (isPaneNotFound(error)) return `pane ${surface} is gone`;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const subcommand = message.match(/^Command failed:\s*tmux\s+(\S+)/);
+  if (subcommand) return `tmux ${subcommand[1]} failed on pane ${surface}`;
+  return message.trim();
+}
+
 async function steerSubagent(
   running: RunningSubagent,
   message: string,
@@ -1221,7 +1275,7 @@ async function steerSubagent(
         return {
           error:
             `Failed to deliver message to subagent "${running.name}" via tmux: ` +
-            `${error?.message ?? String(error)}`,
+            `${describeTmuxFailure(error, surface)}`,
         };
       }
       // The watcher already delivered pane_lost and finalized this entry —
@@ -1243,7 +1297,7 @@ async function steerSubagent(
         return {
           error:
             `Failed to deliver message to subagent "${running.name}" via tmux: ` +
-            `${error?.message ?? String(error)} ` +
+            `${describeTmuxFailure(error, surface)} ` +
             `(pane loss did not heal within ${Math.round(waitMs / 1000)}s — retry, or send ` +
             `the message again to resume the session).`,
         };
@@ -1608,7 +1662,7 @@ async function handleSubagentSteer(
 }
 
 function startStatusRefresh(pi: ExtensionAPI) {
-  if (!statusConfig.enabled || statusInterval) return;
+  if (statusInterval) return;
 
   statusInterval = setInterval(() => {
     if (runningSubagents.size === 0) {
@@ -1620,52 +1674,73 @@ function startStatusRefresh(pi: ExtensionAPI) {
       return;
     }
 
-    const transitionLines: string[] = [];
-    const now = Date.now();
-    let shouldRefreshWidget = false;
-
-    for (const running of runningSubagents.values()) {
-      observeRunningSubagent(running, now);
-      const { nextState, snapshot, transition } = advanceStatusState(running.statusState, now);
-      if (nextState.currentKind !== running.statusState.currentKind) {
-        shouldRefreshWidget = true;
-      }
-      running.statusState = nextState;
-
-      // Interactive subagents (long-running, user-driven) intentionally don't
-      // wake the parent session on stalled/recovered transitions — the user is
-      // working in the subagent's pane, and a steer message here would burn an
-      // orchestrator turn on a no-op "still waiting" ping. Widget still updates.
-      if (transition && !running.interactive) {
-        transitionLines.push(formatTransitionLine(running.name, snapshot, transition));
-      }
-    }
-
-    // Reconciliation sweep: finalize entries whose pane is gone or whose
-    // session file stalled — delivery must not depend on the poll loop.
-    sweepRunningSubagents({
-      runningSubagents,
-      listPanes: listLiveSurfaces,
-      finalize: (entry, kind) => finalizeLostSubagent(pi, entry as RunningSubagent, kind),
-    }).catch(() => {});
-
-    if (shouldRefreshWidget) updateWidget();
-
-    if (transitionLines.length > 0) {
-      const capped = capStatusLines(transitionLines, statusConfig.lineLimit);
-      pi.sendMessage(
-        {
-          customType: "subagent_status",
-          content: formatStatusAggregate(transitionLines, statusConfig.lineLimit),
-          display: true,
-          details: { lines: capped.visibleLines, overflow: capped.overflow },
-        },
-        { triggerTurn: true, deliverAs: "steer" },
-      );
-    }
+    runStatusRefreshTick(pi);
   }, 1000);
 
   (globalThis as any)[STATUS_INTERVAL_KEY] = statusInterval;
+}
+
+/** One status-refresh tick: observe every running child, advance its status
+ *  machine, drive stalled-child recovery, and run the reconciliation sweep.
+ *  Status cosmetics (widget refresh, transition steers) apply only when the
+ *  status config is enabled — liveness, recovery, and the sweep always run,
+ *  so result delivery never depends on cosmetics. Extracted from the interval
+ *  so tests can drive ticks with an injected clock and pane list. */
+function runStatusRefreshTick(
+  pi: ExtensionAPI,
+  now: number = Date.now(),
+  opts: { listPanes?: () => Promise<Set<string> | null> } = {},
+): void {
+  const transitionLines: string[] = [];
+  let shouldRefreshWidget = false;
+
+  for (const running of runningSubagents.values()) {
+    observeRunningSubagent(running, now);
+    const { nextState, snapshot, transition } = advanceStatusState(running.statusState, now);
+    if (nextState.currentKind !== running.statusState.currentKind) {
+      shouldRefreshWidget = true;
+    }
+    running.statusState = nextState;
+
+    // Stalled-child recovery: nudge on the stall transition, grace-lapse
+    // check on every other tick. Runs regardless of status cosmetics.
+    if (transition === "stalled") handleStallTransition(pi, running, now);
+    else enforceStallRecovery(pi, running, now);
+
+    // Interactive subagents (long-running, user-driven) intentionally don't
+    // wake the parent session on stalled/recovered transitions — the user is
+    // working in the subagent's pane, and a steer message here would burn an
+    // orchestrator turn on a no-op "still waiting" ping. Widget still updates.
+    if (transition && !running.interactive && statusConfig.enabled) {
+      transitionLines.push(formatTransitionLine(running.name, snapshot, transition));
+    }
+  }
+
+  // Reconciliation sweep: finalize entries whose pane is gone or whose
+  // session file stalled — delivery must not depend on the poll loop.
+  sweepRunningSubagents({
+    runningSubagents,
+    listPanes: opts.listPanes ?? listLiveSurfaces,
+    finalize: (entry, kind) => finalizeLostSubagent(pi, entry as RunningSubagent, kind),
+  }).catch(() => {});
+
+  if (!statusConfig.enabled) return;
+
+  if (shouldRefreshWidget) updateWidget();
+
+  if (transitionLines.length > 0) {
+    const capped = capStatusLines(transitionLines, statusConfig.lineLimit);
+    sendMessageContained(
+      pi,
+      {
+        customType: "subagent_status",
+        content: formatStatusAggregate(transitionLines, statusConfig.lineLimit),
+        display: true,
+        details: { lines: capped.visibleLines, overflow: capped.overflow },
+      },
+      { triggerTurn: true, deliverAs: "steer" },
+    );
+  }
 }
 
 // Resuming a finished session is always autonomous: the relaunched agent runs
@@ -1701,6 +1776,11 @@ export const __test__ = {
   canRestartLostPane,
   restartLostPane,
   finalizeLostSubagent,
+  handleStallTransition,
+  enforceStallRecovery,
+  buildStallHealthCheckCommand,
+  runStatusRefreshTick,
+  statusConfig,
   watchSubagent,
   deliverSubagentResult,
   adoptPendingSubagents,
@@ -1787,7 +1867,9 @@ async function launchReservedSpawn(
     })
     .catch((err) => {
       updateWidget();
-      pi.sendMessage(
+      // The report channel itself can fail (extension reloaded): contain it.
+      sendMessageContained(
+        pi,
         {
           customType: "subagent_result",
           content: `Sub-agent "${running.name}" error: ${err?.message ?? String(err)}`,
@@ -2327,7 +2409,10 @@ function deliverSubagentResult(
     closeSurface(running.surface);
   } catch {}
   updateWidget();
-  pi.sendMessage(
+  // Contained: a stale post-/reload watcher's ExtensionAPI handle rejects
+  // every send — the result report must not become an unhandled rejection.
+  sendMessageContained(
+    pi,
     {
       customType: "subagent_result",
       content: resolveResultPresentation(result, running.name),
@@ -2357,6 +2442,21 @@ interface RestartDeps {
   createSurfaceRunning?: (name: string, paneCommand: string) => string;
   /** Launch-script writer (file layout shared with every spawn path). */
   writeScript?: (scriptPath: string, command: string, preamble: string) => void;
+  /** Restart executor (defaults to restartLostPane); injectable so tests can
+   *  observe or fail the attempt without touching the surface layer. */
+  restart?: (running: RunningSubagent, deps: RestartDeps) => Promise<boolean>;
+}
+
+/** Dependencies of stalled-child recovery; injectable so tests can fake the
+ *  pane channel, the restart, and the grace window. Production callers use
+ *  the real surface layer. */
+interface StallRecoveryDeps extends RestartDeps {
+  /** Interrupt channel (tmux C-c in production). */
+  interrupt?: (surface: string) => void;
+  /** Keystroke channel for the health-check steer. */
+  sendCommand?: (surface: string, command: string) => void;
+  /** Grace window override; defaults to the env-tunable resolution. */
+  graceMs?: number;
 }
 
 /** Gates for the one automatic pane-loss restart. A child qualifies only if
@@ -2485,6 +2585,9 @@ async function restartLostPane(
     // The resumed child re-appends in its own time; re-baseline the sweep's
     // stall bookkeeping so the restart pause is not read as a new stall.
     delete running.reconcile;
+    // The replacement pane runs a fresh child: its stall episode budget resets
+    // with it (one nudge before any future escalation, not a straight kill).
+    delete running.stallRecovery;
     // Restart is the recovery path, same as the subagent_message resume: the
     // budget that was metering the pre-loss run would re-breach instantly
     // against the re-read session file, so resumed runs are unenforced.
@@ -2502,6 +2605,94 @@ async function restartLostPane(
   }
 }
 
+/** Grace window a nudged child gets to resume activity before recovery
+ *  escalates to a restart. Env-tunable at call time
+ *  (PI_SUBAGENT_STALL_RECOVERY_GRACE_MS). */
+const DEFAULT_STALL_RECOVERY_GRACE_MS = 120_000;
+
+function resolveStallRecoveryGraceMs(
+  env: { [key: string]: string | undefined } = process.env,
+): number {
+  const raw = env.PI_SUBAGENT_STALL_RECOVERY_GRACE_MS;
+  const value = Number(raw);
+  return raw != null && raw !== "" && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_STALL_RECOVERY_GRACE_MS;
+}
+
+/** The steering user turn typed into a stalled child's pane after the
+ *  interrupt: tells the child why it was interrupted and what to do next. */
+function buildStallHealthCheckCommand(silentForMs: number): string {
+  const minutes = Math.max(1, Math.round(silentForMs / 60_000));
+  return (
+    `Health check: no activity for ${minutes} min. If a command hung, kill it and ` +
+    `continue from your last milestone in /tmp; if blocked, ask_question; if done, finish.`
+  );
+}
+
+/** Stalled-child recovery entry: on a stall transition, interrupt the pane
+ *  (a hung foreground command would swallow a typed message) and steer the
+ *  child with a health-check turn. Guards: interactive panes are user-driven
+ *  and never injected into; claude children have no activity contract; a
+ *  child with no heartbeat trail (recorder absent or disabled) is owned by
+ *  the sweep's session-file path — recovery must not fire on it. A child
+ *  already nudged (this or an earlier episode) skips the nudge and goes
+ *  straight to restart-or-deliver. */
+function handleStallTransition(
+  pi: ExtensionAPI,
+  running: RunningSubagent,
+  now: number,
+  deps: StallRecoveryDeps = {},
+): void {
+  if (running.interactive) return;
+  if (running.cli === "claude") return;
+  if (running.statusState.lastActivityAtMs == null) return;
+  if (running.stallRecovery) {
+    finalizeLostSubagent(pi, running, "stalled", deps);
+    return;
+  }
+  running.stallRecovery = { nudgedAt: now };
+  const interrupt = deps.interrupt ?? sendInterrupt;
+  const send = deps.sendCommand ?? sendCommand;
+  // A dead or closing pane must not escape as an unhandled throw — the sweep
+  // observes the pane and finalizes; the recovery state stays recorded either
+  // way, so the nudge is never retried within the episode.
+  try {
+    interrupt(running.surface);
+  } catch {}
+  try {
+    send(running.surface, buildStallHealthCheckCommand(now - running.statusState.lastActivityAtMs));
+  } catch {}
+}
+
+/** Grace-lapse check for an in-flight recovery, run on every status tick: a
+ *  child still stalled once the grace window elapses escalates to
+ *  restart-or-deliver; a child that resumed activity simply outlives the
+ *  episode (the stallRecovery marker stays, so a later stall skips the
+ *  nudge). One escalation per episode (the exhaustedAt flag). */
+function enforceStallRecovery(
+  pi: ExtensionAPI,
+  running: RunningSubagent,
+  now: number,
+  deps: StallRecoveryDeps = {},
+): void {
+  const recovery = running.stallRecovery;
+  if (!recovery || recovery.exhaustedAt != null) return;
+  if (running.statusState.currentKind !== "stalled") return;
+  if (now - recovery.nudgedAt < (deps.graceMs ?? resolveStallRecoveryGraceMs())) return;
+  recovery.exhaustedAt = now;
+  finalizeLostSubagent(pi, running, "stalled", deps);
+}
+
+/** Whether a lost child qualifies for its one automatic restart: a pane loss
+ *  always tries; a stall only after the health-check recovery failed (the
+ *  stallRecovery marker). A sweep-found stall with no recovery state delivers
+ *  directly, as before. */
+function restartEligible(running: RunningSubagent, kind: "pane_lost" | "stalled"): boolean {
+  if (!canRestartLostPane(running)) return false;
+  return kind === "pane_lost" || running.stallRecovery != null;
+}
+
 /** Finalize a lost child for the sweep and watcher: try the one automatic
  *  restart first; deliver the synthesized loss when the gates refuse or the
  *  attempt fails. The restart path is fire-and-forget: a failed attempt
@@ -2513,12 +2704,22 @@ function finalizeLostSubagent(
   kind: "pane_lost" | "stalled",
   deps: RestartDeps = {},
 ): void {
-  if (kind === "pane_lost" && canRestartLostPane(running)) {
-    void restartLostPane(running, deps).then((respawned) => {
-      if (!respawned && !running.delivered) {
-        deliverSubagentResult(pi, running, synthesizeLostResult(running, "pane_lost"), "pane_lost");
-      }
-    });
+  if (restartEligible(running, kind)) {
+    const restart = deps.restart ?? restartLostPane;
+    void restart(running, deps)
+      .then((respawned) => {
+        if (!respawned && !running.delivered) {
+          deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);
+        }
+      })
+      .catch((reportErr) => {
+        console.error(
+          `[pi-subagents] restart attempt failed (${reportErr instanceof Error ? reportErr.message : String(reportErr)}); synthesizing loss`,
+        );
+        if (!running.delivered) {
+          deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);
+        }
+      });
     return;
   }
   deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);

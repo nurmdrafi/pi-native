@@ -11,7 +11,10 @@
  *      by infrastructure.
  *   2. Session-file check: file mtime/size unchanged across the stall
  *      window -> child dead or wedged (a long pause alone is not enough —
- *      LLM turns legitimately take minutes between appends).
+ *      LLM turns legitimately take minutes between appends). Skipped for
+ *      claude children: their seeded session file is never written by the
+ *      child, so an unchanged mtime says nothing about liveness — only the
+ *      pane check applies to them.
  *
  * Either condition synthesizes the result from the session file and hands it
  * to the caller's finalize (durable inbox write + in-memory delivery +
@@ -31,6 +34,10 @@ export interface SweepEntry {
   id: string;
   surface: string;
   sessionFile: string;
+  /** Child CLI. "claude" children never write their (seeded) session file,
+   *  so the mtime/size stall check cannot observe them and is skipped — a
+   *  live claude child must never look stalled to the sweep. */
+  cli?: string;
   /** Reconcile bookkeeping (owned by the sweep). */
   reconcile?: { lastMtimeMs: number; lastSize: number; unchangedTicks: number };
 }
@@ -56,6 +63,11 @@ export async function sweepRunningSubagents(deps: SweepDeps): Promise<void> {
       deps.finalize(entry, "pane_lost");
       continue;
     }
+
+    // Claude children exit the stalled path here: their session file is a
+    // static seed, and counting unchanged ticks against it would false-kill
+    // a live child once the window elapsed. Pane loss above still applies.
+    if (entry.cli === "claude") continue;
 
     const state = entry.reconcile ?? { lastMtimeMs: -1, lastSize: -1, unchangedTicks: 0 };
     let mtimeMs = -1;
