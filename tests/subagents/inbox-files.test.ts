@@ -42,6 +42,8 @@ import {
   type InboxRecord,
 } from "../../extensions/subagents/inbox.ts";
 
+const { __test__ } = await import("../../extensions/subagents/index.ts");
+
 function makeRecord(overrides: Partial<InboxRecord> = {}): InboxRecord {
   return {
     id: "rec-1",
@@ -504,20 +506,52 @@ describe("readRecentResults stat cache", () => {
       mkdirSync(join(repoRoot, ".pi"), { recursive: true });
       const line = (n: number) =>
         JSON.stringify({ id: `c${n}`, ts: n, name: `n${n}`, files_changed: ["f"], summary: `s${n}` });
-      writeFileSync(historyPath, line(1) + "\n", "utf8");
+      writeFileSync(historyPath, line(1) + "\n" + line(2) + "\n", "utf8");
       const parseCalls = { parses: 0 };
-      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1"]);
-      assert.equal(parseCalls.parses, 1, "first read parses");
-      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1"]);
-      assert.equal(parseCalls.parses, 1, "an unchanged stat reuses the cached parse");
-      // The cache holds the full deduped tail; a different limit still slices.
-      assert.deepEqual(readRecentResults(repoRoot, 1, { parseCalls }).map((r) => r.id), ["c1"]);
-      assert.equal(parseCalls.parses, 1);
-      appendFileSync(historyPath, line(2) + "\n", "utf8"); // stat change
       assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1", "c2"]);
+      assert.equal(parseCalls.parses, 1, "first read parses");
+      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1", "c2"]);
+      assert.equal(parseCalls.parses, 1, "an unchanged stat reuses the cached parse");
+      // The cache holds the full deduped tail; a different limit still slices
+      // (seed of 2+ records: limit 1 must yield only the LAST record).
+      assert.deepEqual(readRecentResults(repoRoot, 1, { parseCalls }).map((r) => r.id), ["c2"]);
+      assert.equal(parseCalls.parses, 1);
+      appendFileSync(historyPath, line(3) + "\n", "utf8"); // stat change
+      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1", "c2", "c3"]);
       assert.equal(parseCalls.parses, 2, "a changed stat re-parses");
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("findChildSelfReport", () => {
+  it("adopts only a fresh child self-report; stale and parent-observed same-id records are skipped", () => {
+    const root = mkdtempSync(join(tmpdir(), "selfreport-"));
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    try {
+      const inboxPath = join(root, "inbox.ndjson");
+      process.env.PI_SUBAGENT_INBOX = inboxPath;
+      const startTime = 10_000;
+      const line = (over: Record<string, unknown>) =>
+        JSON.stringify({ id: "dup", name: "W", files_changed: ["x.ts"], ...over });
+      // Last same-id record is STALE (ts before the run started) — the
+      // unguarded scan would adopt it because it simply keeps the last match.
+      writeFileSync(
+        inboxPath,
+        [
+          line({ ts: 12_000, observedByParent: false, files_changed: ["fresh.ts"] }),
+          line({ ts: 12_500, observedByParent: true, files_changed: ["parent.ts"] }),
+          line({ ts: 9_000, observedByParent: false, files_changed: ["stale.ts"] }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      const adopted = __test__.findChildSelfReport("dup", root, startTime);
+      assert.equal(adopted?.files_changed?.[0], "fresh.ts");
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

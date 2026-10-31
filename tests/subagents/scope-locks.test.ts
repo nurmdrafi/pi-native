@@ -560,6 +560,18 @@ describe("scope exposure", () => {
     assert.ok((scoped[0].paths.length <= 10), "exposed path list capped");
   });
 
+  it("a scoped child whose declared paths are all outside the repo renders (outside this repo), not an empty owns span", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    const harness = armSpawn(projectDir, agentDir, ctx);
+
+    await spawnTool(harness, { task: "work elsewhere", name: "exp-out", files: [join(agentDir, "outside.ts")] });
+    const res = (await harness.list.execute("tc-list", {}, undefined, undefined, ctx as never)) as {
+      content: { text: string }[];
+    };
+    const text = res.content.map((c) => c.text).join("\n");
+    assert.match(text, /exp-out[^\n]*\(outside this repo\)/, "all-outside scope gets an explicit marker");
+  });
+
   it("subagents_list renderResult renders the declared-scope section", async () => {
     const { agentDir, projectDir, ctx } = freshRoot();
     const harness = armSpawn(projectDir, agentDir, ctx);

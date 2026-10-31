@@ -18,6 +18,7 @@ import {
   appendFileSync,
   closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -382,17 +383,23 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
     // — readers drop BOTH, and below the rotation threshold the residue is
     // never rewritten away. Probe the last byte and supply the missing
     // newline: the residue is sacrificed, the new record still parses.
+    // One fd for the whole probe: fstat the OPEN fd (never the path) and
+    // read at that fd's size-1, so the offset and the size come from one
+    // snapshot — a path stat and a separate open can straddle an append and
+    // probe a mid-file byte. An append racing after the fstat only grows the
+    // file past this offset; it never moves it (same residual window the
+    // rotation guard's recheck accepts).
     let prefix = "";
     try {
-      const st = statSync(path);
-      if (st.size > 0) {
-        const fd = openSync(path, "r");
-        try {
+      const fd = openSync(path, "r");
+      try {
+        const size = fstatSync(fd).size;
+        if (size > 0) {
           const last = Buffer.alloc(1);
-          if (readSync(fd, last, 0, 1, st.size - 1) === 1 && last[0] !== 0x0a) prefix = "\n";
-        } finally {
-          closeSync(fd);
+          if (readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a) prefix = "\n";
         }
+      } finally {
+        closeSync(fd);
       }
     } catch {
       // Probe is best-effort: on failure append exactly as before.

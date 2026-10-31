@@ -1967,6 +1967,7 @@ export const __test__ = {
   statusConfig,
   watchSubagent,
   deliverSubagentResult,
+  findChildSelfReport,
   adoptPendingSubagents,
   steerSubagent,
   resumeSubagentByName,
@@ -2597,7 +2598,9 @@ function synthesizeLostResult(
 /** Bound for every git exec the result-delivery path makes. A wedged git
  * (hung mount, stale index lock) must never stall delivery — it is the
  * parent's one-shot funnel for the child's outcome. Both runners stay
- * fail-soft: a timeout kill is just another git failure. */
+ * fail-soft: a timeout kill is just another git failure. The timeout kill
+ * uses SIGKILL — a wedged git can ignore SIGTERM and would otherwise
+ * outlive its own bound and still block delivery. */
 const GIT_BOUND_MS = 5_000;
 
 const boundedGitSync: GitRunner = (args) =>
@@ -2605,6 +2608,7 @@ const boundedGitSync: GitRunner = (args) =>
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
     timeout: GIT_BOUND_MS,
+    killSignal: "SIGKILL",
   }) as string;
 
 const boundedGitAsync: AsyncGitRunner = (args, cb) => {
@@ -2612,7 +2616,7 @@ const boundedGitAsync: AsyncGitRunner = (args, cb) => {
     execFile(
       "git",
       args,
-      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: GIT_BOUND_MS },
+      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: GIT_BOUND_MS, killSignal: "SIGKILL" },
       (err, stdout) => cb(err ? null : (stdout as string)),
     );
   } catch {
@@ -2621,13 +2625,15 @@ const boundedGitAsync: AsyncGitRunner = (args, cb) => {
 };
 
 /** The child's own durable record for `id`, if it self-reported before the
- * parent delivered (same id, observedByParent false). The drain keeps the
- * LAST record per id, so a parent record that omits files_changed — its git
- * delta failed — would strip the child's already-durable value from the
- * durable view. Returns the last matching record, or null. */
+ * parent delivered (same id, observedByParent false, ts at/after this run's
+ * start). The drain keeps the LAST record per id, so a parent record that
+ * omits files_changed — its git delta failed — would strip the child's
+ * already-durable value from the durable view. Returns the last matching
+ * record, or null. */
 function findChildSelfReport(
   id: string,
   repoRoot: string,
+  startTime: number,
 ): { files_changed?: string[]; files_changed_source?: "git_status_delta" } | null {
   const inboxPath = process.env.PI_SUBAGENT_INBOX || resultInboxPath(repoRoot);
   let raw: string;
@@ -2642,10 +2648,21 @@ function findChildSelfReport(
     try {
       const rec = JSON.parse(line) as {
         id?: unknown;
+        ts?: unknown;
+        observedByParent?: unknown;
         files_changed?: unknown;
         files_changed_source?: unknown;
       };
-      if (rec.id !== id || !Array.isArray(rec.files_changed)) continue;
+      // Adopt only the child's OWN fresh self-report: parent-observed
+      // records and stale same-id records from an earlier run of this id
+      // never qualify.
+      if (
+        rec.id !== id ||
+        rec.observedByParent !== false ||
+        typeof rec.ts !== "number" ||
+        rec.ts < startTime ||
+        !Array.isArray(rec.files_changed)
+      ) continue;
       found = {
         files_changed: rec.files_changed as string[],
         ...(rec.files_changed_source === "git_status_delta"
@@ -2744,7 +2761,11 @@ function deliverSubagentResult(
       // Parent delta null (git failed / baseline unreadable): adopt the
       // child's already-durable files_changed instead of stripping it — the
       // drain keeps the last record per id, and this record is the last.
-      const child = findChildSelfReport(running.id, repoRootFor(running.cwd ?? process.cwd()));
+      const child = findChildSelfReport(
+        running.id,
+        repoRootFor(running.cwd ?? process.cwd()),
+        running.startTime,
+      );
       if (child?.files_changed) {
         result.files_changed = child.files_changed;
         result.files_changed_source = child.files_changed_source ?? "git_status_delta";
@@ -3852,7 +3873,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             const total = s.paths.length + (s.more ?? 0);
             const shown =
               s.paths.slice(0, 3).join(", ") + (total > 3 ? `, +${total - 3} more` : "");
-            lines.push(`• ${s.name} — owns ${shown} (${s.state})`);
+            // All declared paths were filtered out (outside the exposure
+            // root): an explicit marker — never an empty "owns  (state)" span.
+            const owns = s.paths.length > 0 ? `owns ${shown}` : "(outside this repo)";
+            lines.push(`• ${s.name} — ${owns} (${s.state})`);
           }
         }
         if (metrics.length > 0) {
@@ -3900,8 +3924,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             const total = s.paths.length + (s.more ?? 0);
             const shown =
               s.paths.slice(0, 3).join(", ") + (total > 3 ? `, +${total - 3} more` : "");
+            // Same all-outside marker as the text output's scope section.
+            const owns = s.paths.length > 0 ? `owns ${shown}` : "(outside this repo)";
             lines.push(
-              `  ▣ ${theme.fg("toolTitle", theme.bold(s.name))}${theme.fg("dim", ` — owns ${shown} (${s.state})`)}`,
+              `  ▣ ${theme.fg("toolTitle", theme.bold(s.name))}${theme.fg("dim", ` — ${owns} (${s.state})`)}`,
             );
           }
         }
