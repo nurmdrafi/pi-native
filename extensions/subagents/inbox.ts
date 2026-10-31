@@ -87,7 +87,11 @@ export function appendSubagentResult(record: InboxRecord, historyExtra?: Subagen
     // Best-effort durability: the in-memory delivery still happens, and the
     // next successful append keeps the stream usable.
   }
-  if (record.files_changed && record.files_changed.length > 0) {
+  // History row whenever there is anything to record: changed files, or a
+  // read-only child's files_read (computeFilesChanged yields [] on a clean
+  // delta — dropping the row here would silently drop the reader's
+  // files_read and leave prior-reader matching inert for pure readers).
+  if ((record.files_changed?.length ?? 0) > 0 || (historyExtra?.files_read?.length ?? 0) > 0) {
     appendHistoryLine(record, historyExtra);
   }
 }
@@ -223,8 +227,10 @@ export function extractFilesRead(sessionFile: string): string[] | null {
   }
 }
 
-/** `git -C <baseline.repoRoot> diff --no-color -U1 -- <files>` output capped
- * at 1500 chars; null on failure, empty diff, or empty file list. */
+/** `git -C <baseline.repoRoot> diff HEAD --no-color -U1 -- <files>` output
+ * capped at 1500 chars; null on failure, empty diff, or empty file list.
+ * `HEAD` (not the default index-vs-worktree diff) so staged-only changes
+ * appear; truly untracked files still show nothing — fail-soft null. */
 export function gitDiffForBaseline(
   baselinePath: string,
   files: string[],
@@ -234,7 +240,7 @@ export function gitDiffForBaseline(
   try {
     const baseline = readBaseline(baselinePath);
     if (!baseline) return null;
-    const out = gitFn(["-C", baseline.repoRoot, "diff", "--no-color", "-U1", "--", ...files]);
+    const out = gitFn(["-C", baseline.repoRoot, "diff", "HEAD", "--no-color", "-U1", "--", ...files]);
     if (!out || !out.trim()) return null;
     return out.length > DIFF_CAP_CHARS ? out.slice(0, DIFF_CAP_CHARS) : out;
   } catch {
@@ -272,14 +278,6 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
   const path = subagentHistoryPath(record.repoRoot);
   try {
     mkdirSync(dirname(path), { recursive: true });
-    let existing: string[] = [];
-    try {
-      existing = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
-    } catch {
-      // First line in a fresh file.
-    }
-    // Rotation: past the cap, keep the most recent half before appending.
-    if (existing.length > HISTORY_MAX_LINES) existing = existing.slice(-HISTORY_KEEP_LINES);
     const line = JSON.stringify({
       id: record.id,
       ts: record.ts,
@@ -289,7 +287,38 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
       ...(extra?.diff ? { diff: extra.diff } : {}),
       summary: (record.summary ?? "").replace(/\s+/g, " ").trim().slice(0, HISTORY_SUMMARY_CHARS),
     });
-    writeFileSync(path, [...existing, line].join("\n") + "\n", "utf8");
+    // Appends are append-only: a read-modify-write appender drops a sibling
+    // writer's line (child self-report racing parent delivery) that lands
+    // between its read and its write, and a crash mid-rewrite truncates all
+    // history. The ONLY rewrite is rotation, and it fires solely when the
+    // file is unchanged since the read (mtimeMs+size recheck — the same
+    // lost-update guard the inbox compaction uses); a refused rotation just
+    // defers to the next append. Nothing is lost either way.
+    let rotation: { lines: string[]; mtimeMs: number; size: number } | null = null;
+    try {
+      const readAt = statSync(path);
+      const existing = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
+      // Rotation: past the cap, keep the most recent half before appending.
+      if (existing.length > HISTORY_MAX_LINES) {
+        rotation = { lines: existing.slice(-HISTORY_KEEP_LINES), mtimeMs: readAt.mtimeMs, size: readAt.size };
+      }
+    } catch {
+      // Fresh file — nothing to rotate, plain append below.
+    }
+    if (rotation) {
+      try {
+        const now = statSync(path);
+        if (now.mtimeMs === rotation.mtimeMs && now.size === rotation.size) {
+          writeFileSync(path, [...rotation.lines, line].join("\n") + "\n", "utf8");
+          return;
+        }
+        // Changed since the read: rewriting could drop the interleaved line —
+        // fall through to a plain append and rotate another day.
+      } catch {
+        // Unstatable: fall through to the append.
+      }
+    }
+    appendFileSync(path, line + "\n", "utf8");
   } catch {
     // Best-effort: history enriches future spawns; a lost line is not a lost result.
   }

@@ -25,6 +25,7 @@ import "./test-env.ts";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -234,7 +235,7 @@ describe("gitDiffForBaseline", () => {
     assert.ok(out);
     assert.ok(out.length <= 1500);
     assert.ok(out.startsWith("diff --git"));
-    assert.deepEqual(seenArgs, ["-C", root, "diff", "--no-color", "-U1", "--", "a.ts", "b.ts"]);
+    assert.deepEqual(seenArgs, ["-C", root, "diff", "HEAD", "--no-color", "-U1", "--", "a.ts", "b.ts"]);
   });
 
   it("omits (null) on empty diff, git failure, or missing baseline", () => {
@@ -248,6 +249,36 @@ describe("gitDiffForBaseline", () => {
     );
     assert.equal(gitDiffForBaseline(join(root, "missing.json"), ["a.ts"], () => "x"), null);
     assert.equal(gitDiffForBaseline(baseline, [], () => "x"), null, "no changed paths -> no diff");
+  });
+
+  it("includes staged-only changes (diffs against HEAD, not just the worktree)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inbox-files-staged-"));
+    try {
+      const git = (args: string[]) =>
+        execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+      git(["init", "-q"]);
+      git([
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "base",
+      ]);
+      // Staged-only: the worktree matches the index, so a plain `git diff`
+      // (index vs worktree) shows nothing — only `git diff HEAD` sees it.
+      writeFileSync(join(dir, "a.ts"), "one\ntwo\n", "utf8");
+      git(["add", "a.ts"]);
+      const baseline = writeBaselineFile(join(dir, "baseline.json"), dir, "");
+      const out = gitDiffForBaseline(baseline, ["a.ts"]);
+      assert.ok(out, "staged-only change must appear in the history diff");
+      assert.match(out, /\+two/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -295,6 +326,42 @@ describe("history file and drain interplay", () => {
     assert.ok(!rec.summary.includes("\n"), "history summary must be one line");
   });
 
+  it("append-only: bytes another writer landed survive a later append", () => {
+    const historyPath = subagentHistoryPath(repoRoot);
+    mkdirSync(join(repoRoot, ".pi"), { recursive: true });
+    // Writer B (a sibling child self-report) already landed this line — plus
+    // the untidy tail a crash mid-append leaves behind.
+    const writerB =
+      JSON.stringify({ id: "b-1", ts: 1, name: "scout", files_changed: ["b.ts"], summary: "s" }) + "\n\n";
+    writeFileSync(historyPath, writerB, "utf8");
+    // Writer A (parent delivery of another child) appends its own line.
+    appendSubagentResult(makeRecord({ id: "a-1", repoRoot, files_changed: ["a.ts"] }));
+    const after = readFileSync(historyPath, "utf8");
+    // A read-modify-write appender drops a sibling's line that lands between
+    // its read and its write, and truncates all history on a crash mid
+    // rewrite; an append-only writer cannot.
+    assert.ok(after.startsWith(writerB), "append must not rewrite bytes already on disk");
+    assert.deepEqual(
+      readRecentResults(repoRoot, 10).map((r) => r.id),
+      ["b-1", "a-1"],
+    );
+  });
+
+  it("rotation keeps every valid record when the tail is a mid-append crash residue", () => {
+    const historyPath = subagentHistoryPath(repoRoot);
+    mkdirSync(join(repoRoot, ".pi"), { recursive: true });
+    const old = Array.from({ length: 1001 }, (_, i) =>
+      JSON.stringify({ id: `old-${i}`, ts: i, name: "old", files_changed: ["f"], summary: "s" }),
+    );
+    // Writer B crashed mid-append: a trailing partial line with no newline.
+    writeFileSync(historyPath, old.join("\n") + "\n" + '{"id":"partial-', "utf8");
+    appendSubagentResult(makeRecord({ id: "new-1", repoRoot, files_changed: ["f.ts"] }));
+    const ids = readRecentResults(repoRoot, 1000).map((r) => r.id);
+    assert.equal(ids.length, 500);
+    assert.equal(ids[0], "old-502", "oldest kept valid record must survive rotation");
+    assert.equal(ids[ids.length - 1], "new-1");
+  });
+
   it("carries files_read and diff in HISTORY ONLY — the inbox record stays lean", () => {
     appendSubagentResult(
       makeRecord({
@@ -313,6 +380,17 @@ describe("history file and drain interplay", () => {
     assert.equal(surfaced[0].files_changed?.[0], "a.ts");
     assert.equal("files_read" in surfaced[0], false, "files_read must not bloat the drain-managed inbox");
     assert.equal("diff" in surfaced[0], false, "diff must not bloat the drain-managed inbox");
+  });
+
+  it("read-only children (files_read, no file changes) still get a history row", () => {
+    appendSubagentResult(
+      makeRecord({ id: "scout-1", repoRoot, files_changed: [], files_changed_source: "git_status_delta" }),
+      { files_read: ["docs/a.md", "src/b.ts"] },
+    );
+    const rec = JSON.parse(readFileSync(subagentHistoryPath(repoRoot), "utf8").trim());
+    assert.equal(rec.id, "scout-1");
+    assert.deepEqual(rec.files_changed, []);
+    assert.deepEqual(rec.files_read, ["docs/a.md", "src/b.ts"]);
   });
 
   it("rotates the history file down to the last 500 records past 1000 lines", () => {

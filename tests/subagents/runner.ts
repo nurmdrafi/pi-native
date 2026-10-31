@@ -1369,7 +1369,7 @@ describe("subagent discovery", () => {
     assert.equal(paths[0], join(homedir(), ".pi", "agent", "extensions", "permission-gate"));
   });
 
-  it("applySandboxToParts re-enables the gate directory form in sandboxed launch args", () => {
+  it("applySandboxToParts re-enables the gate directory form in sandboxed launch args", (t) => {
     const saved = process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
     delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
     try {
@@ -1397,15 +1397,17 @@ describe("subagent discovery", () => {
         for (const arg of gateArgs) {
           assert.ok(!arg.includes("permission-gate.ts"), `dead .ts default leaked into launch args: ${arg}`);
         }
-        // The gate ships as a directory in this layout; only assert the -e
-        // push where that directory actually exists.
+        // The gate ships as a directory in this layout; an absent gate dir
+        // must skip loudly, not let the assertion pass vacuously.
         const gateDir = join(homedir(), ".pi", "agent", "extensions", "permission-gate");
-        if (existsSync(gateDir)) {
-          assert.ok(
-            gateArgs.some((a) => a.replace(/'/g, "") === gateDir),
-            `expected -e ${gateDir} in launch args`,
-          );
+        if (!existsSync(gateDir)) {
+          t.skip(`gate directory not present in this layout: ${gateDir}`);
+          return;
         }
+        assert.ok(
+          gateArgs.some((a) => a.replace(/'/g, "") === gateDir),
+          `expected -e ${gateDir} in launch args`,
+        );
       });
     } finally {
       if (saved === undefined) delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
