@@ -14,7 +14,18 @@
  * in-memory steer). Records are addressed by id, so appends after a drain
  * are picked up by the next drain.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { getNewEntries } from "./session.ts";
@@ -293,7 +304,10 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
     // history. The ONLY rewrite is rotation, and it fires solely when the
     // file is unchanged since the read (mtimeMs+size recheck — the same
     // lost-update guard the inbox compaction uses); a refused rotation just
-    // defers to the next append. Nothing is lost either way.
+    // defers to the next append. That recheck is check-then-write, not
+    // atomic: an append landing between the re-stat and the rewrite is
+    // still dropped — the same residual window the inbox compaction accepts
+    // at this write rate.
     let rotation: { lines: string[]; mtimeMs: number; size: number } | null = null;
     try {
       const readAt = statSync(path);
@@ -318,7 +332,27 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
         // Unstatable: fall through to the append.
       }
     }
-    appendFileSync(path, line + "\n", "utf8");
+    // Crash residue: a mid-append crash can leave the last line without its
+    // newline. Gluing onto it merges both records into one invalid JSON line
+    // — readers drop BOTH, and below the rotation threshold the residue is
+    // never rewritten away. Probe the last byte and supply the missing
+    // newline: the residue is sacrificed, the new record still parses.
+    let prefix = "";
+    try {
+      const st = statSync(path);
+      if (st.size > 0) {
+        const fd = openSync(path, "r");
+        try {
+          const last = Buffer.alloc(1);
+          if (readSync(fd, last, 0, 1, st.size - 1) === 1 && last[0] !== 0x0a) prefix = "\n";
+        } finally {
+          closeSync(fd);
+        }
+      }
+    } catch {
+      // Probe is best-effort: on failure append exactly as before.
+    }
+    appendFileSync(path, prefix + line + "\n", "utf8");
   } catch {
     // Best-effort: history enriches future spawns; a lost line is not a lost result.
   }

@@ -362,6 +362,26 @@ describe("history file and drain interplay", () => {
     assert.equal(ids[ids.length - 1], "new-1");
   });
 
+  it("sacrifices a no-newline crash residue so the next record still parses", () => {
+    const historyPath = subagentHistoryPath(repoRoot);
+    mkdirSync(join(repoRoot, ".pi"), { recursive: true });
+    const good =
+      JSON.stringify({ id: "good-1", ts: 1, name: "old", files_changed: ["f"], summary: "s" }) + "\n";
+    // Crash mid-append: a trailing partial JSON fragment with no newline.
+    // Below the rotation threshold nothing ever rewrites this file, so a
+    // glued append would cost one permanently lost history record.
+    writeFileSync(historyPath, good + '{"id":"partial-', "utf8");
+    appendSubagentResult(makeRecord({ id: "new-1", repoRoot, files_changed: ["f.ts"] }));
+    const after = readFileSync(historyPath, "utf8");
+    assert.ok(after.endsWith("\n"), "the appended record must end with a newline");
+    const tail = after.slice(0, -1).split("\n").pop()!;
+    assert.equal(JSON.parse(tail).id, "new-1", "the new record must parse off the tail");
+    assert.deepEqual(
+      readRecentResults(repoRoot, 10).map((r) => r.id),
+      ["good-1", "new-1"],
+    );
+  });
+
   it("carries files_read and diff in HISTORY ONLY — the inbox record stays lean", () => {
     appendSubagentResult(
       makeRecord({
