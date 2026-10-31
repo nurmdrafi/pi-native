@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn small_gap_is_printed_not_marked() {
-        // Measured (.pi/read-ledger.jsonl): 92 of 151 gapped reads omitted
+        // Measured on real read traffic: 92 of 151 gapped reads omitted
         // <= 60 lines, and 57 later reads aimed inside a prior gap. A marker
         // over such a gap trades ~60 printed lines for a whole re-read turn.
         let text = (1..=90)

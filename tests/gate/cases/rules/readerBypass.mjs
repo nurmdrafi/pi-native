@@ -32,6 +32,21 @@ export const cases = [
     async (pi) => bash(pi, "rg -n foo src/ | sed 's/foo/bar/' | head -5"),
   ],
   [
+    "SE2: pipeline-stage sed -n filtering produced output is not flagged",
+    "pass",
+    async (pi) => bash(pi, "rg -n foo src/ | sed -n '1,5p'"),
+  ],
+  [
+    "SE2: cat used as a writer reads no window and is not flagged",
+    "pass",
+    async (pi) => bash(pi, "printf 'x\\n' | cat > /tmp/scratch.txt"),
+  ],
+  [
+    "SE2: a heredoc write through cat is not flagged",
+    "pass",
+    async (pi) => bash(pi, "cat <<'EOF' > /tmp/scratch.md\nnotes\nEOF"),
+  ],
+  [
     "SE2: jq reading a file is not flagged",
     "pass",
     async (pi) => bash(pi, "jq -r '.name' ~/.pi/agent/package.json"),

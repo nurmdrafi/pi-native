@@ -2381,13 +2381,13 @@ describe("subagent interruption", () => {
     }
   });
 
-  it("steers a running subagent by typing into its pane (newlines flattened)", () => {
+  it("steers a running subagent by typing into its pane (newlines flattened)", async () => {
     const testApi = (subagentsModule as any).__test__;
     let sentSurface = "";
     let sentText = "";
     const running = makeRunning();
 
-    const result = testApi.steerSubagent(running, "do this\nthen that", (surface: string, text: string) => {
+    const result = await testApi.steerSubagent(running, "do this\nthen that", (surface: string, text: string) => {
       sentSurface = surface;
       sentText = text;
     });
@@ -2397,18 +2397,103 @@ describe("subagent interruption", () => {
     assert.equal(sentText, "do this then that");
   });
 
-  it("returns an explicit error when steering delivery fails", () => {
+  it("returns an explicit error when steering delivery fails", async () => {
     const testApi = (subagentsModule as any).__test__;
     const running = makeRunning();
 
-    const result = testApi.steerSubagent(running, "hi", () => {
+    const result = await testApi.steerSubagent(running, "hi", () => {
       throw new Error("mux write failed");
     });
 
     assert.match(result.error, /Failed to deliver message/);
   });
 
-  it("delivers a steer message and forces local status waiting", () => {
+  it("waits for the restarted pane and re-sends when steering hits a lost pane", async () => {
+    const testApi = (subagentsModule as any).__test__;
+    const runningMap = testApi.runningSubagents as Map<string, any>;
+    runningMap.clear();
+    const running = makeRunning();
+    runningMap.set("a1", running);
+    const targets: string[] = [];
+    const send = (surface: string) => {
+      targets.push(surface);
+      if (surface === "pane-1") {
+        throw new Error("Command failed: tmux send-keys -t pane-1\ncan't find pane: pane-1\n");
+      }
+    };
+    setTimeout(() => {
+      running.surface = "pane-9"; // watcher auto-restart swapped the pane
+    }, 50);
+
+    try {
+      const result = await testApi.steerSubagent(running, "hi", send, { healWaitMs: 2_000, stepMs: 20 });
+
+      assert.deepEqual(result, { ok: true });
+      assert.ok(targets.length >= 2);
+      assert.equal(targets[targets.length - 1], "pane-9");
+    } finally {
+      runningMap.clear();
+    }
+  });
+
+  it("reports the run as ended when the lost-pane entry is finalized mid-steer", async () => {
+    const testApi = (subagentsModule as any).__test__;
+    const runningMap = testApi.runningSubagents as Map<string, any>;
+    runningMap.clear();
+    const running = makeRunning();
+    runningMap.set("a1", running);
+    const send = () => {
+      throw new Error("can't find pane: pane-1");
+    };
+    setTimeout(() => {
+      runningMap.delete("a1"); // watcher delivered pane_lost and finalized the entry
+    }, 40);
+
+    try {
+      const result = await testApi.steerSubagent(running, "hi", send, { healWaitMs: 2_000, stepMs: 20 });
+      assert.match(result.error, /ended/);
+      assert.match(result.error, /again/i);
+    } finally {
+      runningMap.clear();
+    }
+  });
+
+  it("keeps the delivery error when a lost pane does not heal in time", async () => {
+    const testApi = (subagentsModule as any).__test__;
+    const runningMap = testApi.runningSubagents as Map<string, any>;
+    runningMap.clear();
+    const running = makeRunning();
+    runningMap.set("a1", running);
+    const send = () => {
+      throw new Error("can't find pane: pane-1");
+    };
+
+    try {
+      const result = await testApi.steerSubagent(running, "hi", send, { healWaitMs: 60, stepMs: 20 });
+      assert.match(result.error, /Failed to deliver message/);
+    } finally {
+      runningMap.clear();
+    }
+  });
+
+  it("falls back to an exit summary when the finished claude pane is unreadable", async () => {
+    const testApi = (subagentsModule as any).__test__;
+    const running = makeRunning({
+      cli: "claude",
+      sessionFile: "/nonexistent/worker.jsonl",
+    });
+
+    const result = await testApi.watchSubagent(running, new AbortController().signal, {
+      poll: async () => ({ reason: "done", exitCode: 0 }),
+      readScreen: () => {
+        throw new Error("can't find pane: pane-1");
+      },
+    });
+
+    assert.match(result.summary, /Claude Code exited without output/);
+  });
+
+  it("delivers a steer message and forces local status waiting", async () => {
     const testApi = (subagentsModule as any).__test__;
     const runningMap = testApi.runningSubagents as Map<string, any>;
     let sentSurface = "";
@@ -2433,7 +2518,7 @@ describe("subagent interruption", () => {
     try {
       runningMap.set("a1", makeRunning({ statusState: activeState }));
 
-      const result = withMockedNow(20_000, () =>
+      const result = await withMockedNow(20_000, () =>
         testApi.handleSubagentSteer({ name: "Worker", message: "keep going" }, (surface: string, text: string) => {
           sentSurface = surface;
           sentText = text;
@@ -2452,20 +2537,20 @@ describe("subagent interruption", () => {
     }
   });
 
-  it("requires a message when steering", () => {
+  it("requires a message when steering", async () => {
     const testApi = (subagentsModule as any).__test__;
     const runningMap = testApi.runningSubagents as Map<string, any>;
     runningMap.clear();
     try {
       runningMap.set("a1", makeRunning());
-      const result = testApi.handleSubagentSteer({ name: "Worker", message: "  " }, () => {});
+      const result = await testApi.handleSubagentSteer({ name: "Worker", message: "  " }, () => {});
       assert.match(result.content[0].text, /`message` is required/);
     } finally {
       runningMap.clear();
     }
   });
 
-  it("leaves status unchanged when steering delivery fails in the tool path", () => {
+  it("leaves status unchanged when steering delivery fails in the tool path", async () => {
     const testApi = (subagentsModule as any).__test__;
     const runningMap = testApi.runningSubagents as Map<string, any>;
     runningMap.clear();
@@ -2488,7 +2573,7 @@ describe("subagent interruption", () => {
     try {
       runningMap.set("a1", makeRunning({ statusState: activeState }));
 
-      const result = withMockedNow(20_000, () =>
+      const result = await withMockedNow(20_000, () =>
         testApi.handleSubagentSteer({ name: "Worker", message: "go" }, () => {
           throw new Error("mux write failed");
         }),
