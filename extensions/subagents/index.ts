@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   readdirSync,
@@ -72,14 +72,24 @@ import {
   type EnforcedBudget,
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
-import { appendSubagentResult, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, repoRootFor, type SubagentHistoryExtra } from "./inbox.ts";
+import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, type SubagentHistoryExtra } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
   type ActivityReadResult,
   type SubagentActivityState,
 } from "./activity.ts";
-import { SpawnQueue, resolveMaxConcurrent } from "./spawn-queue.ts";
+import {
+  SpawnQueue,
+  declareScope,
+  findConflicts,
+  releaseScope,
+  resetScopeRegistry,
+  resolveMaxConcurrent,
+  scopedChildren,
+  setScopeDrainHook,
+} from "./spawn-queue.ts";
+import { deriveScope, intersectFilesChanged, parseTaskPaths, type SubagentScope } from "./scope.ts";
 import { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents, type PendingDetachedSubagent } from "./pending.ts";
 export { dismissPendingDetached, findPendingDetached, writePendingDetachedSubagents } from "./pending.ts";
 
@@ -133,6 +143,15 @@ const SubagentParams = Type.Object({
       description:
         "Working directory; the sub-agent starts there and picks up its local .pi/ config, CLAUDE.md, skills, and extensions. " +
         "Use for role-specific subfolders.",
+    }),
+  ),
+  files: Type.Optional(
+    Type.Array(Type.String(), {
+      maxItems: 100,
+      description:
+        "Files or directories this sub-agent will WRITE, repo-relative to cwd. Declares write ownership: " +
+        "while it runs (or waits), other spawns declaring overlapping paths queue behind it instead of racing it. " +
+        "NOT existence-checked — name deliverables that do not exist yet.",
     }),
   ),
   budget: Type.Optional(
@@ -717,6 +736,13 @@ interface RunningSubagent {
   /** Spawn-time git baseline snapshot (PI_SUBAGENT_BASELINE) when the child
    * cwd was inside a git repo; diffs at delivery time for files_changed. */
   gitBaselinePath?: string;
+  /** Derived file scope. "declared" (from the files param) participates in
+   * spawn-queue locking; "parsed" (from task text) is context-only — prior-
+   * work injection and display. Survives pane-loss restarts because the
+   * entry mutates in place. */
+  scope?: SubagentScope;
+  /** Spawn-queue lock id for a declared scope; released only at delivery. */
+  scopeId?: string;
   launchScriptFile?: string;
   activityFile?: string;
   activity?: SubagentActivityState;
@@ -783,8 +809,48 @@ interface PendingSpawn {
   ctx: Parameters<typeof launchSubagent>[1];
   parentArtifactDir: string;
   reservedName: string | null;
+  /** Declared-scope lock carried through the wait. Parsed-scope entries
+   * carry `scope` only — parsed scope never locks. */
+  scopeId?: string;
+  scope?: SubagentScope;
 }
 const pendingSpawns: PendingSpawn[] = [];
+
+/** PI_SUBAGENTS_SCOPE_MODE: "queue" (default) parks colliding declared
+ * spawns behind their owner; "warn" runs them with a warning; "off" does no
+ * scope tracking at all (prior-work injection is orthogonal and still runs). */
+type ScopeMode = "queue" | "warn" | "off";
+function resolveScopeMode(raw: string | undefined): ScopeMode {
+  const v = (raw ?? "").trim().toLowerCase();
+  return v === "warn" || v === "off" ? v : "queue";
+}
+
+let scopeIdSeq = 0;
+const nextScopeId = (): string => `scope-${process.pid}-${++scopeIdSeq}`;
+
+/** Scope info threaded launchReservedSpawn → launchSubagent: the derived
+ * scope always (injection + display), the lock id for declared scopes. */
+interface ScopeInfo {
+  scopeId?: string;
+  scope: SubagentScope;
+}
+
+function scopeInfoOf(entry: { scopeId?: string; scope?: SubagentScope }): ScopeInfo | undefined {
+  if (!entry.scope || entry.scope.origin === "none") return undefined;
+  return entry.scopeId ? { scopeId: entry.scopeId, scope: entry.scope } : { scope: entry.scope };
+}
+
+/** Declared-scope conflict summary for ack texts: first owner + its first
+ * few owned paths, plus a count of any further owners. */
+function describeScopeConflicts(conflicts: ReturnType<typeof findConflicts>): string {
+  const first = conflicts[0];
+  const hits = first.hits.slice(0, 3).join(", ");
+  const more = conflicts.length - 1;
+  return (
+    `overlaps "${first.name}" (owns ${hits}${first.hits.length > 3 ? ", …" : ""})` +
+    (more > 0 ? ` and ${more} other owner${more > 1 ? "s" : ""}` : "")
+  );
+}
 
 /** Send through `pi` while containing a failure of the channel itself: after
  *  a /reload this module instance is replaced but its watchers keep polling,
@@ -812,6 +878,10 @@ function sendMessageContained(
  *  throw and the async launch rejection share one message so neither path is
  *  silent (a queued spawn must never vanish without a result). */
 function reportQueuedLaunchFailure(pi: ExtensionAPI, entry: PendingSpawn, err: unknown): void {
+  // Parity with the slot release: a permanently failed queued launch frees
+  // its declared scope too — a third spawn parked behind this entry waits on
+  // an owner that will never run, and a freed slot alone cannot wake it.
+  if (entry.scopeId) releaseScope(entry.scopeId);
   sendMessageContained(
     pi,
     {
@@ -826,26 +896,51 @@ function reportQueuedLaunchFailure(pi: ExtensionAPI, entry: PendingSpawn, err: u
   );
 }
 
-/** Launch queued spawns as slots free; called from the queue's drain hook.
- *  One launch failure must not strand the rest — report as a steer and keep
- *  draining. */
+/** Launch queued spawns as slots free; called from the queue's drain hook
+ *  and (via the scope drain hook) when a declared scope is released.
+ *  Skip-scan: walk the FIFO and launch every entry whose declared scope (if
+ *  any) is conflict-free while slots last; conflicting entries stay parked
+ *  AT THEIR ORIGINAL INDEX so disjoint tasks keep their parallel lanes and
+ *  parked order is preserved. One launch failure must not strand the rest —
+ *  report as a steer and keep draining. */
 function drainPendingSpawns(): void {
-  while (pendingSpawns.length > 0 && spawnQueue.tryAcquire()) {
-    const next = pendingSpawns.shift()!;
+  // Conflict check FIRST: acquiring a slot for a parked entry only to
+  // release it again would re-fire this hook synchronously (release()
+  // drains) and recurse — and a conflicting entry cannot launch anyway.
+  for (let index = 0; index < pendingSpawns.length; ) {
+    const next = pendingSpawns[index];
+    if (next.scope && findConflicts(next.scope.paths, next.scopeId).length > 0) {
+      index += 1; // parked behind a live owner — keep its place in line
+      continue;
+    }
+    if (!spawnQueue.tryAcquire()) break; // slots exhausted
+    pendingSpawns.splice(index, 1); // detach BEFORE launch (and before any release)
     const pi = latestPi;
     if (!pi) {
       // Extension API gone (shutdown): nothing can be launched or reported.
-      // Free the slot and keep the entry queued for a future process.
+      // Free the slot FIRST — release() re-fires this hook synchronously, so
+      // the entry must not be in the queue when that runs — then restore the
+      // entry at its original index and stop this pass.
       spawnQueue.release();
-      pendingSpawns.unshift(next);
+      pendingSpawns.splice(index, 0, next);
       break;
     }
     try {
+      if (next.scopeId && next.scope) {
+        // Queued → running: the pane is about to exist. (name is always set
+        // by the time an entry queues — the tool assigned or reserved it.)
+        declareScope(next.scopeId, {
+          name: next.params.name ?? next.params.agent ?? "subagent",
+          paths: next.scope.paths,
+          state: "running",
+        });
+      }
       // launchReservedSpawn is async and never throws synchronously: attach
       // the failure report to the promise, or a rejected queued launch dies as
       // an unhandled rejection with no result anywhere. It releases its slot
-      // itself before re-throwing, so only the report is needed here.
-      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName).catch(
+      // (and its scope) itself before re-throwing, so only the report is
+      // needed here.
+      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName, scopeInfoOf(next)).catch(
         (err: unknown) => reportQueuedLaunchFailure(pi, next, err),
       );
     } catch (err) {
@@ -855,6 +950,7 @@ function drainPendingSpawns(): void {
   }
 }
 spawnQueue.setDrainHook(() => drainPendingSpawns());
+setScopeDrainHook(() => drainPendingSpawns());
 
 // When this extension is loaded inside a subagent that itself spawns children
 // (e.g. a worker delegating to scout/researcher), `subagent-done.ts` runs in the
@@ -957,7 +1053,10 @@ function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): st
     const agentTag = agent.agent ? ` (${agent.agent})` : "";
     const snapshot = classifyStatus(agent.statusState, Date.now());
     const icon = widgetIcon(snapshot.kind);
-    const left = ` ${icon} ${elapsed}  ${agent.name}${agentTag} `;
+    // Compact lock indicator for declared write scopes: glyph + path count.
+    const scopeCount = agent.scope?.origin === "declared" ? agent.scope.paths.length : 0;
+    const lockTag = scopeCount > 0 ? ` ${ACCENT}▣${RST}${scopeCount}` : "";
+    const left = ` ${icon} ${elapsed}${lockTag}  ${agent.name}${agentTag} `;
     const right = statusConfig.enabled
       ? formatWidgetRightLabel(snapshot)
       : agent.cli === "claude"
@@ -1818,6 +1917,15 @@ export const __test__ = {
   contextWindowFor,
   formatUsageSegments,
   widgetIcon,
+  deriveScope,
+  parseTaskPaths,
+  intersectFilesChanged,
+  declareScope,
+  releaseScope,
+  findConflicts,
+  scopedChildren,
+  resetScopeRegistry,
+  resolveScopeMode,
 };
 
 function startWidgetRefresh() {
@@ -1847,12 +1955,16 @@ async function launchReservedSpawn(
   ctx: Parameters<typeof launchSubagent>[1],
   parentArtifactDir: string,
   reservedName: string | null,
+  scopeInfo?: ScopeInfo,
 ): Promise<RunningSubagent> {
   let running: RunningSubagent;
   try {
-    running = await launchSubagent(params, ctx);
+    running = await launchSubagent(params, ctx, scopeInfo);
   } catch (err) {
     spawnQueue.release();
+    // The declared scope was reserved before the launch attempt — a failed
+    // launch must give the lock back or it leaks forever.
+    if (scopeInfo?.scopeId) releaseScope(scopeInfo.scopeId);
     // Wrap, never re-throw verbatim: a raw tmux failure here (pane lost
     // mid-launch) reads as internal noise; the wrap names the subagent.
     throw new Error(
@@ -1908,6 +2020,7 @@ async function launchReservedSpawn(
 async function launchSubagent(
   params: typeof SubagentParams.static,
   ctx: { sessionManager: { getSessionFile(): string | undefined; getSessionId(): string; getSessionDir(): string }; cwd: string },
+  scopeInfo?: ScopeInfo,
 ): Promise<RunningSubagent> {
   if (!params.name?.trim()) throw new Error("launchSubagent: params.name is required (the spawn handler assigns a unique name before launching)");
   const startTime = Date.now();
@@ -1973,9 +2086,26 @@ async function launchSubagent(
   const systemPromptMode = agentDefs?.systemPromptMode;
   const identityInSystemPrompt = systemPromptMode && identity;
   const roleBlock = identity && !identityInSystemPrompt ? `\n\n${identity}` : "";
-  const fullTask = inheritsConversationContext
-    ? params.task
-    : `${roleBlock}\n\n${modeHint}\n\n${params.task}\n\n${summaryInstruction}`;
+  // Prior-work injection: when the child carries a scope (declared or
+  // parsed), append what recent history says about those paths so a later
+  // wave does not re-read files an earlier child already changed. Orthogonal
+  // to scope locking — it runs in every PI_SUBAGENTS_SCOPE_MODE. Scope paths
+  // are absolute; history paths are repo-relative, so relativize first.
+  const scopeRepoRoot = repoRootFor(targetCwdForSession);
+  const priorWorkBlock =
+    scopeInfo && scopeInfo.scope.paths.length > 0
+      ? buildPriorWorkBlock(
+          readRecentResults(scopeRepoRoot, 20),
+          scopeInfo.scope.paths
+            .map((p) => relative(scopeRepoRoot, p))
+            .filter((p) => p !== "" && !p.startsWith("..")),
+        )
+      : null;
+  const fullTask =
+    (inheritsConversationContext
+      ? params.task
+      : `${roleBlock}\n\n${modeHint}\n\n${params.task}\n\n${summaryInstruction}`) +
+    (priorWorkBlock ? `\n\n${priorWorkBlock}` : "");
   // ── Claude Code CLI path ──
   if (agentDefs?.cli === "claude") {
     const sentinelFile = `/tmp/pi-claude-${id}-done`;
@@ -2042,6 +2172,8 @@ async function launchSubagent(
       interactive: effectiveInteractive,
       cwd: effectiveCwd ?? process.cwd(),
       parentSessionId: sessionId,
+      ...(scopeInfo && scopeInfo.scope.origin !== "none" ? { scope: scopeInfo.scope } : {}),
+      ...(scopeInfo?.scopeId ? { scopeId: scopeInfo.scopeId } : {}),
       ...budgetRuntimeFields(budget, surface, subagentSessionFile),
       statusState: createStatusState({
         source: "claude",
@@ -2206,6 +2338,8 @@ async function launchSubagent(
     sessionFile: subagentSessionFile,
     parentArtifactDir: artifactDir,
     ...(gitBaselinePath ? { gitBaselinePath } : {}),
+    ...(scopeInfo && scopeInfo.scope.origin !== "none" ? { scope: scopeInfo.scope } : {}),
+    ...(scopeInfo?.scopeId ? { scopeId: scopeInfo.scopeId } : {}),
     launchScriptFile,
     activityFile,
     interactive: effectiveInteractive,
@@ -2448,7 +2582,13 @@ function deliverSubagentResult(
   if (running.gitBaselinePath) {
     const filesChanged = computeFilesChanged(running.gitBaselinePath);
     if (filesChanged) {
-      result.files_changed = filesChanged;
+      // Scope-intersect: when the child carried a scope, attribute only the
+      // changes inside it — the whole-repo baseline would otherwise bill
+      // sibling children's edits to this one. No scope keeps the raw delta;
+      // the provenance marker stays advisory either way.
+      result.files_changed = running.scope?.paths.length
+        ? intersectFilesChanged(filesChanged, running.scope.paths, repoRootFor(running.cwd ?? process.cwd()))
+        : filesChanged;
       result.files_changed_source = "git_status_delta";
       const filesRead = extractFilesRead(result.sessionFile ?? running.sessionFile);
       const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged);
@@ -2460,6 +2600,14 @@ function deliverSubagentResult(
   }
   persistResultRecord(running, result, synthesized, historyExtra);
   runningSubagents.delete(running.id);
+  // THE scope-release funnel — every finalization (watcher exit, reconcile
+  // sweep, budget kill) passes through here. The delete sites inside
+  // watchSubagent run before delivery and must NOT release; restart never
+  // deletes (the entry mutates in place, so the reservation survives); the
+  // resume path constructs unscoped entries. Releasing may unpark spawns
+  // queued behind this owner — the scope drain hook fires synchronously and
+  // the watcher's slot release re-drains regardless.
+  if (running.scopeId) releaseScope(running.scopeId);
   try {
     running.abortController?.abort();
   } catch {}
@@ -3286,18 +3434,70 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           reservedNames.add(reservedName);
         }
 
+        // ── Declared file-scope lock ──
+        // Derive the child's scope and check conflicts synchronously: the
+        // segment from here to tryAcquire is verified await-free, so the
+        // reservation is atomic against same-turn parallel spawns (mirrors
+        // the name reservation above). Parsed scope NEVER locks — it only
+        // rides along for prior-work injection and display.
+        const scope = deriveScope(
+          params.task,
+          resolveSubagentPaths(params, params.agent ? loadAgentDefaults(params.agent) : null).effectiveCwd ?? ctx.cwd,
+          params.files,
+        );
+        const scopeMode = resolveScopeMode(process.env.PI_SUBAGENTS_SCOPE_MODE);
+        let scopeId: string | undefined;
+        let scopeConflicts: ReturnType<typeof findConflicts> = [];
+        if (scopeMode !== "off" && scope.origin === "declared") {
+          scopeId = nextScopeId();
+          scopeConflicts = findConflicts(scope.paths);
+        }
+        const scopeInfo = scopeInfoOf({ scopeId, scope });
+
         // Launch the subagent (creates pane, runs the launch script). Release
         // the name reservation once it registers in runningSubagents (or the
         // launch fails) — from then on uniqueRunningName tracks it via the
         // running map. A slot must already be held: either claimed just now or
         // drained from the queue — never block the parent turn on acquire().
         let running: RunningSubagent;
+        if (scopeConflicts.length > 0 && scopeMode === "queue") {
+          // Declared write overlap with a live owner: park the spawn with its
+          // scope reserved (a queued reservation participates in conflicts,
+          // so a third colliding spawn queues behind this one too). No slot
+          // is taken — the scope release wakes it.
+          declareScope(scopeId!, { name: params.name, paths: scope.paths, state: "queued" });
+          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName, scopeId, scope });
+          startWidgetRefresh();
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text:
+                  `Sub-agent "${params.name}" queued behind "${scopeConflicts[0].name}" — it declares write scope that ` +
+                  `${describeScopeConflicts(scopeConflicts)}, so it launches once that owner finishes. ` +
+                  `The launch and its result both arrive automatically: a steer message wakes you when it finishes. ` +
+                  `Do NOT poll, sleep, or check status; do NOT assume results. Move on to other work or end your turn.`,
+              },
+            ],
+            details: {
+              name: params.name,
+              task: params.task,
+              agent: params.agent,
+              queued: true,
+              queuePosition: pendingSpawns.length,
+              scopeConflicts,
+            },
+          };
+        }
+        if (scopeId) {
+          declareScope(scopeId, { name: params.name, paths: scope.paths, state: "running" });
+        }
         if (spawnQueue.tryAcquire()) {
-          running = await launchReservedSpawn(pi, params, ctx, parentArtifactDir, reservedName);
+          running = await launchReservedSpawn(pi, params, ctx, parentArtifactDir, reservedName, scopeInfo);
         } else {
           // Cap reached: queue FIFO and return immediately. The drain hook
           // launches it when a slot frees; result delivery is unchanged.
-          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName });
+          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName, scopeId, scope });
           startWidgetRefresh();
           return {
             content: [
@@ -3321,12 +3521,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         // Return immediately
+        const scopeWarn =
+          scopeMode === "warn" && scopeConflicts.length > 0
+            ? `WARNING: write-scope ${describeScopeConflicts(scopeConflicts)} — running anyway (PI_SUBAGENTS_SCOPE_MODE=warn). `
+            : "";
         return {
           content: [
             {
               type: "text",
               text:
                 `Sub-agent "${params.name}" launched and is now running in the background. ` +
+                `${scopeWarn}` +
                 `Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
                 `The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
                 `Until then, move on to other work or tell the user you're waiting.`,
@@ -3462,9 +3667,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           }
         }
 
+        // Declared write-scope owners (running or queued) — the file locks
+        // this session's spawns currently hold.
+        const scoped = scopedChildren();
+        if (scoped.length > 0) {
+          lines.push("", "Declared file scopes (write locks):");
+          for (const s of scoped) {
+            const shown =
+              s.paths.slice(0, 3).join(", ") + (s.paths.length > 3 ? `, +${s.paths.length - 3} more` : "");
+            lines.push(`• ${s.name} — owns ${shown} (${s.state})`);
+          }
+        }
+
         return {
           content: [{ type: "text", text: lines.join("\n") }],
-          details: { agents: list, registered },
+          details: { agents: list, registered, ...(scoped.length ? { scoped } : {}) },
         };
       },
 

@@ -2138,8 +2138,8 @@ describe("tool registration", () => {
     const props = subagentTool.parameters.properties;
     assert.deepEqual(
       Object.keys(props).sort(),
-      ["agent", "budget", "cwd", "model", "name", "task"],
-      "only agent/task/name/model/cwd/budget should remain",
+      ["agent", "budget", "cwd", "files", "model", "name", "task"],
+      "only agent/task/name/model/cwd/files/budget should remain",
     );
     assert.deepEqual(
       [...(subagentTool.parameters.required ?? [])].sort(),
