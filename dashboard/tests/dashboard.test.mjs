@@ -469,11 +469,17 @@ describe("gateSummary", () => {
     const g = gateSummary({ anchor: 4, search: 1 }, { alpha: "error", beta: "warn", gamma: "off", delta: "error" });
     assert.equal(g.total, 5);
     assert.deepEqual(g.byFamily, { anchor: 4, search: 1 });
+    // Unknown rule ids keep their id as code/label and land in the advisory
+    // group, with every count field zero-defaulted.
+    const zeroRule = (id, severity) => ({
+      id, code: id, label: id, group: "advisory", severity, family: null,
+      blocks: 0, warns: 0, topTool: null, trend: [], avoidedSpend: 0, tags: [],
+    });
     assert.deepEqual(g.rules, [
-      { id: "alpha", severity: "error", family: null },
-      { id: "delta", severity: "error", family: null },
-      { id: "beta", severity: "warn", family: null },
-      { id: "gamma", severity: "off", family: null },
+      zeroRule("alpha", "error"),
+      zeroRule("delta", "error"),
+      zeroRule("beta", "warn"),
+      zeroRule("gamma", "off"),
     ]);
     assert.deepEqual(g.bySeverity, { error: 2, warn: 1, off: 1 });
     // Unmapped rules leave family severity unresolved, not guessed.
@@ -492,8 +498,17 @@ describe("gateSummary", () => {
     assert.equal(g.avoidedSpend, 0.42);
     assert.deepEqual(g.rules.find((r) => r.id === "editAnchorGuard"), {
       id: "editAnchorGuard",
+      code: "AG",
+      label: "Edits anchor on lines already in context",
+      group: "anchor",
       severity: "warn",
       family: "anchor",
+      blocks: 0,
+      warns: 0,
+      topTool: null,
+      trend: [],
+      avoidedSpend: 0,
+      tags: ["Anchor Guard (Stale)", "Anchor Guard (Stale-relaxed)", "Anchor Guard"],
     });
   });
 });
@@ -569,7 +584,15 @@ describe("subagentMetrics byAgent", () => {
     assert.equal(m.spawns, 2);
     assert.equal(m.messages, 2);
     const scout = m.byAgent.find((a) => a.agent === "scout");
-    assert.deepEqual(scout, { agent: "scout", spawns: 1, messages: 1, errors: 0, avgLatencyMs: 25000 });
+    assert.deepEqual(scout, {
+      agent: "scout",
+      spawns: 1,
+      messages: 1,
+      errors: 0,
+      avgLatencyMs: 25000,
+      p50LatencyMs: 20000,
+      p95LatencyMs: 30000,
+    });
     const builder = m.byAgent.find((a) => a.agent === "builder");
     assert.deepEqual(builder, { agent: "builder", spawns: 1, messages: 0, errors: 1, avgLatencyMs: 90000 });
     const direct = m.byAgent.find((a) => a.agent === "(direct)");

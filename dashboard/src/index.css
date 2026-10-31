@@ -17,6 +17,12 @@
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
     --color-chart-5: var(--chart-5);
+    --color-ok-foreground: var(--ok-foreground);
+    --color-ok: var(--ok);
+    --color-warn-foreground: var(--warn-foreground);
+    --color-warn: var(--warn);
+    --color-error-foreground: var(--error-foreground);
+    --color-error: var(--error);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
@@ -60,17 +66,26 @@
     --secondary: oklch(0.955 0.005 280);
     --secondary-foreground: oklch(0.3 0.02 275);
     --muted: oklch(0.955 0.005 280);
-    --muted-foreground: oklch(0.5 0.02 275);
+    --muted-foreground: oklch(0.47 0.02 275);
     --accent: oklch(0.94 0.012 300);
     --accent-foreground: oklch(0.35 0.09 300);
     --destructive: oklch(0.55 0.21 22);
+    /* warn is yellow, error is red: state colors carry meaning, lighter fills
+       keep the pill quiet so the numbers stay loudest */
+    --error: oklch(0.63 0.19 25);
+    --error-foreground: oklch(0.5 0.19 25);
+    --warn: oklch(0.86 0.14 94);
+    --warn-foreground: oklch(0.46 0.1 80);
+    /* green speaks only for the live/active state, same quiet-pill shape */
+    --ok: oklch(0.58 0.13 152);
+    --ok-foreground: oklch(0.42 0.11 152);
     --destructive-foreground: oklch(0.99 0.002 280);
     --border: oklch(0.905 0.006 280);
     --input: oklch(0.905 0.006 280);
     --ring: oklch(0.54 0.2 300);
     --chart-1: oklch(0.52 0.21 264);
     --chart-2: oklch(0.52 0.14 163);
-    --chart-3: oklch(0.66 0.16 70);
+    --chart-3: oklch(0.6 0.15 70);
     --chart-4: oklch(0.5 0.23 303);
     --chart-5: oklch(0.55 0.21 16);
     --sidebar: oklch(0.975 0.003 280);
@@ -99,11 +114,17 @@
     --accent: oklch(0.28 0.05 300);
     --accent-foreground: oklch(0.85 0.09 300);
     --destructive: oklch(0.65 0.2 25);
+    --error: oklch(0.7 0.17 25);
+    --error-foreground: oklch(0.8 0.14 25);
+    --warn: oklch(0.9 0.15 98);
+    --warn-foreground: oklch(0.94 0.1 98);
+    --ok: oklch(0.72 0.16 152);
+    --ok-foreground: oklch(0.9 0.1 152);
     --destructive-foreground: oklch(0.13 0.02 275);
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.72 0.16 300);
-    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-1: oklch(0.53 0.21 264);
     --chart-2: oklch(0.696 0.17 162.48);
     --chart-3: oklch(0.769 0.188 70.08);
     --chart-4: oklch(0.627 0.265 303.9);

@@ -42,14 +42,16 @@ over-budget / warning / live.
 - Charts keep the five-hue oklch data sequence (`--chart-1..5`), tuned per
   theme for ≥3:1 on their card surface. Same hue → same meaning everywhere:
   chart-1 cost, chart-2 secondary series, chart-3 counts, chart-4 mix,
-  chart-5 gate/blocks.
+  chart-5 blocks. The gate's own series use state tokens instead of the data
+  ramp: `--error` (red) for blocks, `--warn` (yellow) for warns — lighter
+  fills, with `--error-foreground` / `--warn-foreground` carrying text.
 
 ## Typography
 
 - One family: Geist Variable. Hierarchy by weight and size steps, not new fonts.
 - Scale: page title 13px/600, card titles 12px/500 uppercase tracking-wide is
-  banned — titles stay sentence case 13px/500; stat labels 11px/500 muted;
-  values 22px/600 tabular-nums; table cells 12px, ids/paths monospace 11px.
+  banned — titles stay sentence case 13px/500; stat labels 12px/500 muted;
+  values 28px/600 tabular-nums; table cells 12px, ids/paths monospace 11px.
 - All metrics `tabular-nums`. Money: `$1.23` / `$1,234`, milliseconds or
   `1.2s`, durations `2h 14m`, counts `1.2k`.
 
@@ -58,11 +60,17 @@ over-budget / warning / live.
 - Cards: `rounded-lg border bg-card`, header 12px title + muted suffix meta,
   no shadows on the resting surface (shadow only on keyboard focus/hover of
   interactive cards).
+- Session modal: near-full glass dialog (`w-[min(68.75rem,94vw)] h-[90vh]`),
+  meta header (project + mono id, quiet meta line: models/duration/turns/
+  cost/cache; state badges only when non-zero), tabbed body, borderless stat
+  stacks (label over value, no nested mini-cards), footer with prev/next,
+  copy id, per-session CSV.
 - Tables: header 11px muted, rows 36px, zebra off, hover `bg-muted/50`,
   selected row `bg-muted` + accent left edge. Rows that act as controls are
   focusable buttons (Enter/Space), with visible focus ring.
-- Badges: severity — destructive (error), amber (warn), muted (off); live dot
-  green with text label beside it (never color alone).
+- Badges: severity — red (`--error`, error), yellow (`--warn`, warn), muted
+  (off): a dot plus the word, tinted pill, 11px/500, never color alone. Live
+  dot green with text label beside it.
 - Charts: recharts, hairline gridlines (horizontal only for time series,
   vertical only for horizontal bars), axis ticks 11px muted, tooltip follows
   the shadcn chart tooltip. No gradients, no 3D, no drop shadows on data.

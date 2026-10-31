@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SessionDetailPanel } from "@/components/SessionDetail";
 import { fetchDetail } from "@/lib/api";
+import { burnRate } from "@/lib/burn";
 import {
   Table,
   TableBody,
@@ -22,20 +23,7 @@ export interface FeedItem {
   payload: LivePayload;
 }
 
-const FEED_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-];
-
-/** Stable color per session file so feed rows and active rows identify alike. */
-function colorFor(file: string): string {
-  let h = 0;
-  for (let i = 0; i < file.length; i++) h = (h * 31 + file.charCodeAt(i)) >>> 0;
-  return FEED_COLORS[h % FEED_COLORS.length];
-}
+const ROLLING_WINDOW_MS = 15 * 60_000;
 
 export function LiveTab({
   snapshot,
@@ -55,6 +43,14 @@ export function LiveTab({
   useEffect(() => {
     if (!paused) setShown(feed);
   }, [feed, paused]);
+
+  // Rates come from what is on screen: frozen while paused, empty after a
+  // clear. Events without their own timestamp fall back to feed arrival time.
+  const feedEvents: { ts: string | null; cost: number }[] = shown.flatMap((item) =>
+    item.payload.events.map((e) => ({ ts: e.ts ?? item.at, cost: e.cost })),
+  );
+  const rolling = burnRate(feedEvents, ROLLING_WINDOW_MS);
+  const feedToDate = burnRate(feedEvents, null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,10 +79,10 @@ export function LiveTab({
             active sessions
             <span
               className={`inline-flex items-center gap-1.5 text-xs font-normal ${
-                connected ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+                connected ? "text-ok-foreground" : "text-muted-foreground"
               }`}
             >
-              <span className={`size-1.5 rounded-full ${connected ? "bg-green-500" : "bg-muted-foreground/50"}`} />
+              <span className={`size-1.5 rounded-full ${connected ? "bg-ok" : "bg-muted-foreground/50"}`} />
               {connected ? "streaming" : "connecting"}
             </span>
           </CardTitle>
@@ -129,10 +125,7 @@ export function LiveTab({
                     }}
                   >
                     <TableCell className="flex items-center gap-2 font-mono text-xs">
-                      <span
-                        className="size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: colorFor(a.file) }}
-                      />
+                      <span className="size-2 shrink-0 rounded-full bg-muted-foreground/50" />
                       {a.file}
                     </TableCell>
                     <TableCell className="text-xs">{a.project}</TableCell>
@@ -182,7 +175,28 @@ export function LiveTab({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-64 rounded-lg border">
+          <div className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-xs">
+            <span className="text-muted-foreground">
+              rolling{" "}
+              <span
+                className={`font-semibold tabular-nums ${
+                  connected && rolling ? "text-ok-foreground" : "text-foreground"
+                }`}
+              >
+                {rolling ? `${fmtMoney(rolling.hourly)}/h` : "warming up"}
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              feed-to-date{" "}
+              <span className="font-semibold tabular-nums text-foreground">
+                {feedToDate ? `${fmtMoney(feedToDate.hourly)}/h` : "warming up"}
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              from the visible feed — rolling spans its newest 15m
+            </span>
+          </div>
+          <ScrollArea className="h-64 rounded-md">
             {shown.length === 0 ? (
               <div
                 className="space-y-2 p-3"
@@ -190,7 +204,7 @@ export function LiveTab({
                 aria-label={connected ? "waiting for turns" : "connecting to the live stream"}
               >
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-3 font-mono text-xs">
+                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 font-mono text-xs">
                     <Skeleton className="h-3.5 w-12" />
                     <Skeleton className="h-3.5 w-44" />
                     <Skeleton className="h-3.5 w-14" />
@@ -207,14 +221,10 @@ export function LiveTab({
                   >
                     <span className="text-muted-foreground">{item.at}</span>
                     <span
-                      className="flex min-w-0 max-w-[280px] shrink-0 items-center gap-1.5 font-medium"
-                      style={{ color: colorFor(item.payload.file) }}
+                      className="flex min-w-0 max-w-[280px] shrink-0 items-center gap-1.5 font-medium text-foreground"
                       title={item.payload.file}
                     >
-                      <span
-                        className="size-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: colorFor(item.payload.file) }}
-                      />
+                      <span className="size-2 shrink-0 rounded-full bg-muted-foreground/50" />
                       <span className="truncate">{item.payload.file}</span>
                     </span>
                     {item.payload.events.map((e, j) => (

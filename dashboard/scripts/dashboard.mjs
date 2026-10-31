@@ -24,6 +24,8 @@ import {
   createSessionTailer,
   detailFor,
   gateSummary,
+  localDayKey,
+  sessionRangeView,
   spendSummary,
   summarizeSession,
 } from "./data.mjs";
@@ -43,6 +45,10 @@ const GATE_CONFIG = join(REPO_ROOT, "extensions", "permission-gate", "config.jso
 const SESSION_BUDGET = Number(process.env.PI_DASH_SESSION_BUDGET ?? 0) || 0;
 /** Snapshot refresh cadence. */
 const POLL_MS = 5_000;
+/** Wall-clock start of this server process, shown in the header so a process
+ * running older code than the checkout is visible at a glance — server
+ * modules load once at start and never reload. */
+const SERVER_STARTED_AT = new Date().toISOString();
 /** A session file touched within this window is active and tailed live. */
 const ACTIVE_WINDOW_MS = 5 * 60_000;
 // ── Server shell ─────────────────────────────────────────────
@@ -112,12 +118,88 @@ async function findActiveFiles() {
   return found;
 }
 
-const sseClients = new Set();
+/** Open SSE responses with the date window they asked for; a null bound means
+ * unbounded, so the default client sees the whole history. */
+const sseClients = new Map();
 
 function broadcast(event, data) {
-  for (const res of sseClients) {
+  for (const res of sseClients.keys()) {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   }
+}
+
+/** Date window from a query string; absent or unparsable bounds mean "all". */
+function parseRange(url) {
+  try {
+    const u = new URL(url, "http://127.0.0.1");
+    const iso = (v) => {
+      if (!v) return null;
+      const t = Date.parse(v);
+      return Number.isFinite(t) ? new Date(t).toISOString() : null;
+    };
+    const from = iso(u.searchParams.get("from"));
+    const to = iso(u.searchParams.get("to"));
+    return { from, to };
+  } catch {
+    return { from: null, to: null };
+  }
+}
+
+const rangeKey = (r) => `${r.from ?? ""}|${r.to ?? ""}`;
+
+const inRange = (ts, range) => {
+  if (!range.from && !range.to) return true;
+  if (!ts) return false;
+  const t = Date.parse(ts);
+  if (!Number.isFinite(t)) return false;
+  if (range.from && t < Date.parse(range.from)) return false;
+  if (range.to && t > Date.parse(range.to)) return false;
+  return true;
+};
+
+/** One snapshot for one date window: the session list, every aggregate and the
+ * gate rollup are recomputed from the filtered sessions, so a range selection
+ * changes the numbers rather than just the table. Cost, turns and tool
+ * traffic are attributed to the turns/calls inside the window — a session
+ * merely touched by the window contributes only that in-window activity. */
+export function snapshotFor(base, range) {
+  const sessions = base.sessions.filter((s) => inRange(s.lastTs ?? s.firstTs, range));
+  const keepIds = new Set(sessions.map((s) => s.sessionId));
+  const raw = base.raw.filter((e) => keepIds.has(e.sessionId));
+  const extractById = new Map(raw.map((e) => [e.sessionId, e]));
+  const fromMs = range.from ? Date.parse(range.from) : null;
+  const toMs = range.to ? Date.parse(range.to) : null;
+  // Window-clipped copies of the session summaries: the client's per-session
+  // rollups (the tools chart) read these objects directly.
+  const views = sessions.map((s) => sessionRangeView(s, extractById.get(s.sessionId), fromMs, toMs));
+  const agg = aggregateSessions(views, {
+    fromDay: range.from ? localDayKey(range.from) : null,
+    toDay: range.to ? localDayKey(range.to) : null,
+    raw,
+    from: fromMs,
+    to: toMs,
+  });
+  return {
+    generatedAt: base.generatedAt,
+    serverStartedAt: SERVER_STARTED_AT,
+    range,
+    sessions: views.slice().sort((a, b) => (b.lastTs ?? "").localeCompare(a.lastTs ?? "")),
+    aggregates: {
+      ...agg,
+      modelMix: aggregateModelMix(raw, fromMs, toMs),
+      spend: spendSummary(views, new Date(), { raw, from: fromMs, to: toMs }),
+      alerts: costAlerts(sessions, SESSION_BUDGET),
+      gate: gateSummary(agg.blocksByFamily, readGateRules(), {
+        blocksByTool: agg.blocksByTool,
+        avoidedSpend: agg.avoidedSpend,
+        gateTags: agg.gateTags,
+        gateByDay: agg.gateByDay,
+        toolAvgCost: agg.toolAvgCost,
+        globalAvgCost: agg.globalAvgCost,
+      }),
+    },
+    active: base.active,
+  };
 }
 
 let pidxRunning = false;
@@ -154,26 +236,26 @@ async function cycle(tailers) {
 
   const raw = await readRawExtracts();
   const idByPath = new Map(raw.map((e) => [e.path, e.sessionId]));
-  for (const a of active) a.sessionId = idByPath.get(a.path) ?? null;
+  // Active files are absent from the extracts (pidx skips sessions still being
+  // written), so the project comes from a closed sibling in the same directory.
+  const projectByDir = new Map(raw.map((e) => [dirname(e.path), e.project]));
+  for (const a of active) {
+    a.sessionId = idByPath.get(a.path) ?? null;
+    a.project = projectByDir.get(dirname(a.path)) ?? a.project;
+  }
   const sessions = raw.map(summarizeSession);
-  const sessionsAgg = aggregateSessions(sessions);
-  const snapshot = {
-    generatedAt: new Date().toISOString(),
-    sessions: sessions.sort((a, b) => (b.lastTs ?? "").localeCompare(a.lastTs ?? "")),
-    aggregates: {
-      ...sessionsAgg,
-      modelMix: aggregateModelMix(raw),
-      spend: spendSummary(sessions, new Date()),
-      alerts: costAlerts(sessions, SESSION_BUDGET),
-      gate: gateSummary(sessionsAgg.blocksByFamily, readGateRules(), {
-        blocksByTool: sessionsAgg.blocksByTool,
-        avoidedSpend: sessionsAgg.avoidedSpend,
-      }),
-    },
-    active,
-  };
-  broadcast("snapshot", snapshot);
-  return snapshot;
+  const base = { raw, sessions, active, generatedAt: new Date().toISOString() };
+  // One snapshot per distinct date window among the open streams: the window
+  // is client state, so the payload cannot be shared.
+  const byRange = new Map([[rangeKey({ from: null, to: null }), { from: null, to: null }]]);
+  for (const range of sseClients.values()) byRange.set(rangeKey(range), range);
+  const built = new Map();
+  for (const [key, range] of byRange) built.set(key, snapshotFor(base, range));
+  for (const [res, range] of sseClients) {
+    const snapshot = built.get(rangeKey(range));
+    res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+  }
+  return base;
 }
 
 const HTML = `<!doctype html>
@@ -271,14 +353,14 @@ async function main() {
   const PORT = Number(process.env.PI_DASH_PORT ?? 8787);
 
   const server = createServer(async (req, res) => {
-    if (req.url === "/api/stream") {
+    if (req.url?.startsWith("/api/stream")) {
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
       res.write(":ok\n\n");
-      sseClients.add(res);
+      sseClients.set(res, parseRange(req.url));
       req.on("close", () => sseClients.delete(res));
       return;
     }
@@ -294,8 +376,9 @@ async function main() {
       res.end(JSON.stringify(detailFor(raw)));
       return;
     }
-    if (req.url === "/api/sessions") {
-      const snapshot = await cycle(tailers);
+    if (req.url?.startsWith("/api/sessions")) {
+      const base = await cycle(tailers);
+      const snapshot = snapshotFor(base, parseRange(req.url));
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(snapshot));
       return;
@@ -309,7 +392,11 @@ async function main() {
           { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon" }[
             file.slice(file.lastIndexOf("."))
           ] ?? "application/octet-stream";
-        res.writeHead(200, { "content-type": mime });
+        // The entry document must revalidate every load or a rebuild is
+        // invisible to a normal reload; hashed asset names can cache forever.
+        const cache =
+          req.url === "/" ? "no-cache" : "public, max-age=31536000, immutable";
+        res.writeHead(200, { "content-type": mime, "cache-control": cache });
         res.end(await readFile(file));
         return;
       }

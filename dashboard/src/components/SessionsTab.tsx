@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Copy, Download } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,13 +11,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SessionDetailPanel } from "@/components/SessionDetail";
 import { fetchDetail } from "@/lib/api";
+import { downloadFile, sessionDetailCsv } from "@/lib/export";
 import { fmtAgo, fmtMoney, basename } from "@/lib/format";
 import type { SessionDetail, SessionSummary, Snapshot } from "@/types";
-
-const RANGES: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
 
 type SortKey = "lastTs" | "cost" | "turns" | "toolCalls";
 
@@ -54,9 +54,50 @@ function SortHead({
   );
 }
 
+function SessionDetailFooter({
+  detail,
+  onPrev,
+  onNext,
+}: {
+  detail: SessionDetail;
+  onPrev?: () => void;
+  onNext?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copyId = async () => {
+    try {
+      await navigator.clipboard.writeText(detail.sessionId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable — the id stays readable in the header
+    }
+  };
+  const exportCsv = () => {
+    const { name, text } = sessionDetailCsv(detail);
+    downloadFile(name, text, "text/csv");
+  };
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t pt-3">
+      <Button variant="outline" size="sm" onClick={onPrev} disabled={!onPrev}>
+        <ChevronLeft className="size-4" aria-hidden /> prev
+      </Button>
+      <Button variant="outline" size="sm" onClick={onNext} disabled={!onNext}>
+        next <ChevronRight className="size-4" aria-hidden />
+      </Button>
+      <span className="grow" />
+      <Button variant="outline" size="sm" onClick={copyId}>
+        <Copy className="size-4" aria-hidden /> {copied ? "copied" : "copy id"}
+      </Button>
+      <Button variant="outline" size="sm" onClick={exportCsv}>
+        <Download className="size-4" aria-hidden /> CSV
+      </Button>
+    </div>
+  );
+}
+
 export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
   const [filter, setFilter] = useState("");
-  const [range, setRange] = useState("30d");
   const [selected, setSelected] = useState<SessionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,28 +106,16 @@ export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
     dir: "desc",
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const cutoffDays = RANGES[range];
-    const cutoff = cutoffDays ? Date.now() - cutoffDays * 86400_000 : 0;
+    // The header's global date range already scopes snapshot.sessions; only
+    // text narrows further here, so no second range control lives on this tab.
     const filtered = snapshot.sessions.filter((s) => {
       if (
         q &&
         !`${s.sessionId} ${s.project} ${s.models.join(" ")}`.toLowerCase().includes(q)
       ) {
         return false;
-      }
-      if (cutoff > 0) {
-        const last = s.lastTs ? Date.parse(s.lastTs) : 0;
-        if (last < cutoff) return false;
       }
       return true;
     });
@@ -97,12 +126,28 @@ export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
       }
       return (a[sort.key] - b[sort.key]) * dir;
     });
-  }, [snapshot.sessions, filter, range, sort]);
+  }, [snapshot.sessions, filter, sort]);
 
   const activeFiles = useMemo(
     () => new Set(snapshot.active.map((a) => a.file)),
     [snapshot.active],
   );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === "Escape") {
+        closeDetail();
+        return;
+      }
+      if (!selected || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+      const i = rows.findIndex((r) => r.sessionId === selected.sessionId);
+      const n = e.key === "ArrowRight" ? i + 1 : i - 1;
+      if (n >= 0 && n < rows.length) void select(rows[n]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rows, selected]);
 
   function onSort(key: SortKey) {
     setSort((prev) =>
@@ -125,6 +170,16 @@ export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
     }
   }
 
+  function closeDetail() {
+    setSelected(null);
+    setError(null);
+    setLoading(false);
+  }
+
+  const selIdx = selected ? rows.findIndex((r) => r.sessionId === selected.sessionId) : -1;
+  const prev = selIdx > 0 ? rows[selIdx - 1] : null;
+  const next = selIdx >= 0 && selIdx < rows.length - 1 ? rows[selIdx + 1] : null;
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -135,22 +190,13 @@ export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
           onChange={(e) => setFilter(e.target.value)}
           className="max-w-xs"
         />
-        <Tabs value={range} onValueChange={setRange}>
-          <TabsList aria-label="date range">
-            <TabsTrigger value="7d">7 days</TabsTrigger>
-            <TabsTrigger value="30d">30 days</TabsTrigger>
-            <TabsTrigger value="90d">90 days</TabsTrigger>
-            <TabsTrigger value="all">all</TabsTrigger>
-          </TabsList>
-        </Tabs>
         <span className="text-xs text-muted-foreground" aria-live="polite">
           {rows.length} of {snapshot.sessions.length} sessions
         </span>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,44%)]">
-        <div className="min-w-0">
-          <ScrollArea className="h-[calc(100vh-260px)] min-h-72 rounded-lg border">
+      <div className="min-w-0">
+        <ScrollArea className="h-[calc(100vh-260px)] min-h-72 rounded-md">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -185,7 +231,7 @@ export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
                     >
                       <TableCell className="font-mono text-xs">
                         {live && (
-                          <span className="mr-1 inline-block size-1.5 rounded-full bg-green-500 align-middle" aria-label="active" />
+                          <span className="mr-1 inline-block size-1.5 rounded-full bg-ok align-middle" aria-label="active" />
                         )}
                         {s.sessionId.slice(0, 14)}
                       </TableCell>
@@ -215,47 +261,62 @@ export function SessionsTab({ snapshot }: { snapshot: Snapshot }) {
           </ScrollArea>
         </div>
 
-        <div className="lg:sticky lg:top-16 lg:h-[calc(100vh-220px)]">
-          {loading && (
-            <div
-              className="flex h-full min-h-72 flex-col gap-4 rounded-lg border p-4"
-              aria-busy="true"
-              aria-label="loading session detail"
-            >
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-5 w-24" />
-                <Skeleton className="h-5 w-16" />
+        <Dialog
+          open={loading || !!selected || !!error}
+          onOpenChange={(open) => {
+            if (!open) closeDetail();
+          }}
+        >
+          <DialogContent className="h-[90vh] w-[min(68.75rem,94vw)]" aria-describedby={undefined}>
+            <DialogTitle>session detail</DialogTitle>
+            {loading && (
+              <div
+                className="flex min-h-0 flex-1 flex-col gap-4"
+                aria-busy="true"
+                aria-label="loading session detail"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Skeleton className="h-5 w-40" />
+                  <Skeleton className="h-5 w-24" />
+                  <Skeleton className="h-5 w-16" />
+                  <Skeleton className="h-5 w-14" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-7 w-20" />
+                  ))}
+                </div>
+                <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+                  <div className="space-y-2">
+                    <Skeleton className="h-3.5 w-36" />
+                    <Skeleton className="h-44 w-full" />
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-3.5 w-36" />
+                    <Skeleton className="h-44 w-full" />
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-7 w-20" />
-                ))}
+            )}
+            {error && (
+              <div role="alert" className="mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                failed to load session detail: {error}
               </div>
-              <Skeleton className="h-36 w-full" />
-              <div className="space-y-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-4 w-full" />
-                ))}
+            )}
+            {selected ? (
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="min-h-0 flex-1">
+                  <SessionDetailPanel detail={selected} onClose={closeDetail} />
+                </div>
+                <SessionDetailFooter
+                  detail={selected}
+                  onPrev={prev ? () => select(prev) : undefined}
+                  onNext={next ? () => select(next) : undefined}
+                />
               </div>
-            </div>
-          )}
-          {error && (
-            <div role="alert" className="mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              failed to load session detail: {error}
-            </div>
-          )}
-          {selected ? (
-            <SessionDetailPanel detail={selected} onClose={() => setSelected(null)} />
-          ) : (
-            !loading && (
-              <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
-                select a session to inspect it
-              </div>
-            )
-          )}
-        </div>
-      </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
     </div>
   );
 }
