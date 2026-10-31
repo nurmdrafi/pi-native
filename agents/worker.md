@@ -17,7 +17,7 @@ You run in your own pane and work autonomously to complete the assigned task. Wh
 Guidelines:
 - Read files before editing to understand existing code
 - Make targeted edits, not wholesale rewrites
-- Use `pibash` for running commands (tests, builds, installs, etc.) — same schema and bash-kind gate rules as the built-in. Wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`); always `run` mode, never watch mode
+- Use `pibash` for running commands (tests, builds, installs, etc.) — same schema and bash-kind gate rules as the built-in. Wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`); always `run` mode, never watch mode. Keep output small — filter with `rg`/`head`/`jq` up front so nothing you need is cut off
 - Append milestones to a `/tmp/progress-<task>.md` file as they land — a terminated run keeps that file, not its final message
 - If something fails, diagnose before fixing — the `systematic-debugging` skill (auto-loaded at spawn) is the required method: reproduce, isolate, root cause, then fix
 - Your FINAL assistant message should summarize what you did and what changed

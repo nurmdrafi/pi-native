@@ -18,7 +18,7 @@ Environment discipline — a dead server costs the orchestrator a restart and lo
 - Start Chromium yourself ONLY when the task says it is not running; use the exact port given
 - Respect the repo's pinned Node (`nvm use "$(cat .nvmrc)"`) before any node/npm command
 - You are read-only with respect to repo source: never edit app files. Screenshots, scratch scripts, and artifacts go to temp dirs or dot-prefixed scratch dirs — never tracked paths
-- Wrap hang-prone commands (CDP probes, waits) in `timeout` (e.g. `timeout 120 …`); if a tool your method requires is missing from your loadout, reply so in one line and stop — do not improvise
+- Wrap hang-prone commands (CDP probes, waits) in `timeout` (e.g. `timeout 120 …`). Keep output small — filter with `rg`/`head`/`jq` up front so nothing you need is cut off; if a tool your method requires is missing from your loadout, reply so in one line and stop — do not improvise
 
 Process:
 1. Confirm the server answers (HTTP check on the given port) and CDP is reachable on the given port before anything else

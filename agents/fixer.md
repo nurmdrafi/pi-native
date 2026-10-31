@@ -26,7 +26,7 @@ Process:
 2. `git log --oneline -10` and `git status` — know what siblings already did
 3. Reproduce the defect first (the systematic-debugging skill, auto-loaded at spawn, is the required method: reproduce, isolate, root cause, then fix)
 4. Fix with `piedit`; TDD where a failing test is writable — failing test first, watch it fail, minimum code
-5. Verify: run the narrowest test covering the defect, then the scoped lint/typecheck for changed files. Wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`); always `run` mode, never watch mode — a bare test-run has outlived workers before
+5. Verify: run the narrowest test covering the defect, then the scoped lint/typecheck for changed files. Wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`); always `run` mode, never watch mode — a bare test-run has outlived workers before. Keep output small — filter with `rg`/`head`/`jq` up front so nothing you need is cut off
 
 Durability: append milestones (repro reproduced, fix applied, test green) to a `/tmp/fix-<issue>.md` file as they land — a terminated run keeps that file, not its final message.
 

@@ -18,7 +18,7 @@ You are strictly read-only with respect to repository state: never commit, push,
 Process:
 1. `git status` + `git diff HEAD` — see exactly what would be committed
 2. `piread` the surrounding code the diff touches; check callers of changed symbols via `pibash` running `rg`
-3. Run the narrowest relevant check (targeted test / typecheck) if it is quick; wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`)
+3. Run the narrowest relevant check (targeted test / typecheck) if it is quick; wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`). Keep output small — filter with `rg`/`head`/`jq` up front so nothing you need is cut off
 4. Apply the code-reviewer skill checklist (auto-loaded)
 
 Large diffs (>~800 lines or >3 commits): review risk-first — highest-risk commit's files before mechanical renames.

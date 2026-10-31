@@ -28,6 +28,22 @@
 - Loop: plan → do → verify (verify scope: § Verification).
 - Circling check: same file edited 3+ times, or the same failing fix retried twice, in one turn → stop, state what remains and what failed, ask before continuing.
 
+### Subagent workflow
+- Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked.
+- Gate each delegation: it must beat working inline on speed, accuracy, or quality — a complete deliverable, a well-scoped file-set, and facts already known. Otherwise work inline.
+- Pick the agent by contract: scout read-only recon; worker code edits; fixer one issue in a worktree; reviewer pre-commit diff review; verifier acceptance-criteria check; ui-verifier live app via headless browser; researcher web sources; docs-optimizer rule/doc Markdown; bench-runner frozen benchmark runs. Read-only work never goes to worker. Only worker spawns children (scout, researcher) — no deeper nesting.
+- One task = one agent = one file-set. Disjoint file-sets spawn in the same turn (parallel); any shared file forces the next wave. Start a downstream agent early only when its input contract is already fixed — steer the correction if it changes.
+- Bake facts into the task prompt before spawning: paths, line numbers, shapes, contracts, verification command, report format (agents carry their own formats — state one only to deviate). A worker that must explore is a linear worker plus overhead: scrape the facts yourself first, or send a scout ahead and spawn the worker on its report.
+- Spawn with `agent` (the profile) plus a stable task-specific `name` (label and resume handle), and `cwd` set to the target package so the child loads its local rules. After spawning, end the turn; never poll, sleep, tail logs, or fabricate results — finished work arrives on its own.
+- Children run unattended — no user is watching. A blocked command is a closed door: skip it, note it in the result; never ask permission for one. ask_question carries only task decisions or confusion.
+- Budgets never end work: spawn unbudgeted by default; where cost control demands one, size it far above the estimate. A run cut off by its budget is resumed by name and continues — a cutoff is a signal, not a failure.
+- Transient failure (provider 5xx, rate limit): resume the same named agent with a retry nudge — fresh spawn only for new work. A blocked worker asks one question and waits — answer it via steer. A run looping or repairing >5 cycles: steer it to stop and report.
+- Follow-ups resume the same named agent (warm context); keep prompts prefix-stable so the warm context holds. A result recovered from a dead session is information; act only if it needs action.
+- Guard orchestrator context: at most ~6 children running at once; digest each finished wave into a scratch file (one line per agent — verdict, paths) and work from that file, not re-delivered results; prefer a fresh session over compacting one session through a large effort.
+- Every worker prompt carries scope (files it may touch), contract, verification command, and the bans: no commits, no installs, no working around blockers — report them.
+- End every wave with an independent check of the combined result — reviewer for diffs, verifier for criteria; never merge unverified parallel work.
+
+
 ## Verification
 - Completion: tests + lint + typecheck scoped to changed files only (10 files changed → only their tests), once at task end — TDD-loop scoped runs fine; a project without lint or typecheck skips that leg and says so.
 - Build once at task end: implement phase by phase, each phase runs only its own scoped tests as it lands, and the build command runs after the final phase.
