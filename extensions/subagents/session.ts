@@ -298,6 +298,15 @@ export function getSessionId(sessionFile: string): string | null {
   return readHeaderId(sessionFile);
 }
 
+/** Session id from an already-parsed entry array — the single-read companion
+ *  to getSessionId: finalization paths that parsed the file once for the
+ *  summary must not re-read it just to learn the id. */
+export function getSessionIdFromEntries(entries: SessionEntry[]): string | null {
+  const first = entries[0] as { type?: string; id?: string } | undefined;
+  if (!first || first.type !== "session" || typeof first.id !== "string") return null;
+  return first.id;
+}
+
 function readHeaderId(sessionFile: string): string | null {
   const firstLine = readFirstLine(sessionFile)?.trim();
   if (!firstLine) return null;
@@ -606,7 +615,13 @@ export function summarizeSessionStats(sessionFile: string): SessionStats | null 
   } catch {
     return null;
   }
+  return summarizeStatsFromEntries(entries);
+}
 
+/** Stats from an already-parsed entry array — the single-read companion to
+ *  summarizeSessionStats: finalization paths that parsed the file once for the
+ *  summary must not re-read and re-parse it for the numbers. */
+export function summarizeStatsFromEntries(entries: SessionEntry[]): SessionStats {
   const stats: SessionStats = {
     model: null,
     toolCount: 0,
