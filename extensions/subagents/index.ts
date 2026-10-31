@@ -910,7 +910,10 @@ function drainPendingSpawns(): void {
   // drains) and recurse — and a conflicting entry cannot launch anyway.
   for (let index = 0; index < pendingSpawns.length; ) {
     const next = pendingSpawns[index];
-    if (next.scope && findConflicts(next.scope.paths, next.scopeId).length > 0) {
+    // Declared scopes only (scopeId is reserved exclusively for files[]-
+    // declared scopes): a slot-queued entry with a PARSED scope must never
+    // park behind a declared owner — parsing noise may not serialize a wave.
+    if (next.scopeId && next.scope && findConflicts(next.scope.paths, next.scopeId).length > 0) {
       index += 1; // parked behind a live owner — keep its place in line
       continue;
     }
@@ -2651,13 +2654,16 @@ function deliverSubagentResult(
   if (running.gitBaselinePath) {
     const filesChanged = computeFilesChanged(running.gitBaselinePath, boundedGitSync);
     if (filesChanged) {
-      // Scope-intersect: when the child carried a scope, attribute only the
-      // changes inside it — the whole-repo baseline would otherwise bill
-      // sibling children's edits to this one. No scope keeps the raw delta;
-      // the provenance marker stays advisory either way.
-      result.files_changed = running.scope?.paths.length
-        ? intersectFilesChanged(filesChanged, running.scope.paths, repoRootFor(running.cwd ?? process.cwd()))
-        : filesChanged;
+      // Scope-intersect: when the child DECLARED its scope (files[]), attribute
+      // only the changes inside it — the whole-repo baseline would otherwise
+      // bill sibling children's edits to this one. Parsed task-text scope is
+      // advisory (injection matching + display only): edits to files the task
+      // never named stay in files_changed. No scope keeps the raw delta; the
+      // provenance marker stays advisory either way.
+      result.files_changed =
+        running.scope?.origin === "declared" && running.scope.paths.length > 0
+          ? intersectFilesChanged(filesChanged, running.scope.paths, repoRootFor(running.cwd ?? process.cwd()))
+          : filesChanged;
       result.files_changed_source = "git_status_delta";
       const filesRead = extractFilesRead(result.sessionFile ?? running.sessionFile);
       const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged, boundedGitSync);
@@ -3706,7 +3712,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         "Also lists this session's registered subagent sessions, resumable by name.",
       parameters: Type.Object({}),
 
-      async execute() {
+      async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
         const list = discoverAgentDefinitions().filter((agent) => !agent.disableModelInvocation);
 
         // This session's registered children from the persistent name
@@ -3724,7 +3730,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           // Registry listing is best-effort.
         }
 
-        if (list.length === 0 && registered.length === 0) {
+        // Declared write-scope owners (running or queued) — the file locks
+        // this session's spawns currently hold. Exposure is transcript-safe:
+        // paths repo-relative (absolute machine paths never reach transcripts
+        // or details) and capped.
+        const exposureRoot = repoRootFor(ctx?.cwd ?? latestCtx?.cwd ?? process.cwd());
+        const scoped: Array<{ name: string; state: "queued" | "running"; paths: string[]; more?: number }> =
+          scopedChildren().map((s) => {
+            const shown = s.paths
+              .map((p) => relative(exposureRoot, p))
+              .filter((p) => p !== "" && !p.startsWith(".."));
+            return {
+              name: s.name,
+              state: s.state,
+              paths: shown.slice(0, 10),
+              ...(shown.length > 10 ? { more: shown.length - 10 } : {}),
+            };
+          });
+
+        if (list.length === 0 && registered.length === 0 && scoped.length === 0) {
           return {
             content: [{ type: "text", text: "No subagent definitions found." }],
             details: { agents: [] as typeof list, registered: [] as typeof registered },
@@ -3745,14 +3769,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           }
         }
 
-        // Declared write-scope owners (running or queued) — the file locks
-        // this session's spawns currently hold.
-        const scoped = scopedChildren();
         if (scoped.length > 0) {
           lines.push("", "Declared file scopes (write locks):");
           for (const s of scoped) {
+            const total = s.paths.length + (s.more ?? 0);
             const shown =
-              s.paths.slice(0, 3).join(", ") + (s.paths.length > 3 ? `, +${s.paths.length - 3} more` : "");
+              s.paths.slice(0, 3).join(", ") + (total > 3 ? `, +${total - 3} more` : "");
             lines.push(`• ${s.name} — owns ${shown} (${s.state})`);
           }
         }
@@ -3767,7 +3789,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const details = result.details as any;
         const agents = details?.agents ?? [];
         const registered = details?.registered ?? [];
-        if (agents.length === 0 && registered.length === 0) {
+        const scoped = (details?.scoped ?? []) as Array<{ name: string; state: string; paths: string[]; more?: number }>;
+        if (agents.length === 0 && registered.length === 0 && scoped.length === 0) {
           return new Text(theme.fg("dim", "No subagent definitions found."), 0, 0);
         }
         const lines = agents.map((a: any) => {
@@ -3783,6 +3806,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             const state = r.exists ? "resumable" : "session file missing";
             lines.push(
               `  ${theme.fg("toolTitle", theme.bold(r.name))}${theme.fg("dim", ` — ${state}`)}`,
+            );
+          }
+        }
+        // Mirror the text output's scope section in the expanded view — the
+        // ▣ glyph matches the widget's lock indicator.
+        if (scoped.length > 0) {
+          if (lines.length > 0) lines.push("");
+          lines.push(theme.fg("dim", "Declared file scopes (write locks):"));
+          for (const s of scoped) {
+            const total = s.paths.length + (s.more ?? 0);
+            const shown =
+              s.paths.slice(0, 3).join(", ") + (total > 3 ? `, +${total - 3} more` : "");
+            lines.push(
+              `  ▣ ${theme.fg("toolTitle", theme.bold(s.name))}${theme.fg("dim", ` — owns ${shown} (${s.state})`)}`,
             );
           }
         }

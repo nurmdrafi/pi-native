@@ -348,6 +348,38 @@ describe("declared scope in the spawn flow", () => {
     assert.equal(scopedChildren().length, 1, "only the declared owner is in the registry");
   });
 
+  it("parsed scope never locks on the drain path", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    const harness = armSpawn(projectDir, agentDir, ctx);
+
+    // Fill the cap: a declared owner of src/, then four unscoped holders.
+    const holders: { abortController?: AbortController }[] = [];
+    for (const [n, files] of [
+      ["own-pd", ["src"]],
+      ["h-pd-2", []],
+      ["h-pd-3", []],
+      ["h-pd-4", []],
+      ["h-pd-5", []],
+    ] as const) {
+      await spawnTool(harness, { task: "hold", name: n, ...(files.length ? { files: [...files] } : {}) });
+      holders.push([...__test__.runningSubagents.values()].find((r) => r.name === n)!);
+    }
+    // Cap full: a PARSED-scope spawn (task names src/a.ts, no files[]) queues
+    // on the slot even though its parsed paths overlap the declared owner.
+    const p = await spawnTool(harness, { task: "review src/a.ts and report", name: "parsed-drain" });
+    assert.match(p.content[0].text, /concurrency cap/, "queued on the cap, not on the scope");
+    assert.equal(__test__.pendingSpawns.length, 1);
+
+    // Free a slot held by an unscoped child. The parsed entry must launch on
+    // the slot release alone — the wait window deliberately closes BEFORE the
+    // ~1s watcher tick at which this harness reaps idle children: only the
+    // owner's scope release (never a slot) could otherwise wake it (bug).
+    holders[4].abortController?.abort();
+    const launchedEarly = await waitUntil(() => runningNames().has("parsed-drain"), 700);
+    assert.ok(launchedEarly, "parsed-scope entry launches as soon as a slot frees");
+    assert.equal(__test__.pendingSpawns.length, 0, "queue drained");
+  });
+
   it("warn mode proceeds and the ack warns with the conflict", async () => {
     process.env.PI_SUBAGENTS_SCOPE_MODE = "warn";
     const { agentDir, projectDir, ctx } = freshRoot();
@@ -423,7 +455,9 @@ describe("declared scope in the spawn flow", () => {
     assert.ok(await waitUntil(() => runningNames().has("parked-head")), "parked head launches once the owner releases");
   });
 
-  it("scope releases on delivery only — not at watcher delete sites", async () => {
+  it("scope is released by the time the watcher settles", async () => {
+    // Settling spans delete AND the delivery funnel — this pins that the lock
+    // never outlives the watcher, not which site performed the release.
     const { agentDir, projectDir, ctx } = freshRoot();
     const harness = armSpawn(projectDir, agentDir, ctx);
 
@@ -511,8 +545,33 @@ describe("scope exposure", () => {
     assert.match(text, /exp-a[^\n]*owns/, "running owner listed with its paths");
     assert.ok(text.includes("src/a.ts"), "owned path shown");
     assert.match(text, /exp-b[^\n]*queued/, "queued scope holder listed");
-    const scoped = res.details.scoped as { name: string; state: string; paths: string[] }[];
+    const scoped = res.details.scoped as { name: string; state: string; paths: string[]; more?: number }[];
     assert.equal(scoped.length, 2);
+    // Exposure is transcript-safe: repo-relative paths, never absolute
+    // machine paths, and capped so a wide scope cannot flood the details.
+    assert.ok(
+      scoped.every((s) => s.paths.every((p) => !p.startsWith("/"))),
+      "exposed scope paths are repo-relative, not absolute",
+    );
+    assert.ok(scoped[0].paths.includes("src/a.ts"), "owned path relativized");
+    assert.ok((scoped[0].paths.length <= 10), "exposed path list capped");
+  });
+
+  it("subagents_list renderResult renders the declared-scope section", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    const harness = armSpawn(projectDir, agentDir, ctx);
+
+    await spawnTool(harness, { task: "own it", name: "rend-a", files: ["src/a.ts"] });
+    const res = (await harness.list.execute("tc-list", {}, undefined, undefined, ctx as never)) as {
+      content: { text: string }[];
+      details: Record<string, unknown>;
+    };
+    const theme = { fg: (_mode: string, t: string) => t, bold: (t: string) => t };
+    const rendered = (harness.list.renderResult as Function)(res, {}, theme) as { render(w: number): string[] };
+    const out = rendered.render(80).join("\n");
+    assert.match(out, /Declared file scopes/, "scope section rendered in the expanded view");
+    assert.ok(out.includes("rend-a"), "owner named");
+    assert.ok(out.includes("\u25A3"), "lock glyph rendered");
   });
 
   it("widget row shows a lock indicator with the declared path count", async () => {
@@ -624,6 +683,47 @@ describe("scope-intersected files_changed", () => {
     };
     __test__.deliverSubagentResult(harness.pi as never, running, result);
     assert.deepEqual(result.files_changed, ["src/in.ts"], "only in-scope changes attributed");
+    assert.equal(result.files_changed_source, "git_status_delta");
+  });
+
+  it("deliverSubagentResult keeps edits outside a PARSED scope in files_changed", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    // Real git repo so the spawn-time baseline and delivery-time status both work.
+    execFileSync("git", ["init", "-q", projectDir], { stdio: "ignore" });
+
+    const harness = armSpawn(projectDir, agentDir, ctx);
+    // No files[] — the scope comes from parsing the task text (src/a.ts exists).
+    await spawnTool(harness, { task: "review src/a.ts and report", name: "git-p", cwd: projectDir });
+    const running = [...__test__.runningSubagents.values()].find((r) => r.name === "git-p")!;
+    assert.equal(running.scope?.origin, "parsed", "setup: the child carries a parsed scope");
+    assert.ok(await waitUntil(() => existsSync(running.gitBaselinePath!)), "baseline file written");
+
+    // The child edits a file its task text never named — git ground truth must
+    // keep it: parsed scope is advisory (injection matching), never a filter.
+    writeFileSync(join(projectDir, "other", "of.ts"), "unnamed edit", "utf8");
+
+    const result: {
+      name: string;
+      task: string;
+      summary: string;
+      sessionFile: string;
+      exitCode: number;
+      elapsed: number;
+      files_changed?: string[];
+      files_changed_source?: "git_status_delta";
+    } = {
+      name: "git-p",
+      task: "review src/a.ts and report",
+      summary: "done",
+      sessionFile: running.sessionFile,
+      exitCode: 0,
+      elapsed: 1,
+    };
+    __test__.deliverSubagentResult(harness.pi as never, running, result);
+    assert.ok(
+      (result.files_changed ?? []).some((p) => p.endsWith("other/of.ts")),
+      "edit outside the parsed scope stays in files_changed",
+    );
     assert.equal(result.files_changed_source, "git_status_delta");
   });
 });
