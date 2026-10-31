@@ -21,6 +21,9 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
 import { __surfaceTest__ } from "../../extensions/subagents/tmux.ts";
+import { createSessionBudgetMeter } from "../../extensions/subagents/budget.ts";
+import { createStatusState } from "../../extensions/subagents/status.ts";
+import { appendSubagentResult } from "../../extensions/subagents/inbox.ts";
 import { registerName, writeSubagentLoadout } from "../../extensions/subagents/session.ts";
 import {
   declareScope,
@@ -725,5 +728,139 @@ describe("scope-intersected files_changed", () => {
       "edit outside the parsed scope stays in files_changed",
     );
     assert.equal(result.files_changed_source, "git_status_delta");
+  });
+});
+
+// ── live child metrics exposure ──
+
+describe("live child metrics", () => {
+  /** Session file with two assistant turns: 2 metered turns, $0.84 cost,
+   *  3150 tokens per turn (6300 cumulative). */
+  function writeMeteredSession(projectDir: string): string {
+    const sessionFile = join(projectDir, "metrics-session.jsonl");
+    const msg = {
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "work" }],
+        usage: {
+          input: 1000,
+          output: 2000,
+          cacheRead: 100,
+          cacheWrite: 50,
+          totalTokens: 3150,
+          cost: { total: 0.42 },
+        },
+      },
+    };
+    writeFileSync(sessionFile, `${JSON.stringify(msg)}\n${JSON.stringify(msg)}\n`, "utf8");
+    return sessionFile;
+  }
+
+  function fabricateRunning(over: { id: string; name: string; sessionFile: string; metered: boolean }) {
+    const startedAt = Date.now() - 84_000;
+    return {
+      id: over.id,
+      name: over.name,
+      task: "metrics task",
+      surface: "%70",
+      startTime: startedAt,
+      sessionFile: over.sessionFile,
+      statusState: createStatusState({ source: "pi", startTimeMs: startedAt }),
+      ...(over.metered ? { budgetMeter: createSessionBudgetMeter(over.sessionFile) } : {}),
+    } as never;
+  }
+
+  it("subagents_list reports metered live usage and omits meter fields without a meter", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    const harness = armSpawn(projectDir, agentDir, ctx);
+    const sessionFile = writeMeteredSession(projectDir);
+    __test__.runningSubagents.set(
+      "met-1",
+      fabricateRunning({ id: "met-1", name: "met-a", sessionFile, metered: true }),
+    );
+    __test__.runningSubagents.set(
+      "met-2",
+      fabricateRunning({ id: "met-2", name: "met-b", sessionFile: join(projectDir, "none.jsonl"), metered: false }),
+    );
+
+    const res = (await harness.list.execute("tc-metrics", {}, undefined, undefined, ctx as never)) as {
+      content: { text: string }[];
+      details: Record<string, unknown>;
+    };
+    const metrics = res.details.metrics as Array<Record<string, unknown>>;
+    const a = metrics.find((m) => m.name === "met-a");
+    const b = metrics.find((m) => m.name === "met-b");
+    assert.ok(a, "metered child listed in details.metrics");
+    assert.ok(typeof a.elapsedSec === "number" && a.elapsedSec >= 84, "elapsed present");
+    assert.equal(a.phase, "starting", "phase is the live status kind");
+    assert.equal(a.turns, 2, "metered turns");
+    assert.equal(a.tokens, 6300, "cumulative tokens");
+    assert.ok(Math.abs((a.costUsd as number) - 0.84) < 1e-6, "metered cost");
+    assert.ok(b, "unmetered child listed");
+    assert.ok(typeof b.elapsedSec === "number" && b.phase === "starting", "elapsed/phase still present");
+    for (const key of ["turns", "tokens", "costUsd"]) {
+      assert.ok(!(key in b), `${key} omitted without a meter — no fake zeros`);
+    }
+    const text = res.content.map((c) => c.text).join("\n");
+    assert.match(text, /met-a · \d+s · starting · 2t · 6\.3k tok · \$0\.84/, "compact text line");
+    assert.match(text, /met-b · \d+s · starting$/m, "unmetered line trims the usage tail");
+  });
+
+  it("widget right label carries compact usage for a metered child", () => {
+    const { projectDir } = freshRoot();
+    const sessionFile = writeMeteredSession(projectDir);
+    const lines = __test__.renderSubagentWidgetLines(
+      [fabricateRunning({ id: "met-1", name: "met-a", sessionFile, metered: true })],
+      100,
+    ) as string[];
+    const row = (lines.find((l) => l.includes("met-a")) ?? "").replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(row, /2t · \$0\.84/, "usage tail on the right label");
+  });
+
+  it("history rows mirror turns/tokens/cost/duration at delivery", () => {
+    const { projectDir } = freshRoot();
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    process.env.PI_SUBAGENT_INBOX = join(projectDir, "inbox.jsonl");
+    try {
+      appendSubagentResult(
+        {
+          id: "met-h1",
+          ts: Date.now(),
+          name: "met-h",
+          task: "t",
+          sessionFile: "/tmp/s.jsonl",
+          repoRoot: projectDir,
+          summary: "done",
+          exitCode: 0,
+          elapsed: 3,
+          files_changed: ["a.ts"],
+          stats: {
+            model: "m",
+            toolCount: 1,
+            inputTokens: 1000,
+            outputTokens: 2000,
+            cacheReadTokens: 100,
+            cacheWriteTokens: 50,
+            contextTokens: 3150,
+            cost: 0.42,
+          },
+        },
+        { turns: 2 },
+      );
+      const rows = readFileSync(historyPath(), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      const row = rows.find((r) => r.id === "met-h1");
+      assert.ok(row, "history row written");
+      assert.equal(row.turns, 2, "turns mirrored from the delivery meter");
+      assert.equal(row.tokens, 3150, "tokens mirrored from record stats");
+      assert.equal(row.costUsd, 0.42, "cost mirrored from record stats");
+      assert.equal(row.durationMs, 3000, "durationMs = elapsed * 1000");
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+    }
   });
 });

@@ -74,7 +74,7 @@ import {
   type EnforcedBudget,
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
-import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra } from "./inbox.ts";
+import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, usageTokens, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -625,23 +625,76 @@ function getArtifactDir(sessionDir: string, sessionId: string): string {
 
 const statusConfig = loadStatusConfig();
 
-function formatWidgetRightLabel(snapshot: StatusSnapshot): string {
-  if (snapshot.kind === "starting") return " starting… ";
-  if (snapshot.kind === "running") return ` running ${snapshot.elapsedText} `;
+// ── live child metrics (subagents_list + widget) ──
+
+/** Per-child live metrics: elapsed, the live status phase, and — only when
+ *  a budget meter is attached — its live usage. Unmetered children omit
+ *  turns/tokens/costUsd rather than faking zeros; queued children carry
+ *  just name+phase (no start time exists yet). */
+export interface ChildMetrics {
+  name: string;
+  phase: string;
+  elapsedSec?: number;
+  turns?: number;
+  tokens?: number;
+  costUsd?: number;
+}
+
+function runningChildMetrics(running: RunningSubagent): ChildMetrics {
+  const elapsedSec = Math.max(0, Math.floor((Date.now() - running.startTime) / 1000));
+  const phase = classifyStatus(running.statusState, Date.now()).kind;
+  if (!running.budgetMeter) return { name: running.name, phase, elapsedSec };
+  // O(delta) incremental read — the same meter the poll loop enforces with.
+  const usage = running.budgetMeter.update();
+  const stats = summarizeSessionStats(running.sessionFile);
+  return {
+    name: running.name,
+    phase,
+    elapsedSec,
+    turns: usage.turns,
+    ...(stats ? { tokens: usageTokens(stats) } : {}),
+    costUsd: Number(usage.costUsd.toFixed(4)),
+  };
+}
+
+function queuedChildMetrics(pending: PendingSpawn): ChildMetrics {
+  return { name: pending.params.name ?? pending.reservedName ?? pending.params.agent, phase: "queued" };
+}
+
+/** Compact line: `worker-1 · 842s · active · 12t · 84k tok · $0.42` —
+ *  absent fields are trimmed, never zero-filled. */
+function formatChildMetricsLine(m: ChildMetrics): string {
+  if (m.phase === "queued") return `${m.name} · queued`;
+  const parts = [m.name, `${m.elapsedSec ?? 0}s`, m.phase];
+  if (m.turns !== undefined) parts.push(`${m.turns}t`);
+  if (m.tokens !== undefined) parts.push(`${formatTokens(m.tokens)} tok`);
+  if (m.costUsd !== undefined) parts.push(`$${m.costUsd.toFixed(2)}`);
+  return parts.join(" · ");
+}
+
+/** Widget usage tail: ` · 12t · $0.42`, empty when unmetered. */
+function formatUsageTail(usage: { turns: number; costUsd: number } | undefined): string {
+  return usage ? ` · ${usage.turns}t · $${usage.costUsd.toFixed(2)}` : "";
+}
+
+function formatWidgetRightLabel(snapshot: StatusSnapshot, usage?: { turns: number; costUsd: number }): string {
+  if (snapshot.kind === "starting") return ` starting…${formatUsageTail(usage)} `;
+  if (snapshot.kind === "running") return ` running ${snapshot.elapsedText}${formatUsageTail(usage)} `;
   if (snapshot.kind === "active") {
     const label = snapshot.activityLabel ?? snapshot.activeScope;
     const duration = snapshot.activeDurationText ? ` ${snapshot.activeDurationText}` : "";
-    return label ? ` active · ${label}${duration} ` : " active ";
+    const tail = formatUsageTail(usage);
+    return label ? ` active · ${label}${duration}${tail} ` : ` active${tail} `;
   }
   if (snapshot.kind === "waiting") {
     const duration = snapshot.waitingDurationText ? ` ${snapshot.waitingDurationText}` : "";
     const detail = snapshot.statusLabel ? ` · ${snapshot.statusLabel}` : "";
-    return ` waiting${duration}${detail} `;
+    return ` waiting${duration}${detail}${formatUsageTail(usage)} `;
   }
 
   const detail = snapshot.statusLabel ? ` · ${snapshot.statusLabel}` : "";
   const duration = snapshot.snapshotProblemText ? ` ${snapshot.snapshotProblemText}` : "";
-  return ` stalled${detail}${duration} `;
+  return ` stalled${detail}${duration}${formatUsageTail(usage)} `;
 }
 
 function resolveResultPresentation(
@@ -1066,11 +1119,13 @@ function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): st
     const scopeCount = agent.scope?.origin === "declared" ? agent.scope.paths.length : 0;
     const lockTag = scopeCount > 0 ? ` ${ACCENT}▣${RST}${scopeCount}` : "";
     const left = ` ${icon} ${elapsed}${lockTag}  ${agent.name}${agentTag} `;
+    // Metered usage tail on the right label; elapsed already leads the row.
+    const usage = agent.budgetMeter?.update();
     const right = statusConfig.enabled
-      ? formatWidgetRightLabel(snapshot)
+      ? formatWidgetRightLabel(snapshot, usage)
       : agent.cli === "claude"
-        ? " running… "
-        : " starting… ";
+        ? ` running…${formatUsageTail(usage)} `
+        : ` starting…${formatUsageTail(usage)} `;
 
     lines.push(borderLine(left, right, width));
   }
@@ -2652,11 +2707,15 @@ function deliverSubagentResult(
 ): void {
   if (running.delivered) return; // sweep or watcher already finalized this entry
   running.delivered = true;
+  // Final meter read (O(delta) since the last poll tick): the turn count the
+  // budget stopper enforced, mirrored into the history row below.
+  const finalTurns = running.budgetMeter?.update().turns;
   // Parent-side git delta at delivery time: the same baseline the child
   // diffs against, so both records agree modulo seconds of skew. The richer
   // context (files the child read, a capped diff) enriches the history file
   // only — the drain-managed inbox record stays lean.
   let historyExtra: SubagentHistoryExtra | undefined;
+  if (typeof finalTurns === "number") historyExtra = { turns: finalTurns };
   if (running.gitBaselinePath) {
     const filesChanged = computeFilesChanged(running.gitBaselinePath, boundedGitSync);
     if (filesChanged) {
@@ -2677,6 +2736,7 @@ function deliverSubagentResult(
       );
       const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged, boundedGitSync);
       historyExtra = {
+        ...historyExtra,
         ...(filesRead?.length ? { files_read: filesRead } : {}),
         ...(diff ? { diff } : {}),
       };
@@ -3758,7 +3818,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             };
           });
 
-        if (list.length === 0 && registered.length === 0 && scoped.length === 0) {
+        // Live per-child metrics — queued first (they have no start time),
+        // then running children with elapsed, phase, and metered usage.
+        const metrics: ChildMetrics[] = [
+          ...pendingSpawns.map(queuedChildMetrics),
+          ...[...runningSubagents.values()].map(runningChildMetrics),
+        ];
+
+        if (list.length === 0 && registered.length === 0 && scoped.length === 0 && metrics.length === 0) {
           return {
             content: [{ type: "text", text: "No subagent definitions found." }],
             details: { agents: [] as typeof list, registered: [] as typeof registered },
@@ -3788,10 +3855,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             lines.push(`• ${s.name} — owns ${shown} (${s.state})`);
           }
         }
+        if (metrics.length > 0) {
+          lines.push("", "Live children:");
+          for (const m of metrics) lines.push(`• ${formatChildMetricsLine(m)}`);
+        }
 
         return {
           content: [{ type: "text", text: lines.join("\n") }],
-          details: { agents: list, registered, ...(scoped.length ? { scoped } : {}) },
+          details: { agents: list, registered, ...(scoped.length ? { scoped } : {}), ...(metrics.length ? { metrics } : {}) },
         };
       },
 
@@ -3800,7 +3871,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const agents = details?.agents ?? [];
         const registered = details?.registered ?? [];
         const scoped = (details?.scoped ?? []) as Array<{ name: string; state: string; paths: string[]; more?: number }>;
-        if (agents.length === 0 && registered.length === 0 && scoped.length === 0) {
+        const metrics = (details?.metrics ?? []) as ChildMetrics[];
+        if (agents.length === 0 && registered.length === 0 && scoped.length === 0 && metrics.length === 0) {
           return new Text(theme.fg("dim", "No subagent definitions found."), 0, 0);
         }
         const lines = agents.map((a: any) => {
@@ -3831,6 +3903,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             lines.push(
               `  ▣ ${theme.fg("toolTitle", theme.bold(s.name))}${theme.fg("dim", ` — owns ${shown} (${s.state})`)}`,
             );
+          }
+        }
+        // Mirror the text output's live-metrics section in the expanded view.
+        if (metrics.length > 0) {
+          if (lines.length > 0) lines.push("");
+          lines.push(theme.fg("dim", "Live children:"));
+          for (const m of metrics) {
+            lines.push(`  • ${theme.fg("dim", formatChildMetricsLine(m))}`);
           }
         }
         return new Text(lines.join("\n"), 0, 0);

@@ -75,6 +75,19 @@ export function repoRootFor(startDir: string): string {
   }
 }
 
+/** Total tokens processed per a session-stats record: the four cumulative
+ *  usage fields summed. One definition, shared by live child metrics and
+ *  history mirroring so the two can never disagree. */
+export function usageTokens(stats: {
+  inputTokens?: unknown;
+  outputTokens?: unknown;
+  cacheReadTokens?: unknown;
+  cacheWriteTokens?: unknown;
+}): number {
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  return num(stats.inputTokens) + num(stats.outputTokens) + num(stats.cacheReadTokens) + num(stats.cacheWriteTokens);
+}
+
 export function resultInboxPath(repoRoot: string): string {
   return join(repoRoot, ".pi", "subagent-results.jsonl");
 }
@@ -276,10 +289,12 @@ export function gitDiffForBaseline(
 }
 
 /** Extra per-result context kept in the history file ONLY — never in the
- * drain-managed inbox record. */
+ * drain-managed inbox record. `turns` is the budget meter's final count at
+ * delivery; tokens/cost/duration are mirrored from the record itself. */
 export interface SubagentHistoryExtra {
   files_read?: string[];
   diff?: string;
+  turns?: number;
 }
 
 /** One record of the append-only per-repo history file. */
@@ -291,6 +306,10 @@ export interface SubagentHistoryRecord {
   files_read?: string[];
   diff?: string;
   summary: string;
+  turns?: number;
+  tokens?: number;
+  costUsd?: number;
+  durationMs?: number;
 }
 
 /** History file location: same directory as the durable inbox (honors the
@@ -303,6 +322,12 @@ export function subagentHistoryPath(repoRoot: string): string {
 
 function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): void {
   const path = subagentHistoryPath(record.repoRoot);
+  // Usage mirror for future-wave planning: tokens and cost come from the
+  // SAME numbers already computed for InboxRecord.stats (no re-parse),
+  // turns from the delivery-time meter read, duration from elapsed.
+  const stats = record.stats as { cost?: unknown } | null | undefined;
+  const costUsd = typeof stats?.cost === "number" && Number.isFinite(stats.cost) ? stats.cost : undefined;
+  const tokens = record.stats ? usageTokens(record.stats as Parameters<typeof usageTokens>[0]) : 0;
   try {
     mkdirSync(dirname(path), { recursive: true });
     const line = JSON.stringify({
@@ -312,6 +337,10 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
       files_changed: [...(record.files_changed ?? [])].sort().slice(0, FILES_CHANGED_CAP),
       ...(extra?.files_read?.length ? { files_read: extra.files_read } : {}),
       ...(extra?.diff ? { diff: extra.diff } : {}),
+      ...(typeof extra?.turns === "number" ? { turns: extra.turns } : {}),
+      ...(tokens > 0 ? { tokens } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
+      durationMs: Math.round(record.elapsed * 1000),
       summary: (record.summary ?? "").replace(/\s+/g, " ").trim().slice(0, HISTORY_SUMMARY_CHARS),
     });
     // Appends are append-only: a read-modify-write appender drops a sibling
