@@ -1,8 +1,9 @@
 import { X } from "lucide-react";
 import { Area, AreaChart, Bar, CartesianGrid, ComposedChart, Line, LineChart, XAxis, YAxis } from "recharts";
+import { errorRate, errorRateLabel } from "@/components/SubagentsTab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   ChartContainer,
   ChartTooltip,
@@ -19,15 +20,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fmtLatency } from "@/lib/format";
+import { sortedSkillRows } from "@/lib/burn";
+import { fmtLatency, fmtMoney } from "@/lib/format";
 import type { SessionDetail } from "@/types";
 
+/** Token counts are one meaning — one hue, depth by opacity. */
 const tokenConfig = {
-  input: { label: "input", color: "var(--chart-1)" },
-  output: { label: "output", color: "var(--chart-2)" },
+  input: { label: "input", color: "var(--chart-3)" },
+  output: { label: "output", color: "var(--chart-3)" },
   reasoning: { label: "reasoning", color: "var(--chart-3)" },
-  cacheRead: { label: "cache read", color: "var(--chart-4)" },
+  cacheRead: { label: "cache read", color: "var(--chart-3)" },
 } satisfies ChartConfig;
+const TOKEN_FILL = { input: 0.5, output: 0.38, reasoning: 0.26, cacheRead: 0.15 } as const;
 
 const costConfig = { cumulative: { label: "cumulative $", color: "var(--chart-1)" } } satisfies ChartConfig;
 const toolConfig = {
@@ -39,11 +43,15 @@ const timelineConfig = {
   calls: { label: "tool calls", color: "var(--chart-3)" },
 } satisfies ChartConfig;
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value, error }: { label: string; value: string; error?: boolean }) {
   return (
-    <div className="rounded border p-2">
+    <div className="min-w-0">
       <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="text-sm font-semibold tabular-nums">{value}</div>
+      <div
+        className={`truncate text-sm font-semibold tabular-nums ${error ? "text-error-foreground" : ""}`}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -72,7 +80,8 @@ export function SessionDetailPanel({
   const tools = [...toolCounts.entries()]
     .map(([name, calls]) => ({ name, calls, cost: Number((detail.summary.toolCosts?.[name] ?? 0).toFixed(4)) }))
     .sort((a, b) => b.cost - a.cost || b.calls - a.calls);
-  const skills = Object.entries(detail.skills);
+  const skillRows = sortedSkillRows(detail.skills);
+  const skillUses = skillRows.reduce((sum, [, uses]) => sum + uses, 0);
   const timeline = (detail.timeline ?? []).map((b) => ({
     time: new Date(b.start).toISOString().slice(11, 16),
     cost: b.cost,
@@ -82,42 +91,51 @@ export function SessionDetailPanel({
     detail.subagents ?? { spawns: 0, messages: 0, lists: 0, errors: 0, avgLatencyMs: 0, byAgent: [] };
   const spawns = detail.subagentSpawns ?? [];
   const prompts = detail.prompts ?? [];
+  const gate = detail.summary.agent;
+  const gateFamilies = Object.entries(gate.blocksByFamily ?? {}).sort((a, b) => b[1] - a[1]);
+  const gateTagList = Object.entries(detail.summary.gateTags ?? {}).sort(
+    (a, b) => b[1].block + b[1].warn - (a[1].block + a[1].warn),
+  );
+  const gateTools = Object.entries(detail.summary.blocksByTool ?? {}).sort((a, b) => b[1] - a[1]);
 
   return (
     <Card className="flex h-full flex-col">
       <CardHeader className="shrink-0">
-        <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="break-all">{detail.project}</span>
-          <span className="font-mono text-xs text-muted-foreground">{detail.sessionId}</span>
-          {detail.summary.models.map((m) => (
-            <Badge key={m} variant="secondary">{m}</Badge>
-          ))}
-          {detail.compactions > 0 && (
-            <Badge variant="outline">{detail.compactions} compaction{detail.compactions > 1 ? "s" : ""}</Badge>
-          )}
-          <Badge variant="secondary">cache {detail.summary.cacheHitRate}%</Badge>
-          <Badge variant="secondary">
-            {detail.summary.durationSec >= 3600
-              ? `${(detail.summary.durationSec / 3600).toFixed(1)}h`
-              : `${Math.round(detail.summary.durationSec / 60)}m`}
-          </Badge>
-          <Badge variant="secondary">{detail.summary.tokensPerTurn.toLocaleString()} tok/turn</Badge>
-          <Badge variant="secondary">${detail.summary.avgTurnCost.toFixed(4)}/turn</Badge>
-          {detail.summary.agent.repeatWithoutChange > 0 && (
-            <Badge variant="outline">{detail.summary.agent.repeatWithoutChange} repeats</Badge>
-          )}
-          {detail.summary.agent.maxFailureStreak > 1 && (
-            <Badge variant="outline">max streak {detail.summary.agent.maxFailureStreak}</Badge>
-          )}
-          {detail.summary.agent.blocks > 0 && (
-            <Badge variant="outline">{detail.summary.agent.blocks} blocks</Badge>
-          )}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold break-all">{detail.project}</span>
+          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{detail.sessionId}</span>
           {onClose && (
             <Button variant="ghost" size="icon" className="ml-auto size-6" onClick={onClose} aria-label="close detail">
               <X className="size-4" />
             </Button>
           )}
-        </CardTitle>
+        </div>
+        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+          <span>{detail.summary.models.join(" + ")}</span>
+          <span>
+            {detail.summary.durationSec >= 3600
+              ? `${(detail.summary.durationSec / 3600).toFixed(1)}h`
+              : `${Math.round(detail.summary.durationSec / 60)}m`}
+          </span>
+          <span>{detail.summary.turns} turns</span>
+          <span>{fmtMoney(detail.summary.cost, 2)} total</span>
+          <span>cache {detail.summary.cacheHitRate}%</span>
+        </div>
+        {(detail.compactions > 0 ||
+          detail.summary.agent.maxFailureStreak > 1 ||
+          detail.summary.agent.blocks > 0) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {detail.compactions > 0 && (
+              <Badge variant="outline">{detail.compactions} compaction{detail.compactions > 1 ? "s" : ""}</Badge>
+            )}
+            {detail.summary.agent.maxFailureStreak > 1 && (
+              <Badge variant="outline">max streak {detail.summary.agent.maxFailureStreak}</Badge>
+            )}
+            {detail.summary.agent.blocks > 0 && (
+              <Badge variant="outline">{detail.summary.agent.blocks} blocks</Badge>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="min-h-0 flex-1">
         <Tabs defaultValue="charts" className="flex h-full flex-col">
@@ -126,8 +144,10 @@ export function SessionDetailPanel({
             <TabsTrigger value="timeline">timeline</TabsTrigger>
             <TabsTrigger value="tools">tools</TabsTrigger>
             <TabsTrigger value="calls">calls</TabsTrigger>
+            <TabsTrigger value="skills">skills</TabsTrigger>
             <TabsTrigger value="prompts">prompts ({prompts.length})</TabsTrigger>
             <TabsTrigger value="subagents">subagents</TabsTrigger>
+            <TabsTrigger value="gate">gate</TabsTrigger>
           </TabsList>
 
           <TabsContent value="charts" className="mt-3 min-h-0 flex-1">
@@ -159,7 +179,7 @@ export function SessionDetailPanel({
                         type="monotone"
                         stackId="t"
                         fill={`var(--color-${key})`}
-                        fillOpacity={0.3}
+                        fillOpacity={TOKEN_FILL[key]}
                         stroke={`var(--color-${key})`}
                         strokeWidth={1.5}
                       />
@@ -209,17 +229,7 @@ export function SessionDetailPanel({
                 )}
               </div>
               <div>
-                <div className="mb-1 text-xs text-muted-foreground">skills loaded</div>
-                {skills.length === 0 ? (
-                  <div className="text-xs text-muted-foreground">none</div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {skills.map(([name, count]) => (
-                      <Badge key={name} variant="outline">{name}×{count}</Badge>
-                    ))}
-                  </div>
-                )}
-                <div className="mb-1 mt-4 text-xs text-muted-foreground">tokens by model</div>
+                <div className="mb-1 text-xs text-muted-foreground">tokens by model</div>
                 <div className="space-y-1">
                   {Object.entries(detail.usageByModel).map(([model, u]) => (
                     <div key={model} className="flex justify-between text-xs">
@@ -257,6 +267,39 @@ export function SessionDetailPanel({
             </ScrollArea>
           </TabsContent>
 
+          <TabsContent value="skills" className="mt-3 min-h-0 flex-1">
+            <div className="grid grid-cols-3 gap-2">
+              <MiniStat label="skills used" value={String(skillRows.length)} />
+              <MiniStat label="total uses" value={String(skillUses)} />
+              <MiniStat label="compactions" value={String(detail.compactions)} />
+            </div>
+            <div className="mt-3">
+              <div className="mb-1 text-xs text-muted-foreground">skill usage — uses</div>
+              {skillRows.length === 0 ? (
+                <div className="text-xs text-muted-foreground">no skills recorded in this session</div>
+              ) : (
+                <ScrollArea className="h-36 rounded border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead scope="col">skill</TableHead>
+                        <TableHead scope="col" className="text-right">uses</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {skillRows.map(([name, uses]) => (
+                        <TableRow key={name}>
+                          <TableCell className="font-mono text-xs">{name}</TableCell>
+                          <TableCell className="text-right tabular-nums">{uses}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </div>
+          </TabsContent>
+
           <TabsContent value="prompts" className="mt-3 min-h-0 flex-1">
             {prompts.length === 0 ? (
               <div className="text-xs text-muted-foreground">no user prompts recorded</div>
@@ -276,12 +319,69 @@ export function SessionDetailPanel({
             )}
           </TabsContent>
 
+          <TabsContent value="gate" className="mt-3 min-h-0 flex-1">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+              <MiniStat label="blocks" value={String(gate.blocks)} />
+              <MiniStat label="repeat w/o change" value={String(gate.repeatWithoutChange)} />
+              <MiniStat label="failure streak calls" value={String(gate.failureStreakCalls)} />
+              <MiniStat label="max streak" value={String(gate.maxFailureStreak)} />
+              <MiniStat label="gate token share" value={`${gate.gateTokenSharePct}%`} />
+            </div>
+            <div className="mt-3">
+              <div className="mb-1 text-xs text-muted-foreground">blocks by family</div>
+              {gateFamilies.length === 0 ? (
+                <div className="text-xs text-muted-foreground">no gate activity in this session</div>
+              ) : (
+                <div className="space-y-1">
+                  {gateFamilies.map(([fam, n]) => (
+                    <div key={fam} className="flex justify-between text-xs">
+                      <span className="font-mono">{fam}</span>
+                      <span className="tabular-nums text-muted-foreground">{n}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">gate tags — blocks · warns</div>
+                {gateTagList.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">no gate tags in this session</div>
+                ) : (
+                  <div className="space-y-1">
+                    {gateTagList.map(([tag, c]) => (
+                      <div key={tag} className="flex justify-between text-xs">
+                        <span className="font-mono">{tag}</span>
+                        <span className="tabular-nums text-muted-foreground">{c.block} · {c.warn}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">blocks by tool</div>
+                {gateTools.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">no blocked tools</div>
+                ) : (
+                  <div className="space-y-1">
+                    {gateTools.map(([tool, n]) => (
+                      <div key={tool} className="flex justify-between text-xs">
+                        <span className="font-mono">{tool}</span>
+                        <span className="tabular-nums text-muted-foreground">{n}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
           <TabsContent value="subagents" className="mt-3 min-h-0 flex-1">
             <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
               <MiniStat label="spawns" value={String(subagents.spawns)} />
               <MiniStat label="messages" value={String(subagents.messages)} />
               <MiniStat label="lists" value={String(subagents.lists)} />
-              <MiniStat label="errors" value={String(subagents.errors)} />
+              <MiniStat label="errors" value={String(subagents.errors)} error={subagents.errors > 0} />
               <MiniStat label="avg latency" value={fmtLatency(subagents.avgLatencyMs)} />
             </div>
             {(subagents.byAgent ?? []).length > 0 && (
@@ -295,19 +395,42 @@ export function SessionDetailPanel({
                         <TableHead scope="col" className="text-right">spawns</TableHead>
                         <TableHead scope="col" className="text-right">messages</TableHead>
                         <TableHead scope="col" className="text-right">errors</TableHead>
+                        <TableHead scope="col" className="text-right">error rate</TableHead>
                         <TableHead scope="col" className="text-right">avg latency</TableHead>
+                        <TableHead scope="col" className="text-right">p50 · p95</TableHead>
+                        <TableHead scope="col" className="text-right">spawn lag</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(subagents.byAgent ?? []).map((a) => (
-                        <TableRow key={a.agent}>
-                          <TableCell className="font-mono text-xs">{a.agent}</TableCell>
-                          <TableCell className="text-right tabular-nums">{a.spawns}</TableCell>
-                          <TableCell className="text-right tabular-nums">{a.messages}</TableCell>
-                          <TableCell className="text-right tabular-nums">{a.errors}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fmtLatency(a.avgLatencyMs)}</TableCell>
-                        </TableRow>
-                      ))}
+                      {(subagents.byAgent ?? []).map((a) => {
+                        const rate = errorRate(a.errors, a.messages);
+                        return (
+                          <TableRow key={a.agent}>
+                            <TableCell className="font-mono text-xs">{a.agent}</TableCell>
+                            <TableCell className="text-right tabular-nums">{a.spawns}</TableCell>
+                            <TableCell className="text-right tabular-nums">{a.messages}</TableCell>
+                            <TableCell
+                              className={`text-right tabular-nums ${a.errors > 0 ? "text-error-foreground" : ""}`}
+                            >
+                              {a.errors}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right tabular-nums ${rate !== null && rate > 0 ? "text-error-foreground" : ""}`}
+                            >
+                              {errorRateLabel(a.errors, a.messages)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtLatency(a.avgLatencyMs)}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {a.p50LatencyMs != null
+                                ? `${fmtLatency(a.p50LatencyMs)} · ${fmtLatency(a.p95LatencyMs ?? a.p50LatencyMs)}`
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {a.spawnToFirstMsgMs != null ? fmtLatency(a.spawnToFirstMsgMs) : "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </ScrollArea>
