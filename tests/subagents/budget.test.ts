@@ -14,6 +14,7 @@ import {
   createSessionBudgetMeter,
   checkBudgetExceeded,
   createBudgetStopper,
+  BUDGET_GRACE_MS,
 } from "../../extensions/subagents/budget.ts";
 import { parseStatusConfig } from "../../extensions/subagents/status.ts";
 import { readSubagentLoadout, writeSubagentLoadout } from "../../extensions/subagents/session.ts";
@@ -286,6 +287,10 @@ describe("budget breach check", () => {
 
 describe("budget stopper", () => {
   const baseBreached = { dimension: "turns" as const, value: 2, limit: 2 };
+
+  it("pins the default grace at 10s (owner-set, 2026-10-31)", () => {
+    assert.equal(BUDGET_GRACE_MS, 10_000);
+  });
 
   it("interrupts once, then kills after the grace period", () => {
     let interrupted = 0;
