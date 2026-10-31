@@ -8,7 +8,11 @@
  * of the pane) and delivers it through a durable per-repo inbox written
  * BEFORE any in-memory delivery.
  */
-import { describe, it } from "node:test";
+// Scrub inherited child-identity env and redirect the durable inbox BEFORE any
+// extension import loads — every invocation style must get the same isolation.
+import "./test-env.ts";
+
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -27,6 +31,20 @@ import {
 } from "../../extensions/subagents/inbox.ts";
 import { appendSelfResult } from "../../extensions/subagents/subagent-done.ts";
 import { __test__ } from "../../extensions/subagents/index.ts";
+
+// These tests assert the repo-root DEFAULT resolution of the durable inbox.
+// The shared test bootstrap redirects PI_SUBAGENT_INBOX to a global tmp file
+// so a suite running inside a real subagent cannot leak self-reports into
+// the live parent's inbox — scrub that override for the duration of each
+// test so appends land in the per-test repo root the fixtures construct.
+const savedInboxOverride = process.env.PI_SUBAGENT_INBOX;
+beforeEach(() => {
+  delete process.env.PI_SUBAGENT_INBOX;
+});
+afterEach(() => {
+  if (savedInboxOverride === undefined) delete process.env.PI_SUBAGENT_INBOX;
+  else process.env.PI_SUBAGENT_INBOX = savedInboxOverride;
+});
 
 /** Minimal session JSONL fixture: header + two assistant turns. */
 function writeSessionFixture(dir: string, name = "session.jsonl"): string {

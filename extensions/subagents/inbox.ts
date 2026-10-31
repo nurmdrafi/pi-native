@@ -66,7 +66,10 @@ function drainStatePath(repoRoot: string): string {
 
 /** Append one result record to its repo's inbox (creates dirs as needed). */
 export function appendSubagentResult(record: InboxRecord): void {
-  const path = resultInboxPath(record.repoRoot);
+  // PI_SUBAGENT_INBOX (absolute file path) overrides the repo-root default so
+  // an isolated process can capture every write without ever touching the
+  // repo's real inbox.
+  const path = process.env.PI_SUBAGENT_INBOX || resultInboxPath(record.repoRoot);
   try {
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, JSON.stringify(record) + "\n", "utf8");

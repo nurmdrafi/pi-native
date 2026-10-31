@@ -12,14 +12,14 @@ import {
   mkdirSync,
   copyFileSync,
   unlinkSync,
+  statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import {
   isMuxAvailable,
   muxSetupHint,
-  createSurface,
+  createSurfaceRunning,
   sendCommand,
-  sendLongCommand,
   pollForExit,
   closeSurface,
   sendInterrupt,
@@ -41,6 +41,8 @@ import {
   resolveNameInRegistry,
   seedSubagentSessionFile,
   summarizeSessionStats,
+  summarizeStatsFromEntries,
+  getSessionIdFromEntries,
   writeSubagentLoadout,
   type SessionStats,
   type SubagentLoadout,
@@ -114,22 +116,23 @@ function getModuleAbortSignal(): AbortSignal {
 const SubagentParams = Type.Object({
   agent: Type.String({
     description:
-      "Which agent to spawn (e.g. 'worker', 'scout', 'researcher'). This loads the agent's " +
-      "fixed profile — its model, tool loadout, and system prompt. Must be one of the available agents.",
+      "Agent to spawn (e.g. 'worker', 'scout'). Loads that agent's fixed profile — model, tool loadout, system prompt. " +
+      "Must be one of the listed agents.",
   }),
   task: Type.String({ description: "Task/prompt for the sub-agent" }),
   name: Type.Optional(
     Type.String({
       description:
-        "Optional cosmetic label for the subagent's pane and widget row. Defaults to the agent name. " +
-        "Has no effect on which agent runs — use `agent` for that.",
+        "Cosmetic label for the subagent's pane and widget row; defaults to the agent name. " +
+        "Does not select which agent runs.",
     }),
   ),
   model: Type.Optional(Type.String({ description: "Model override (overrides agent default)" })),
   cwd: Type.Optional(
     Type.String({
       description:
-        "Working directory for the sub-agent. The agent starts in this folder and picks up its local .pi/ config, CLAUDE.md, skills, and extensions. Use for role-specific subfolders.",
+        "Working directory; the sub-agent starts there and picks up its local .pi/ config, CLAUDE.md, skills, and extensions. " +
+        "Use for role-specific subfolders.",
     }),
   ),
   budget: Type.Optional(
@@ -141,7 +144,8 @@ const SubagentParams = Type.Object({
       },
       {
         description:
-          "Optional budget override. Values may only LOWER the effective ceiling (role budget, else config default); without a ceiling the override itself is the cap. On breach the child is interrupted, then killed after a grace period; the result reports budget_exceeded.",
+          "May only LOWER the effective ceiling (role budget, else config default); with no ceiling, the override is the cap. " +
+          "On breach: child interrupted, then killed after grace period; result reports budget_exceeded.",
       },
     ),
   ),
@@ -354,6 +358,12 @@ function parseAgentDefinition(content: string, fallbackName: string): AgentDefin
   };
 }
 
+/** Parsed agent definitions cached per file, invalidated by mtime — agent
+ *  discovery re-ran a full readdir+readFileSync sweep over up to three
+ *  directories on every spawn (validation + launch), none of which changes
+ *  between spawns in a normal session. */
+const agentDefCache = new Map<string, { mtimeMs: number; def: ListedAgentDefinition | null }>();
+
 function discoverAgentDefinitions(): ListedAgentDefinition[] {
   const agents = new Map<string, ListedAgentDefinition>();
   const dirs: Array<{ path: string; source: AgentSource }> = [
@@ -365,12 +375,29 @@ function discoverAgentDefinitions(): ListedAgentDefinition[] {
   for (const { path: dir, source } of dirs) {
     if (!existsSync(dir)) continue;
     for (const file of readdirSync(dir).filter((entry) => entry.endsWith(".md"))) {
+      const fullPath = join(dir, file);
+      let mtimeMs = 0;
+      try {
+        mtimeMs = statSync(fullPath).mtimeMs;
+      } catch {
+        continue;
+      }
+      const cached = agentDefCache.get(fullPath);
+      if (cached && cached.mtimeMs === mtimeMs) {
+        if (cached.def) agents.set(cached.def.name, cached.def);
+        continue;
+      }
       const parsed = parseAgentDefinition(
-        readFileSync(join(dir, file), "utf8"),
+        readFileSync(fullPath, "utf8"),
         file.replace(/\.md$/, ""),
       );
-      if (!parsed) continue;
-      agents.set(parsed.name, { ...parsed, source });
+      if (!parsed) {
+        agentDefCache.set(fullPath, { mtimeMs, def: null });
+        continue;
+      }
+      const listed: ListedAgentDefinition = { ...parsed, source };
+      agentDefCache.set(fullPath, { mtimeMs, def: listed });
+      agents.set(listed.name, listed);
     }
   }
 
@@ -720,6 +747,10 @@ interface RunningSubagent {
   /** Pane-loss restart bookkeeping: set when the single restart attempt
    *  began; `respawnedAt` added once a replacement pane is actually running. */
   restart?: { attemptedAt: number; respawnedAt?: number };
+  /** tmux wait-for channel the pane signals when its launch script ends; the
+   *  watcher parks on it between ticks so completion wakes it immediately
+   *  instead of on the next interval tick. */
+  waitChannel?: string;
 }
 
 /** All currently running subagents, keyed by id. */
@@ -728,6 +759,52 @@ const runningSubagents = new Map<string, RunningSubagent>();
 /** Caps simultaneous children: parallel spawns share one provider quota and
  * 429-storm it. `PI_SUBAGENT_MAX_CONCURRENT` (default 3, <1 = unlimited). */
 const spawnQueue = new SpawnQueue(resolveMaxConcurrent(process.env.PI_SUBAGENT_MAX_CONCURRENT));
+
+/** Spawns accepted while the cap was reached, waiting FIFO for a slot. The
+ *  spawn tool must never block the parent turn on another child's runtime —
+ *  a queued spawn returns an ack immediately and launches from the queue's
+ *  release hook, keeping the same fire-and-forget result delivery. */
+interface PendingSpawn {
+  params: Static<typeof SubagentParams>;
+  ctx: Parameters<typeof launchSubagent>[1];
+  parentArtifactDir: string;
+  reservedName: string | null;
+}
+const pendingSpawns: PendingSpawn[] = [];
+
+/** Launch queued spawns as slots free; called from the queue's drain hook.
+ *  One launch failure must not strand the rest — report as a steer and keep
+ *  draining. */
+function drainPendingSpawns(): void {
+  while (pendingSpawns.length > 0 && spawnQueue.tryAcquire()) {
+    const next = pendingSpawns.shift()!;
+    const pi = latestPi;
+    if (!pi) {
+      // Extension API gone (shutdown): nothing can be launched or reported.
+      // Free the slot and keep the entry queued for a future process.
+      spawnQueue.release();
+      pendingSpawns.unshift(next);
+      break;
+    }
+    try {
+      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName);
+    } catch (err) {
+      spawnQueue.release();
+      pi?.sendMessage(
+        {
+          customType: "subagent_result",
+          content: `Sub-agent "${next.params.name}" failed to launch while leaving the queue: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          display: true,
+          details: { name: next.params.name, task: next.params.task, error: String(err) },
+        },
+        { triggerTurn: true, deliverAs: "steer" },
+      );
+    }
+  }
+}
+spawnQueue.setDrainHook(() => drainPendingSpawns());
 
 // When this extension is loaded inside a subagent that itself spawns children
 // (e.g. a worker delegating to scout/researcher), `subagent-done.ts` runs in the
@@ -1176,54 +1253,45 @@ async function steerSubagent(
   }
 }
 
-/**
- * Deliver a launch script to a subagent pane, healing one pane-loss race.
- *
- * The target pane was created moments ago by createSurface; when it dies
- * inside the shell-settling window before respawn-pane reaches it, tmux
- * answers `can't find pane` and the launch used to die on a raw tmux error.
- * Re-split (createSurface re-derives a live split origin on its own) and
- * deliver once to the replacement pane. Returns the surface the script
- * actually landed on so callers keep tracking the live pane. Any other
- * failure propagates unchanged; a failure on the replacement pane throws a
- * contextual error naming the subagent and the action to take.
- */
-function deliverLaunchScript(
+/** Write a launch script to a stable path — the same file layout the old
+ *  sendLongCommand delivery produced (shebang, optional preamble, command,
+ *  mode 0755) — so a pane can be created already running it. */
+function writeLaunchScript(scriptPath: string, command: string, preamble: string): void {
+  mkdirSync(dirname(scriptPath), { recursive: true });
+  const scriptParts = ["#!/bin/bash"];
+  if (preamble) scriptParts.push(preamble.trimEnd());
+  scriptParts.push(command);
+  writeFileSync(scriptPath, scriptParts.join("\n") + "\n", { mode: 0o755 });
+}
+
+/** The command a launch pane is born running: the script itself, the
+ *  wait-for signal that wakes the watcher's poll the moment the script ends
+ *  (`|| true` so a failed signal can never mask the sentinel echo the script
+ *  already printed; the channel is generated hex, never shell-escaped so it
+ *  stays visible in the pane command), and a trailing interactive shell so
+ *  the pane — and its scrollback, where the sentinel echo lives — survives
+ *  the script, matching the old typed-in-a-shell delivery. */
+function launchPaneCommand(scriptPath: string, waitChannel: string): string {
+  return (
+    `bash ${shellEscape(scriptPath)}; ` +
+    `tmux wait-for -S ${waitChannel} >/dev/null 2>&1 || true; ` +
+    `exec "\${SHELL:-/bin/sh}"`
+  );
+}
+
+/** Write the launch script, then create the pane born running it: one atomic
+ *  split-window. No default-shell window ever exists, so there is no
+ *  pane-died-before-delivery race, no respawn-pane, and no shell-ready wait.
+ *  Returns the new surface. */
+function launchScriptedPane(
   name: string,
   command: string,
-  opts: { surface: string; scriptPath: string; preamble: (surface: string) => string },
-  deps: {
-    create?: (name: string) => string;
-    send?: (
-      surface: string,
-      command: string,
-      options?: { scriptPath?: string; scriptPreamble?: string },
-    ) => string | void;
-  } = {},
+  scriptPath: string,
+  preamble: string,
+  waitChannel: string,
 ): string {
-  const create = deps.create ?? createSurface;
-  const send = deps.send ?? sendLongCommand;
-  try {
-    send(opts.surface, command, {
-      scriptPath: opts.scriptPath,
-      scriptPreamble: opts.preamble(opts.surface),
-    });
-    return opts.surface;
-  } catch (err) {
-    if (!isPaneNotFound(err)) throw err;
-  }
-  const healed = create(name);
-  try {
-    send(healed, command, { scriptPath: opts.scriptPath, scriptPreamble: opts.preamble(healed) });
-    return healed;
-  } catch (err) {
-    throw new Error(
-      `Failed to deliver the launch script to subagent "${name}": its pane was lost ` +
-        `twice (first ${opts.surface}, then replacement ${healed}); recovery was ` +
-        `attempted and failed: ${err instanceof Error ? err.message : String(err)}. ` +
-        `Retry the subagent call.`,
-    );
-  }
+  writeLaunchScript(scriptPath, command, preamble);
+  return createSurfaceRunning(name, launchPaneCommand(scriptPath, waitChannel));
 }
 
 /**
@@ -1299,9 +1367,6 @@ async function resumeSubagentByName(
     // transcript doesn't block the UI.
     const entryCountBefore = countSessionEntryLines(sessionPath);
 
-    let surface = createSurface(name);
-    await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
-
     // Build pi resume command
     const parts = ["pi", "--session", shellEscape(sessionPath)];
 
@@ -1373,18 +1438,21 @@ async function resumeSubagentByName(
         .replace(/-+/g, "-")
         .replace(/^-|-$/g, "") || "resume"}-resume-${Date.now()}.sh`,
     );
-    surface = deliverLaunchScript(name, command, {
-      surface,
-      scriptPath: launchScriptFile,
-      preamble: (s) =>
-        [
-          `# Subagent resume script for ${name}`,
-          `# Generated: ${new Date().toISOString()}`,
-          `# Session: ${sessionPath}`,
-          `# Surface: ${s}`,
-          ...(resumeMsgFile ? [`# Resume message file: ${resumeMsgFile}`] : []),
-        ].join("\n"),
-    });
+    // Write the script, then create the pane born running it — atomic, so a
+    // fast-exit default shell can no longer kill the pane before delivery.
+    const waitChannel = `pi-subagent-${id}`;
+    const surface = launchScriptedPane(
+      name,
+      command,
+      launchScriptFile,
+      [
+        `# Subagent resume script for ${name}`,
+        `# Generated: ${new Date().toISOString()}`,
+        `# Session: ${sessionPath}`,
+        ...(resumeMsgFile ? [`# Resume message file: ${resumeMsgFile}`] : []),
+      ].join("\n"),
+      waitChannel,
+    );
 
     await spawnQueue.acquire();
 
@@ -1394,6 +1462,7 @@ async function resumeSubagentByName(
       name,
       task: message ?? "",
       surface,
+      waitChannel,
       autoExit: true,
       startTime,
       sessionFile: sessionPath,
@@ -1610,6 +1679,9 @@ function resolveResumeLaunchBehavior(): { autoExit: boolean; interactive: boolea
 export const __test__ = {
   borderLine,
   getShellReadyDelayMs,
+  clearAgentDefCache: () => agentDefCache.clear(),
+  pendingSpawns,
+  resetSpawnQueue: () => spawnQueue.resetForTest(),
   renderSubagentWidgetLines,
   loadAgentDefaults,
   discoverAgentDefinitions,
@@ -1634,7 +1706,6 @@ export const __test__ = {
   adoptPendingSubagents,
   steerSubagent,
   resumeSubagentByName,
-  deliverLaunchScript,
   launchSubagent,
   handleSubagentSteer,
   resolveResultPresentation,
@@ -1658,15 +1729,82 @@ function startWidgetRefresh() {
 }
 
 /**
- * Launch a subagent: creates the multiplexer pane, builds the command, and
- * sends it. Returns a RunningSubagent — does NOT poll.
+ * Launch a subagent: builds the command, writes its launch script, and
+ * creates a multiplexer pane born running that script — one atomic step.
+ * Returns a RunningSubagent — does NOT poll.
  *
  * Call watchSubagent() on the returned object to observe completion.
  */
+/** Launch a spawn that already holds a queue slot — the shared pipeline for
+ *  the immediate path and the queued-drain path: create the child, register
+ *  its name, start the fire-and-forget watcher, and release the slot (which
+ *  drains the next queued spawn) when the watcher settles. Launch failures
+ *  release the slot too, so one bad spawn never strands the queue. */
+async function launchReservedSpawn(
+  pi: ExtensionAPI,
+  params: Static<typeof SubagentParams>,
+  ctx: Parameters<typeof launchSubagent>[1],
+  parentArtifactDir: string,
+  reservedName: string | null,
+): Promise<RunningSubagent> {
+  let running: RunningSubagent;
+  try {
+    running = await launchSubagent(params, ctx);
+  } catch (err) {
+    spawnQueue.release();
+    // Wrap, never re-throw verbatim: a raw tmux failure here (pane lost
+    // mid-launch) reads as internal noise; the wrap names the subagent.
+    throw new Error(
+      `Failed to launch subagent "${params.name}": ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    if (reservedName) reservedNames.delete(reservedName);
+  }
+
+  // Persist name → session so subagent_message({ name }) can resume this
+  // subagent after it finishes (and after a pi restart). Done at launch,
+  // not completion, so the handle exists even if the parent dies mid-run.
+  registerName(parentArtifactDir, running.name, {
+    sessionFile: running.sessionFile,
+    sessionId: getSessionId(running.sessionFile),
+  });
+
+  // Create a separate AbortController for the watcher
+  // (the tool's signal completes when we return)
+  const watcherAbort = new AbortController();
+  running.abortController = watcherAbort;
+
+  // Start widget refresh and status supervision when the first agent launches
+  startWidgetRefresh();
+  startStatusRefresh(pi);
+
+  // Fire-and-forget: start watching in background
+  watchSubagent(running, watcherAbort.signal)
+    .then((result) => {
+      updateWidget(); // reflect removal from Map immediately
+      deliverSubagentResult(pi, running, result);
+    })
+    .catch((err) => {
+      updateWidget();
+      pi.sendMessage(
+        {
+          customType: "subagent_result",
+          content: `Sub-agent "${running.name}" error: ${err?.message ?? String(err)}`,
+          display: true,
+          details: { name: running.name, task: running.task, error: err?.message },
+        },
+        { triggerTurn: true, deliverAs: "steer" },
+      );
+    })
+    .finally(() => spawnQueue.release());
+
+  return running;
+}
+
 async function launchSubagent(
   params: typeof SubagentParams.static,
   ctx: { sessionManager: { getSessionFile(): string | undefined; getSessionId(): string; getSessionDir(): string }; cwd: string },
-  options?: { surface?: string },
 ): Promise<RunningSubagent> {
   if (!params.name?.trim()) throw new Error("launchSubagent: params.name is required (the spawn handler assigns a unique name before launching)");
   const startTime = Date.now();
@@ -1700,14 +1838,6 @@ async function launchSubagent(
     Math.random().toString(16).slice(2, 6),
   ].join("-");
   const subagentSessionFile = join(sessionDir, `${timestamp}_${uuid}.jsonl`);
-
-  // Use pre-created surface (parallel mode) or create a new one.
-  // For new surfaces, pause briefly so the shell is ready before sending the command.
-  const surfacePreCreated = !!options?.surface;
-  let surface = options?.surface ?? createSurface(params.name);
-  if (!surfacePreCreated) {
-    await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
-  }
 
   const launchBehavior = resolveLaunchBehavior(params, agentDefs);
 
@@ -1781,16 +1911,17 @@ async function launchSubagent(
       .replace(/^-|-$/g, "") || "subagent"}-${id}.sh`;
     const launchScriptFile = join(artifactDir, "subagent-scripts", launchScriptName);
 
-    surface = deliverLaunchScript(params.name, command, {
-      surface,
-      scriptPath: launchScriptFile,
-      preamble: (s) =>
-        [
-          `# Claude Code subagent launch script for ${params.name}`,
-          `# Generated: ${new Date().toISOString()}`,
-          `# Surface: ${s}`,
-        ].join("\n"),
-    });
+    const waitChannel = `pi-subagent-${id}`;
+    const surface = launchScriptedPane(
+      params.name,
+      command,
+      launchScriptFile,
+      [
+        `# Claude Code subagent launch script for ${params.name}`,
+        `# Generated: ${new Date().toISOString()}`,
+      ].join("\n"),
+      waitChannel,
+    );
 
     const running: RunningSubagent = {
       id,
@@ -1798,6 +1929,7 @@ async function launchSubagent(
       task: params.task,
       agent: params.agent,
       surface,
+      waitChannel,
       startTime,
       sessionFile: subagentSessionFile,
       parentArtifactDir: artifactDir,
@@ -1886,7 +2018,9 @@ async function launchSubagent(
   envParts.push(`PI_SUBAGENT_PARENT_SESSION=${shellEscape(sessionId ?? "")}`);
   envParts.push(`PI_SUBAGENT_START_MS=${Date.now()}`);
   envParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
-  envParts.push(`PI_SUBAGENT_SURFACE=${shellEscape(surface)}`);
+  // The pane id does not exist until the pane is created below; the pane's
+  // own tmux environment carries it, so expand it at run time inside the pane.
+  envParts.push(`PI_SUBAGENT_SURFACE="\${TMUX_PANE}"`);
   const envPrefix = envParts.join(" ") + " ";
 
   // Pass task and skill prompts to the sub-agent.
@@ -1932,17 +2066,20 @@ async function launchSubagent(
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "subagent"}-${id}.sh`;
   const launchScriptFile = join(artifactDir, "subagent-scripts", launchScriptName);
-  surface = deliverLaunchScript(params.name, command, {
-    surface,
-    scriptPath: launchScriptFile,
-    preamble: (s) =>
-      [
-        `# Subagent launch script for ${params.name}`,
-        `# Generated: ${new Date().toISOString()}`,
-        `# Session: ${subagentSessionFile}`,
-        `# Surface: ${s}`,
-      ].join("\n"),
-  });
+  // Write the script, then create the pane born running it: one atomic
+  // split-window, no default-shell window, no respawn, no shell-ready wait.
+  const waitChannel = `pi-subagent-${id}`;
+  const surface = launchScriptedPane(
+    params.name,
+    command,
+    launchScriptFile,
+    [
+      `# Subagent launch script for ${params.name}`,
+      `# Generated: ${new Date().toISOString()}`,
+      `# Session: ${subagentSessionFile}`,
+    ].join("\n"),
+    waitChannel,
+  );
 
   const running: RunningSubagent = {
     id,
@@ -1950,6 +2087,7 @@ async function launchSubagent(
     task: params.task,
     agent: params.agent,
     surface,
+    waitChannel,
     startTime,
     sessionFile: subagentSessionFile,
     parentArtifactDir: artifactDir,
@@ -2100,10 +2238,13 @@ function synthesizeLostResult(
   kind: "pane_lost" | "stalled",
 ): SubagentResult {
   const { name, task, sessionFile, startTime } = running;
+  // Single read: parse once, derive summary + stats + id from the same
+  // entries — the loss path used to re-read the whole file three times.
   const fileExists = existsSync(sessionFile);
-  const lastText = fileExists ? findLastAssistantMessage(getNewEntries(sessionFile, 0)) : null;
-  const stats = fileExists ? summarizeSessionStats(sessionFile) : null;
-  const sessionId = fileExists ? getSessionId(sessionFile) : null;
+  const entries = fileExists ? getNewEntries(sessionFile, 0) : [];
+  const lastText = fileExists ? findLastAssistantMessage(entries) : null;
+  const stats = fileExists ? summarizeStatsFromEntries(entries) : null;
+  const sessionId = fileExists ? getSessionIdFromEntries(entries) : null;
   const breach =
     running.budgetStopper?.breached() ??
     (running.budget && running.budgetMeter
@@ -2212,15 +2353,10 @@ function deliverSubagentResult(
 /** Dependencies of a pane-loss restart; injectable so tests can fake the
  *  multiplexer. Production callers use the real surface layer. */
 interface RestartDeps {
-  createSurface?: (name: string) => string;
-  sendScript?: (
-    surface: string,
-    command: string,
-    opts: { scriptPath: string; scriptPreamble: string },
-  ) => void;
-  closeSurface?: (surface: string) => void;
-  /** Overrides the fresh-pane shell-ready wait (tests). */
-  shellDelayMs?: number;
+  /** Atomic pane creation: the pane is born running paneCommand. */
+  createSurfaceRunning?: (name: string, paneCommand: string) => string;
+  /** Launch-script writer (file layout shared with every spawn path). */
+  writeScript?: (scriptPath: string, command: string, preamble: string) => void;
 }
 
 /** Gates for the one automatic pane-loss restart. A child qualifies only if
@@ -2247,7 +2383,7 @@ function canRestartLostPane(running: RunningSubagent): boolean {
   return findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) !== null;
 }
 
-/** Restart a pane-lost child: respawn a pane and resume its durable session
+/** Restart a pane-lost child: create a pane born resuming its durable session
  *  file with the sandbox snapshot recorded at spawn (mirrors the
  *  subagent_message resume construction). Returns true when a replacement
  *  pane is running the resumed child; false when the gates refused or the
@@ -2265,9 +2401,9 @@ async function restartLostPane(
   const loadout = readSubagentLoadout(running.sessionFile);
   if (!loadout) return false;
 
-  const spawn = deps.createSurface ?? createSurface;
-  const sendScript = deps.sendScript ?? sendLongCommand;
-  const close = deps.closeSurface ?? closeSurface;
+  const spawnRunning = deps.createSurfaceRunning ?? createSurfaceRunning;
+  const writeScript = deps.writeScript ?? writeLaunchScript;
+  const waitChannel = running.waitChannel ?? `pi-subagent-${running.id}`;
 
   const artifactDir = running.parentArtifactDir ?? dirname(running.sessionFile);
   const safeName =
@@ -2277,21 +2413,6 @@ async function restartLostPane(
       .replace(/\s+/g, "-")
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "") || "subagent";
-
-  let surface: string;
-  try {
-    surface = spawn(running.name);
-  } catch {
-    return false;
-  }
-  // Claim the new pane before any await so a concurrent sweep sees the entry
-  // alive instead of finalizing a loss mid-restart.
-  const deadSurface = running.surface;
-  running.surface = surface;
-
-  await new Promise<void>((resolve) =>
-    setTimeout(resolve, deps.shellDelayMs ?? getShellReadyDelayMs()),
-  );
 
   try {
     // The resumed process needs a user turn to act on; without one the CLI
@@ -2334,7 +2455,9 @@ async function restartLostPane(
     if (running.activityFile) {
       envParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(running.activityFile)}`);
     }
-    envParts.push(`PI_SUBAGENT_SURFACE=${shellEscape(surface)}`);
+    // The pane id cannot be known before the pane exists; the pane's own
+    // tmux environment carries it, so expand it at run time inside the pane.
+    envParts.push(`PI_SUBAGENT_SURFACE="\${TMUX_PANE}"`);
     const cdPrefix = loadout.cwd ? `cd ${shellEscape(loadout.cwd)} && ` : "";
 
     const command =
@@ -2344,17 +2467,20 @@ async function restartLostPane(
       "subagent-scripts",
       `${safeName}-restart-${Date.now()}.sh`,
     );
-    sendScript(surface, command, {
-      scriptPath,
-      scriptPreamble: [
-        `# Subagent restart script for ${running.name}`,
-        `# Generated: ${new Date().toISOString()}`,
-        `# Session: ${running.sessionFile}`,
-        `# Surface: ${surface}`,
-        `# Restarted from dead pane: ${deadSurface}`,
-      ].join("\n"),
-    });
+    // Write the script first, then create the pane born running it — one
+    // atomic step: no default-shell window, no delivery race, no ready wait.
+    // The replacement pane re-signals the wait-for channel its watcher parks
+    // on, so the restart keeps push-driven completion.
+    writeScript(scriptPath, command, [
+      `# Subagent restart script for ${running.name}`,
+      `# Generated: ${new Date().toISOString()}`,
+      `# Session: ${running.sessionFile}`,
+      `# Restarted from dead pane: ${running.surface}`,
+    ].join("\n"));
 
+    const surface = spawnRunning(running.name, launchPaneCommand(scriptPath, waitChannel));
+    running.waitChannel = waitChannel;
+    running.surface = surface;
     running.launchScriptFile = scriptPath;
     // The resumed child re-appends in its own time; re-baseline the sweep's
     // stall bookkeeping so the restart pause is not read as a new stall.
@@ -2369,12 +2495,9 @@ async function restartLostPane(
     updateWidget();
     return true;
   } catch {
-    // The replacement pane exists but runs nothing — close it and restore the
-    // dead pane id so the loss is detected (and delivered) again.
-    try {
-      close(surface);
-    } catch {}
-    running.surface = deadSurface;
+    // The script write or the pane creation failed before the entry mutated:
+    // no replacement pane exists to close, and the entry still points at the
+    // dead pane id, so the loss is detected (and delivered) again.
     return false;
   }
 }
@@ -2425,6 +2548,7 @@ async function watchSubagent(
         interval: 1000,
         sessionFile,
         sentinelFile: running.sentinelFile,
+        waitChannel: running.waitChannel,
         onTick() {
           observeRunningSubagent(running);
           deliverPendingQuestion(running);
@@ -2500,12 +2624,13 @@ async function watchSubagent(
       return { name, task, summary, exitCode: result.exitCode, elapsed, ...(sessionId ? { claudeSessionId: sessionId } : {}) };
     }
 
-    // Pi subagent result extraction
+    // Pi subagent result extraction — single read: parse once, derive
+    // summary + stats + id from the same entries (was three full parses).
     let summary: string;
-    if (existsSync(sessionFile)) {
-      const allEntries = getNewEntries(sessionFile, 0);
+    const piEntries = existsSync(sessionFile) ? getNewEntries(sessionFile, 0) : null;
+    if (piEntries) {
       summary =
-        findLastAssistantMessage(allEntries) ??
+        findLastAssistantMessage(piEntries) ??
         (result.errorMessage
           ? `Subagent error: ${result.errorMessage}`
           : result.exitCode !== 0
@@ -2519,8 +2644,8 @@ async function watchSubagent(
           : "Sub-agent exited without output";
     }
 
-    const stats = existsSync(sessionFile) ? summarizeSessionStats(sessionFile) : null;
-    const subagentSessionId = existsSync(sessionFile) ? getSessionId(sessionFile) : null;
+    const stats = piEntries ? summarizeStatsFromEntries(piEntries) : null;
+    const subagentSessionId = piEntries ? getSessionIdFromEntries(piEntries) : null;
 
     // Close the finished pane. Non-fatal: the pane may already be gone (it
     // can close itself moments before this), and a cleanup failure must never
@@ -2582,8 +2707,13 @@ async function watchSubagent(
   }
 }
 
-/** Surface undelivered inbox records for this repo (skip the spawning
- * parent — it already received the direct in-memory steer). */
+/** Surface undelivered inbox records for this repo. Only the record's own
+ * (resumed) parent session may receive a task-steering delivery — it is the
+ * natural continuation of a result its in-memory delivery never reached.
+ * Every other session is an unrelated bystander: a dead parent's stale
+ * result must never trigger or steer its turns (it could hijack a fresh
+ * subagent task mid-flight), so it surfaces context-only — displayed and in
+ * transcript, but with no forced turn and no queued steer. */
 function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
   try {
     const c = ctx as { cwd?: string; sessionManager?: { getSessionId?(): string } } | undefined;
@@ -2594,12 +2724,19 @@ function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
         ?.sessionManager?.getSessionId?.() ??
       null;
     for (const record of drainSubagentResults(repoRootFor(cwd), sessionId)) {
+      // The draining session owns this record only when it IS the (resumed)
+      // spawning parent. drainSubagentResults passes a parent-session record
+      // through only when the parent never observed it in memory, so `own`
+      // means "reclaim my own unobserved result", never a foreign task.
+      const own = sessionId != null && record.parentSessionId === sessionId;
       pi.sendMessage(
         {
           customType: "subagent_result",
-          content:
-            `Sub-agent "${record.name}" finished — recovered from the durable inbox (original parent gone):\n\n` +
-            `${record.summary}`,
+          content: own
+            ? `Sub-agent "${record.name}" finished — recovered from the durable inbox (original parent gone):\n\n` +
+              `${record.summary}`
+            : `Sub-agent "${record.name}", started by an earlier session, finished — result recovered from the durable inbox. Informational for this session; no action required:\n\n` +
+              `${record.summary}`,
           display: true,
           details: {
             name: record.name,
@@ -2610,9 +2747,10 @@ function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
             ...(record.sessionId ? { sessionId: record.sessionId } : {}),
             ...(record.error ? { error: record.error } : {}),
             fromInbox: true,
+            ...(own ? {} : { contextOnly: true }),
           },
         },
-        { triggerTurn: true, deliverAs: "steer" },
+        own ? { triggerTurn: true, deliverAs: "steer" } : undefined,
       );
     }
   } catch {
@@ -2761,19 +2899,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       label: "Subagent",
       defaultActive: !SPAWN_TOOLS_GATED,
       description:
-        "Spawn a sub-agent in a dedicated terminal multiplexer pane. " +
-        "This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. " +
-        "When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
-        "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. " +
-        "DO NOT fabricate, assume, or summarize results after calling this tool. " +
-        "After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
+        "Spawn a sub-agent in a dedicated pane. Fire-and-forget: returns immediately with an acknowledgement only; " +
+        "when it finishes, the harness automatically delivers its result as a steer message that wakes you and starts a new turn. " +
+        "Do not poll, sleep, tail, re-read session logs, or call tools to check status. " +
+        "Do not fabricate or assume results. " +
+        "After spawning, end your turn or do independent work, including parallel spawns.",
       promptSnippet:
-        "Spawn a sub-agent in a dedicated terminal multiplexer pane. " +
-        "This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. " +
-        "When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
-        "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. " +
-        "DO NOT fabricate, assume, or summarize results after calling this tool. " +
-        "After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
+        "Spawn a fire-and-forget sub-agent; its result arrives later as a steer message. " +
+        "Do not poll or fabricate results; end turn or do other work.",
       parameters: SubagentParams,
 
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -2893,61 +3026,39 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           reservedNames.add(reservedName);
         }
 
-        // Launch the subagent (creates pane, sends command). Release the name
-        // reservation once it registers in runningSubagents (or launch fails) —
-        // from then on uniqueRunningName tracks it via the running map.
-        await spawnQueue.acquire();
-        let running;
-        try {
-          running = await launchSubagent(params, ctx);
-        } catch (err) {
-          spawnQueue.release();
-          // Wrap, never re-throw verbatim: a raw tmux failure here (pane lost
-          // mid-launch) reads as internal noise; the wrap names the subagent.
-          throw new Error(
-            `Failed to launch subagent "${params.name}": ` +
-              `${err instanceof Error ? err.message : String(err)}`,
-          );
-        } finally {
-          if (reservedName) reservedNames.delete(reservedName);
-        }
-
-        // Persist name → session so subagent_message({ name }) can resume this
-        // subagent after it finishes (and after a pi restart). Done at launch,
-        // not completion, so the handle exists even if the parent dies mid-run.
-        registerName(parentArtifactDir, running.name, {
-          sessionFile: running.sessionFile,
-          sessionId: getSessionId(running.sessionFile),
-        });
-
-        // Create a separate AbortController for the watcher
-        // (the tool's signal completes when we return)
-        const watcherAbort = new AbortController();
-        running.abortController = watcherAbort;
-
-        // Start widget refresh and status supervision when the first agent launches
-        startWidgetRefresh();
-        startStatusRefresh(pi);
-
-        // Fire-and-forget: start watching in background
-        watchSubagent(running, watcherAbort.signal)
-          .then((result) => {
-            updateWidget(); // reflect removal from Map immediately
-            deliverSubagentResult(pi, running, result);
-          })
-          .catch((err) => {
-            updateWidget();
-            pi.sendMessage(
+        // Launch the subagent (creates pane, runs the launch script). Release
+        // the name reservation once it registers in runningSubagents (or the
+        // launch fails) — from then on uniqueRunningName tracks it via the
+        // running map. A slot must already be held: either claimed just now or
+        // drained from the queue — never block the parent turn on acquire().
+        let running: RunningSubagent;
+        if (spawnQueue.tryAcquire()) {
+          running = await launchReservedSpawn(pi, params, ctx, parentArtifactDir, reservedName);
+        } else {
+          // Cap reached: queue FIFO and return immediately. The drain hook
+          // launches it when a slot frees; result delivery is unchanged.
+          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName });
+          startWidgetRefresh();
+          return {
+            content: [
               {
-                customType: "subagent_result",
-                content: `Sub-agent "${running.name}" error: ${err?.message ?? String(err)}`,
-                display: true,
-                details: { name: running.name, task: running.task, error: err?.message },
+                type: "text" as const,
+                text:
+                  `Sub-agent "${params.name}" queued — the concurrency cap is reached, so it launches ` +
+                  `when a running sub-agent finishes. The launch and its result both arrive automatically: ` +
+                  `a steer message wakes you when it finishes. Do NOT poll, sleep, or check status; do NOT assume results. ` +
+                  `Move on to other work or end your turn.`,
               },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          })
-          .finally(() => spawnQueue.release());
+            ],
+            details: {
+              name: params.name,
+              task: params.task,
+              agent: params.agent,
+              queued: true,
+              queuePosition: pendingSpawns.length,
+            },
+          };
+        }
 
         // Return immediately
         return {
@@ -3132,26 +3243,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       label: "Message Subagent",
       defaultActive: !SPAWN_TOOLS_GATED,
       description:
-        "Send a message to a subagent by name. Names are unique within your session and persist after a subagent finishes, " +
-        "so the SAME name works whether the subagent is running or finished: if it is still running, your message steers its live session; " +
-        "if it has finished, your message resumes that session and continues it. " +
-        "`name` and `message` are both required. " +
-        "Steering a running subagent returns immediately with a local acknowledgement and does NOT, by itself, emit a new result. " +
-        "Resuming is a fire-and-forget async call: when the resumed sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up. " +
-        "DO NOT poll, sleep, tail logs, or read session files to detect completion — the harness handles delivery. " +
-        "DO NOT fabricate or assume results. After calling, either end your turn or work on other independent tasks.",
+        "Message a subagent by name. Names persist after a subagent finishes: the same name steers a running subagent or resumes a finished one. " +
+        "`name` and `message` are required. " +
+        "Steering returns immediately with an acknowledgement, no new result. " +
+        "Resuming is fire-and-forget: the result arrives later as a steer message that wakes a new turn. " +
+        "Do not poll or fabricate results. End turn or do independent work after.",
       promptSnippet:
-        "Message a subagent by name: steers it if running, resumes it if finished (same name either way). " +
-        "`name` and `message` are required. Steering returns immediately; resuming delivers its result later as a steer message. " +
-        "Do not poll or fabricate results.",
+        "Steer a running subagent or resume a finished one by name (`name`+`message` required). " +
+        "Resume is fire-and-forget; result arrives later as a steer message. No polling.",
       parameters: Type.Object({
         name: Type.String({
-          description:
-            "Exact display name of the subagent. Steers it if it is still running; resumes its session if it has finished.",
+          description: "Exact subagent name. Steers it if running; resumes its session if finished.",
         }),
         message: Type.String({
-          description:
-            "The message to deliver: a follow-up instruction for a running subagent, or the next task for a resumed session.",
+          description: "Follow-up instruction for a running subagent, or the next task for a resumed session.",
         }),
       }),
 
