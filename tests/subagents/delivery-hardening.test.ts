@@ -159,7 +159,7 @@ describe("delivery-path git hardening", () => {
     const pi = fakePi();
     __test__.deliverSubagentResult(pi as never, running as never, resultFor(running));
 
-    const parentRec = inboxRecords(inboxPath).filter((r) => r.id === "merge-2").pop();
+    const parentRec = inboxRecords(inboxPath).filter((r) => r.id === "merge-2").pop()!;
     assert.deepEqual(parentRec.files_changed, ["src/a.ts"], "parent's delta wins when non-null");
     assert.equal(parentRec.files_changed_source, "git_status_delta");
   });
@@ -185,7 +185,7 @@ describe("delivery-path git hardening", () => {
       const elapsedMs = Date.now() - started;
 
       assert.ok(elapsedMs < 8_000, `delivery bounded by the git timeout (took ${elapsedMs} ms)`);
-      const parentRec = inboxRecords(inboxPath).filter((r) => r.id === "wedge-1").pop();
+      const parentRec = inboxRecords(inboxPath).filter((r) => r.id === "wedge-1").pop()!;
       assert.equal(parentRec.files_changed, undefined, "wedged git degrades to no files_changed");
       assert.equal(pi.sent.length, 1, "result still delivered in memory");
     } finally {

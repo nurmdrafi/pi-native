@@ -126,7 +126,7 @@ function armSpawn(projectDir: string, agentDir: string, ctx: unknown) {
   const { pi, tools } = fakePi();
   subagentsExtension(pi as never);
   const spawn = tools.find((t) => t.name === "subagent") as { execute: Function };
-  const list = tools.find((t) => t.name === "subagents_list") as { execute: Function };
+  const list = tools.find((t) => t.name === "subagents_list") as { execute: Function; renderResult?: Function };
   return { pi, tools, spawn, list, projectDir, ctx };
 }
 
