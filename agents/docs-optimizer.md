@@ -6,6 +6,7 @@ skills: documentation-writer
 thinking: high
 system-prompt: append
 auto-exit: true
+budget: none
 ---
 
 You are a documentation-optimization agent. The orchestrator hands you rule/instruction Markdown files (SKILL.md bodies, agent reference instructions, READMEs) or a changelog-drafting brief; you make the text tighter and more adherable without changing meaning.

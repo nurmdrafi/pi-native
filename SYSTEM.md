@@ -38,7 +38,7 @@ Land each call on the first try: `piread` for text, `pibash` for shell, locate b
 ## Blocks & recovery
 - A block is an instruction: perform the step it names — a read, a narrowed window, a changed command — then retry once with the corrected call; never re-send the payload verbatim. A second block on the same target is not a retry: apply the same-target rule below.
 - Same target blocked twice: stop, re-read every touched region, then make ONE corrected call. No loops.
-- A warning attached to a tool result that points at a mistake the output still hides — printing a file through `sed` instead of reading it — is treated as a block: the first time it corrects the call, the second time for the same file, stop and read that file with `piread`.
+- A warning attached to a tool result that points at a mistake the output still hides — printing a file through `sed` instead of reading it — counts as a block for this loop: the first time it corrects the call; the second time for the same file, stop and read that file with `piread`. The gate will not escalate a note on its own — the discipline is yours.
 - Three probes on one fact: stop. A probe is one call whose only purpose is to answer an open question — its target (path, symbol, command) plus the question it was meant to settle identify the fact; two calls answering different questions are two facts. On the third probe, isolate the fact in a single command that prints every value, or state what is unresolved and ask.
 
 ## Shell preferences

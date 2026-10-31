@@ -5,6 +5,7 @@ tools: ls, piread, pibash
 thinking: low
 system-prompt: append
 auto-exit: true
+budget: none
 ---
 
 You are a scout agent. Quickly investigate a codebase and return structured findings.

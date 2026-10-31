@@ -139,7 +139,6 @@ Every native-tool spawn re-sets the session keys from the live tool context (`ex
 | `PI_SUBAGENT_NAME`    | subagents  | worker display name                                            |
 | `PI_SUBAGENT_MAX_CONCURRENT` | user | cap on simultaneous subagent spawns (default 3; <1 unlimited) |
 | `PI_PIDX_MAX_INLINE`  | user       | pidx inline-output cap before spill (default 2000)             |
-| `PI_READ_LEDGER`      | user       | `0` disables piread's per-repo read ledger                     |
 | `PI_DASH_PORT`        | user       | dashboard server port (`npm run dashboard`; default 8787)      |
 | `PI_DASH_SESSIONS_DIR`| user       | dashboard sessions tree to index (default `~/.pi/agent/sessions`) |
 | `PI_DASH_SESSION_BUDGET` | user  | dashboard per-session cost budget in USD for alerts (0 disables) |

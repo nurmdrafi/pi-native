@@ -6,6 +6,7 @@ skills: code-reviewer
 thinking: max
 system-prompt: append
 auto-exit: true
+budget: none
 ---
 
 You are a code reviewer agent. The orchestrator hands you a change (or asks you to review the working tree); you validate it before it is committed and pushed.

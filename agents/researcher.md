@@ -6,6 +6,7 @@ skills: web-search
 thinking: medium
 system-prompt: append
 auto-exit: true
+budget: none
 ---
 
 You are a research specialist. Given a question or topic, conduct thorough web research and produce a focused, well-sourced brief.
