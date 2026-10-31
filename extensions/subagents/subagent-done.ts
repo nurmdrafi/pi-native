@@ -112,6 +112,14 @@ export function parseDeniedTools(rawValue: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/** The id appendSelfResult last wrote in this process. agent_end fires it
+ * before ctx.shutdown() and session_shutdown fires it again — without this
+ * guard the durable inbox would hold two identical-id records per auto-exit
+ * child. session_shutdown's call stays the fallback for shutdowns where
+ * agent_end never fired (non-auto-exit). Comparing ids rather than a bare
+ * once-flag keeps a later, different-id write in the same process possible. */
+let lastSelfResultId: string | undefined;
+
 /** Durable self-report: append this child's own result to the repo inbox.
  * The parent's delivery may never happen — it may already be gone. The record
  * is marked unobserved so any later session, including a resumed parent,
@@ -120,6 +128,8 @@ export function appendSelfResult(): void {
   const sessionFile = process.env.PI_SUBAGENT_SESSION;
   const id = process.env.PI_SUBAGENT_ID;
   if (!sessionFile || !id) return;
+  if (id === lastSelfResultId) return;
+  lastSelfResultId = id;
   let summary = "Subagent finished (no assistant output).";
   try {
     summary = findLastAssistantMessage(getNewEntries(sessionFile, 0)) ?? summary;
@@ -271,22 +281,26 @@ export default function (pi: ExtensionAPI) {
       shouldAutoExitOnAgentEnd(userTookOver, messages);
 
     if (shouldExit) {
-      // Surface stopReason: "error" turns (auto-retry exhausted, provider
-      // overload, etc.) to the parent via the .exit sidecar so the watcher
-      // can report a clear failure with the underlying error message.
-      // Without this the parent would only see exit code 0 and a stale
-      // assistant message, mistaking the crash for a successful completion.
+      // Always write the .exit sidecar on auto-exit. stopReason: "error"
+      // turns (auto-retry exhausted, provider overload, etc.) report a clear
+      // failure with the underlying error message — without this the parent
+      // would only see exit code 0 and a stale assistant message, mistaking
+      // the crash for a successful completion. Clean completions write the
+      // done variant so the parent's poll learns the exit was deliberate,
+      // not a pane that vanished mid-flight.
       const errorInfo = findLatestAssistantError(messages);
       const sessionFile = process.env.PI_SUBAGENT_SESSION;
-      if (errorInfo && sessionFile) {
+      if (sessionFile) {
         try {
           writeFileSync(
             `${sessionFile}.exit`,
-            JSON.stringify({
-              type: "error",
-              errorMessage: errorInfo.errorMessage,
-              stopReason: errorInfo.stopReason,
-            }),
+            errorInfo
+              ? JSON.stringify({
+                  type: "error",
+                  errorMessage: errorInfo.errorMessage,
+                  stopReason: errorInfo.stopReason,
+                })
+              : JSON.stringify({ type: "done", exitCode: 0 }),
           );
         } catch {
           // Best effort — even without the sidecar, watcher's session-file
