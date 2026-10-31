@@ -11,7 +11,7 @@
  * Pure logic lives here so tests need no tmux; the watcher in index.ts wires
  * these pieces into the poll loop and injects the actual interrupt/kill.
  */
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
 export interface BudgetDims {
   wallClockSec?: number;
@@ -138,50 +138,87 @@ export interface BudgetMeterState {
 
 /**
  * Incremental meter over a pi session JSONL: counts assistant messages and
- * sums provider-reported cost totals. Keeps a byte offset so each update
- * parses only newly appended complete lines; malformed lines are skipped.
- * A missing or unreadable file meters as zero.
+ * sums provider-reported cost totals. Keeps a BYTE offset so each update
+ * reads and parses only newly appended bytes (the 1 Hz watcher tick is
+ * O(delta), never O(file)); malformed lines are skipped. A file that
+ * shrank (truncated or replaced) is re-read from byte zero and its content
+ * re-derived — the file is the meter's source of truth. A missing or
+ * unreadable file meters as zero. `bytesRead` is a monotonic test hook:
+ * it proves reads are proportional to growth, not to file size.
  */
 export function createSessionBudgetMeter(sessionFile: string): {
   update(): BudgetMeterState;
+  readonly bytesRead: number;
 } {
   let offset = 0;
   let turns = 0;
   let costUsd = 0;
+  let totalBytesRead = 0;
 
   return {
+    get bytesRead() {
+      return totalBytesRead;
+    },
     update(): BudgetMeterState {
-      let content: string;
+      // Fresh fd per tick: a persistent handle would keep reading a replaced
+      // file's old inode long after the path moved to a new one.
+      let fd: number;
       try {
-        content = readFileSync(sessionFile, "utf8");
+        fd = openSync(sessionFile, "r");
       } catch {
         return { turns, costUsd };
       }
-      if (content.length <= offset) return { turns, costUsd };
-
-      const fresh = content.slice(offset);
-      const lastNewline = fresh.lastIndexOf("\n");
-      if (lastNewline === -1) return { turns, costUsd };
-
-      const complete = fresh.slice(0, lastNewline + 1);
-      offset += complete.length;
-      for (const line of complete.split("\n")) {
-        if (line.trim() === "") continue;
-        let entry: unknown;
-        try {
-          entry = JSON.parse(line);
-        } catch {
-          continue;
+      try {
+        let size = fstatSync(fd).size;
+        if (size < offset) {
+          // Truncated or replaced: start over from byte zero and re-derive
+          // the counters from the file's current content.
+          offset = 0;
+          turns = 0;
+          costUsd = 0;
         }
-        if ((entry as { type?: unknown })?.type !== "message") continue;
-        const message = (entry as { message?: { role?: unknown; usage?: unknown } }).message;
-        if (!message || message.role !== "assistant") continue;
-        turns += 1;
-        const cost = (message.usage as { cost?: { total?: unknown } } | undefined)?.cost;
-        const total = cost?.total;
-        if (typeof total === "number" && Number.isFinite(total)) costUsd += total;
+        if (size <= offset) return { turns, costUsd };
+
+        const want = size - offset;
+        const buf = Buffer.allocUnsafe(want);
+        let got = 0;
+        while (got < want) {
+          const n = readSync(fd, buf, got, want - got, offset + got);
+          if (n <= 0) break;
+          got += n;
+        }
+        if (got === 0) return { turns, costUsd };
+        totalBytesRead += got;
+
+        const fresh = buf.subarray(0, got);
+        // Only complete lines advance the offset; a torn tail line waits for
+        // the next tick. A newline byte can never appear inside a multi-byte
+        // UTF-8 sequence, so the slice is always a whole-character boundary.
+        const lastNewline = fresh.lastIndexOf(0x0a);
+        if (lastNewline === -1) return { turns, costUsd };
+
+        const complete = fresh.subarray(0, lastNewline + 1);
+        offset += complete.length;
+        for (const line of complete.toString("utf8").split("\n")) {
+          if (line.trim() === "") continue;
+          let entry: unknown;
+          try {
+            entry = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if ((entry as { type?: unknown })?.type !== "message") continue;
+          const message = (entry as { message?: { role?: unknown; usage?: unknown } }).message;
+          if (!message || message.role !== "assistant") continue;
+          turns += 1;
+          const cost = (message.usage as { cost?: { total?: unknown } } | undefined)?.cost;
+          const total = cost?.total;
+          if (typeof total === "number" && Number.isFinite(total)) costUsd += total;
+        }
+        return { turns, costUsd };
+      } finally {
+        closeSync(fd);
       }
-      return { turns, costUsd };
     },
   };
 }

@@ -207,6 +207,95 @@ describe("session budget metering", () => {
   it("tolerates a missing session file", () => {
     const meter = createSessionBudgetMeter(join(tmpdir(), "budget-meter-absent.jsonl"));
     assert.deepEqual(meter.update(), { turns: 0, costUsd: 0 });
+    assert.equal(meter.bytesRead, 0, "no bytes read when the file is missing");
+  });
+});
+
+describe("incremental byte-offset meter reads", () => {
+  let dir = "";
+  const setup = () => {
+    dir = mkdtempSync(join(tmpdir(), "budget-meter-incr-"));
+    return dir;
+  };
+  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+
+  const line = (cost: number) =>
+    JSON.stringify({
+      type: "message",
+      message: { role: "assistant", usage: { cost: { total: cost } } },
+    });
+
+  it("append-only growth reads only the new bytes", () => {
+    const d = setup();
+    try {
+      const file = join(d, "session.jsonl");
+      // A file big enough that a whole-file re-read per tick would show.
+      const head = Array.from({ length: 400 }, (_, i) => line(i * 0.001)).join("\n") + "\n";
+      writeFileSync(file, head, "utf8");
+      const meter = createSessionBudgetMeter(file);
+      assert.equal(meter.bytesRead, 0, "counter starts at zero");
+      meter.update();
+      const afterHead = meter.bytesRead;
+      assert.equal(afterHead, Buffer.byteLength(head), "first update reads the file once");
+
+      const appended = line(9.5) + "\n";
+      writeFileSync(file, appended, { flag: "a" });
+      meter.update();
+      assert.equal(
+        meter.bytesRead - afterHead,
+        Buffer.byteLength(appended),
+        "second update reads only the appended bytes, not the whole file",
+      );
+
+      meter.update(); // no growth: no new bytes read
+      assert.equal(meter.bytesRead, afterHead + Buffer.byteLength(appended));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("truncation resets the offset and re-meters the new content", () => {
+    const d = setup();
+    try {
+      const file = join(d, "session.jsonl");
+      const first = [line(0.25), line(0.5), line(0.75)].join("\n") + "\n";
+      writeFileSync(file, first, "utf8");
+      const meter = createSessionBudgetMeter(file);
+      assert.equal(meter.update().turns, 3);
+
+      // Replaced by a shorter file: the meter re-reads from byte zero and
+      // the new file becomes the source of truth (counters re-derived).
+      const second = line(1.5) + "\n";
+      writeFileSync(file, second, "utf8");
+      const m = meter.update();
+      assert.equal(m.turns, 1, "meters the replacement file from scratch");
+      assert.ok(Math.abs(m.costUsd - 1.5) < 1e-9);
+
+      // And the meter keeps following growth of the replacement file.
+      writeFileSync(file, line(0.5) + "\n", { flag: "a" });
+      assert.equal(meter.update().turns, 2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("still meters content and cost correctly from byte-offset reads", () => {
+    const d = setup();
+    try {
+      const file = join(d, "session.jsonl");
+      // Multi-byte UTF-8 inside a line: byte offsets must not corrupt parsing.
+      const msg = JSON.stringify({
+        type: "message",
+        message: { role: "assistant", usage: { cost: { total: 2 } }, text: "café — ünïcode ✓" },
+      });
+      writeFileSync(file, msg + "\n", "utf8");
+      const meter = createSessionBudgetMeter(file);
+      const m = meter.update();
+      assert.equal(m.turns, 1);
+      assert.ok(Math.abs(m.costUsd - 2) < 1e-9);
+    } finally {
+      cleanup();
+    }
   });
 });
 

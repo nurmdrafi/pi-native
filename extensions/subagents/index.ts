@@ -14,6 +14,7 @@ import {
   unlinkSync,
   statSync,
 } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import {
   isMuxAvailable,
@@ -72,7 +73,7 @@ import {
   type EnforcedBudget,
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
-import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, type SubagentHistoryExtra } from "./inbox.ts";
+import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -2263,6 +2264,7 @@ async function launchSubagent(
   const gitBaselinePath = prepareGitBaseline(
     join(artifactDir, `${id}.git-baseline.json`),
     targetCwdForSession,
+    boundedGitAsync,
   );
   if (gitBaselinePath) {
     envParts.push(`PI_SUBAGENT_BASELINE=${shellEscape(gitBaselinePath)}`);
@@ -2526,6 +2528,73 @@ function synthesizeLostResult(
   };
 }
 
+// ── Delivery-path git bounds and the child/parent files_changed merge ──
+
+/** Bound for every git exec the result-delivery path makes. A wedged git
+ * (hung mount, stale index lock) must never stall delivery — it is the
+ * parent's one-shot funnel for the child's outcome. Both runners stay
+ * fail-soft: a timeout kill is just another git failure. */
+const GIT_BOUND_MS = 5_000;
+
+const boundedGitSync: GitRunner = (args) =>
+  execFileSync("git", args, {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: GIT_BOUND_MS,
+  }) as string;
+
+const boundedGitAsync: AsyncGitRunner = (args, cb) => {
+  try {
+    execFile(
+      "git",
+      args,
+      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: GIT_BOUND_MS },
+      (err, stdout) => cb(err ? null : (stdout as string)),
+    );
+  } catch {
+    cb(null);
+  }
+};
+
+/** The child's own durable record for `id`, if it self-reported before the
+ * parent delivered (same id, observedByParent false). The drain keeps the
+ * LAST record per id, so a parent record that omits files_changed — its git
+ * delta failed — would strip the child's already-durable value from the
+ * durable view. Returns the last matching record, or null. */
+function findChildSelfReport(
+  id: string,
+  repoRoot: string,
+): { files_changed?: string[]; files_changed_source?: "git_status_delta" } | null {
+  const inboxPath = process.env.PI_SUBAGENT_INBOX || resultInboxPath(repoRoot);
+  let raw: string;
+  try {
+    raw = readFileSync(inboxPath, "utf8");
+  } catch {
+    return null;
+  }
+  let found: { files_changed?: string[]; files_changed_source?: "git_status_delta" } | null = null;
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const rec = JSON.parse(line) as {
+        id?: unknown;
+        files_changed?: unknown;
+        files_changed_source?: unknown;
+      };
+      if (rec.id !== id || !Array.isArray(rec.files_changed)) continue;
+      found = {
+        files_changed: rec.files_changed as string[],
+        ...(rec.files_changed_source === "git_status_delta"
+          ? { files_changed_source: "git_status_delta" }
+          : {}),
+      };
+    } catch {
+      // Crash-torn line: skip it — a later record for the same id still wins.
+    }
+  }
+  return found;
+}
+
 /** Append a finished (or synthesized) result to the child's repo durable
  * inbox — always BEFORE in-memory delivery, so the result survives pane,
  * parent, or extension-process death. `historyExtra` (files the child read,
@@ -2580,7 +2649,7 @@ function deliverSubagentResult(
   // only — the drain-managed inbox record stays lean.
   let historyExtra: SubagentHistoryExtra | undefined;
   if (running.gitBaselinePath) {
-    const filesChanged = computeFilesChanged(running.gitBaselinePath);
+    const filesChanged = computeFilesChanged(running.gitBaselinePath, boundedGitSync);
     if (filesChanged) {
       // Scope-intersect: when the child carried a scope, attribute only the
       // changes inside it — the whole-repo baseline would otherwise bill
@@ -2591,11 +2660,20 @@ function deliverSubagentResult(
         : filesChanged;
       result.files_changed_source = "git_status_delta";
       const filesRead = extractFilesRead(result.sessionFile ?? running.sessionFile);
-      const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged);
+      const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged, boundedGitSync);
       historyExtra = {
         ...(filesRead?.length ? { files_read: filesRead } : {}),
         ...(diff ? { diff } : {}),
       };
+    } else if (!result.files_changed) {
+      // Parent delta null (git failed / baseline unreadable): adopt the
+      // child's already-durable files_changed instead of stripping it — the
+      // drain keeps the last record per id, and this record is the last.
+      const child = findChildSelfReport(running.id, repoRootFor(running.cwd ?? process.cwd()));
+      if (child?.files_changed) {
+        result.files_changed = child.files_changed;
+        result.files_changed_source = child.files_changed_source ?? "git_status_delta";
+      }
     }
   }
   persistResultRecord(running, result, synthesized, historyExtra);
