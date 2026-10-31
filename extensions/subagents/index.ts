@@ -25,6 +25,7 @@ import {
   sendInterrupt,
   shellEscape,
   readScreen,
+  isPaneNotFound,
   listLiveSurfaces,
 } from "./tmux.ts";
 
@@ -1108,30 +1109,392 @@ function resolveRunningByName(name: string):
   return { error: `Ambiguous subagent name "${requestedName}". Matches: ${candidates}` };
 }
 
+/** How long a steer waits for a lost pane to heal (watcher restart or entry
+ *  finalization) before giving up, and how often it rechecks. */
+const STEER_HEAL_WAIT_MS = 5_000;
+const STEER_HEAL_STEP_MS = 200;
+
 /**
  * Type a follow-up message into a running subagent's live pane. Newlines are
  * collapsed to spaces because each newline submits a turn in the child's TUI
  * editor; a multi-line message would otherwise fire as several partial turns.
+ *
+ * A `can't find pane` failure is a race, not a verdict: the pane died moments
+ * ago and the watcher is either restarting it (the entry's surface swaps) or
+ * finalizing the entry (a pane_lost result is delivered). Wait briefly for
+ * either outcome instead of stranding the message on a pane being replaced.
  */
-function steerSubagent(
+async function steerSubagent(
   running: RunningSubagent,
   message: string,
   send: (surface: string, command: string) => void = sendCommand,
-): { ok: true } | { error: string } {
+  opts: { healWaitMs?: number; stepMs?: number } = {},
+): Promise<{ ok: true } | { error: string }> {
   const flattened = message.replace(/\s*\n\s*/g, " ").trim();
-  try {
-    send(running.surface, flattened);
-    return { ok: true };
-  } catch (error: any) {
-    return {
-      error:
-        `Failed to deliver message to subagent "${running.name}" via tmux: ` +
-        `${error?.message ?? String(error)}`,
-    };
+  const waitMs = opts.healWaitMs ?? STEER_HEAL_WAIT_MS;
+  const stepMs = opts.stepMs ?? STEER_HEAL_STEP_MS;
+  const deadline = Date.now() + waitMs;
+  let surface = running.surface;
+  for (;;) {
+    try {
+      send(surface, flattened);
+      return { ok: true };
+    } catch (error: any) {
+      if (!isPaneNotFound(error)) {
+        return {
+          error:
+            `Failed to deliver message to subagent "${running.name}" via tmux: ` +
+            `${error?.message ?? String(error)}`,
+        };
+      }
+      // The watcher already delivered pane_lost and finalized this entry —
+      // steering is over; a resend resolves to the resume path instead.
+      if (!runningSubagents.has(running.id)) {
+        return {
+          error:
+            `Sub-agent "${running.name}" lost its pane and its run has ended. ` +
+            `Send the message again — the name now resolves to its session and ` +
+            `the resend resumes it in a fresh pane.`,
+        };
+      }
+      // The watcher restarted the child in a replacement pane — deliver there.
+      if (running.surface !== surface) {
+        surface = running.surface;
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        return {
+          error:
+            `Failed to deliver message to subagent "${running.name}" via tmux: ` +
+            `${error?.message ?? String(error)} ` +
+            `(pane loss did not heal within ${Math.round(waitMs / 1000)}s — retry, or send ` +
+            `the message again to resume the session).`,
+        };
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, stepMs));
+    }
   }
 }
 
-function handleSubagentSteer(
+/**
+ * Deliver a launch script to a subagent pane, healing one pane-loss race.
+ *
+ * The target pane was created moments ago by createSurface; when it dies
+ * inside the shell-settling window before respawn-pane reaches it, tmux
+ * answers `can't find pane` and the launch used to die on a raw tmux error.
+ * Re-split (createSurface re-derives a live split origin on its own) and
+ * deliver once to the replacement pane. Returns the surface the script
+ * actually landed on so callers keep tracking the live pane. Any other
+ * failure propagates unchanged; a failure on the replacement pane throws a
+ * contextual error naming the subagent and the action to take.
+ */
+function deliverLaunchScript(
+  name: string,
+  command: string,
+  opts: { surface: string; scriptPath: string; preamble: (surface: string) => string },
+  deps: {
+    create?: (name: string) => string;
+    send?: (
+      surface: string,
+      command: string,
+      options?: { scriptPath?: string; scriptPreamble?: string },
+    ) => string | void;
+  } = {},
+): string {
+  const create = deps.create ?? createSurface;
+  const send = deps.send ?? sendLongCommand;
+  try {
+    send(opts.surface, command, {
+      scriptPath: opts.scriptPath,
+      scriptPreamble: opts.preamble(opts.surface),
+    });
+    return opts.surface;
+  } catch (err) {
+    if (!isPaneNotFound(err)) throw err;
+  }
+  const healed = create(name);
+  try {
+    send(healed, command, { scriptPath: opts.scriptPath, scriptPreamble: opts.preamble(healed) });
+    return healed;
+  } catch (err) {
+    throw new Error(
+      `Failed to deliver the launch script to subagent "${name}": its pane was lost ` +
+        `twice (first ${opts.surface}, then replacement ${healed}); recovery was ` +
+        `attempted and failed: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Retry the subagent call.`,
+    );
+  }
+}
+
+/**
+ * Resume a finished subagent session by name (the subagent_message tool's
+ * resume branch). Extracted from the tool execute so unexpected throws — a
+ * pane lost mid-delivery, a recovery that failed — surface as an actionable
+ * { error } result instead of escaping as a raw tmux error.
+ */
+async function resumeSubagentByName(
+  params: { name?: string; message?: string },
+  ctx: { sessionManager: { getSessionId(): string; getSessionDir(): string } },
+): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
+  const requestedName = params.name?.trim() ?? "";
+  const pi = latestPi;
+  if (!pi) throw new Error("Subagents extension API is unavailable; cannot resume.");
+  try {
+    const message = params.message;
+    const name = requestedName; // identity preservation: the resumed run reclaims its name
+    const { autoExit, interactive } = resolveResumeLaunchBehavior();
+    const startTime = Date.now();
+    const id = Math.random().toString(16).slice(2, 10);
+
+    // Resolve the name to its session file via this session's registry.
+    const parentArtifactDir = getArtifactDir(
+      ctx.sessionManager.getSessionDir(),
+      ctx.sessionManager.getSessionId(),
+    );
+    const entry = resolveNameInRegistry(parentArtifactDir, requestedName);
+    if (!entry) {
+      const known = Object.keys(readNameRegistry(parentArtifactDir));
+      const err =
+        `No subagent named "${requestedName}" in this session. ` +
+        (known.length > 0
+          ? `Known subagents: ${known.join(", ")}.`
+          : "No subagents have been spawned in this session yet.");
+      return { content: [{ type: "text" as const, text: err }], details: { error: err } };
+    }
+
+    const sessionPath = entry.sessionFile;
+    if (!sessionPath || !existsSync(sessionPath)) {
+      const err =
+        `Subagent "${requestedName}" is registered but its session file is gone ` +
+        `(${sessionPath}). It cannot be resumed. Spawn a fresh subagent instead.`;
+      return { content: [{ type: "text" as const, text: err }], details: { error: err } };
+    }
+
+    // Guard: never resume a session that is still running — two processes
+    // mutating the same .jsonl corrupts it. Steer it by name instead.
+    for (const r of runningSubagents.values()) {
+      if (resolve(r.sessionFile) === resolve(sessionPath)) {
+        const err = `Subagent "${requestedName}" is still running as "${r.name}". Your message will steer it; resending as a steer.`;
+        return handleSubagentSteer({ name: r.name, message: params.message });
+      }
+    }
+
+    // Reconstruct the sandbox from the snapshot written at spawn time.
+    // Without it we cannot safely resume: relaunching bare would load every
+    // global extension + the full toolset. Refuse rather than escalate.
+    const loadout = readSubagentLoadout(sessionPath);
+    if (!loadout) {
+      const err =
+        `Cannot safely resume "${requestedName}": no sandbox snapshot found for this session ` +
+        `(it predates sandboxed resume, or its .loadout.json sidecar was removed). ` +
+        `Resuming would relaunch with all global extensions and the full toolset, so this is refused. ` +
+        `Re-run the task as a fresh subagent instead.`;
+      return { content: [{ type: "text" as const, text: err }], details: { error: err } };
+    }
+
+    const resumedSessionId = entry.sessionId ?? getSessionId(sessionPath) ?? requestedName;
+
+    // Record entry count before resuming so we can extract new messages.
+    // Count lines cheaply (no per-line JSON.parse) so resuming a large
+    // transcript doesn't block the UI.
+    const entryCountBefore = countSessionEntryLines(sessionPath);
+
+    let surface = createSurface(name);
+    await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
+
+    // Build pi resume command
+    const parts = ["pi", "--session", shellEscape(sessionPath)];
+
+    // Load subagent-done extension so the agent can self-terminate if needed
+    const subagentDonePath = join(SUBAGENTS_DIR, "subagent-done.ts");
+    parts.push("-e", shellEscape(subagentDonePath));
+
+    const sessionId = ctx.sessionManager.getSessionId();
+    const artifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), sessionId);
+    const activityFile = getSubagentActivityFile(artifactDir, id);
+    mkdirSync(dirname(activityFile), { recursive: true });
+
+    // Replay the model, identity, and default-deny tool/extension sandbox.
+    applySandboxToParts(parts, loadout, { artifactDir, name });
+
+    let resumeMsgFile: string | undefined;
+    if (message) {
+      const msgTimestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      resumeMsgFile = join(
+        artifactDir,
+        "subagent-resume",
+        `${name
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, "")
+          .replace(/\s+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "") || "resume"}-${msgTimestamp}.md`,
+      );
+      mkdirSync(dirname(resumeMsgFile), { recursive: true });
+      writeFileSync(resumeMsgFile, message, "utf8");
+      parts.push(shellEscape(`@${resumeMsgFile}`));
+    }
+
+    // Build env prefix — replay the snapshot's config dir + spawn whitelist
+    // so the resumed process resolves the same agents/extensions and keeps
+    // the same nested-spawn restriction it originally ran with.
+    const resumeEnvParts: string[] = [];
+    const resumeAgentDir = loadout.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? null;
+    if (resumeAgentDir) {
+      resumeEnvParts.push(`PI_CODING_AGENT_DIR=${shellEscape(resumeAgentDir)}`);
+    }
+    if (loadout.spawnable && loadout.spawnable.length > 0) {
+      resumeEnvParts.push(`PI_SUBAGENT_ALLOWED=${shellEscape(loadout.spawnable.join(","))}`);
+    }
+    if (loadout.agent) {
+      resumeEnvParts.push(`PI_SUBAGENT_AGENT=${shellEscape(loadout.agent)}`);
+    }
+    resumeEnvParts.push(`PI_SUBAGENT_NAME=${shellEscape(name)}`);
+    resumeEnvParts.push(`PI_SUBAGENT_SESSION=${shellEscape(sessionPath)}`);
+    resumeEnvParts.push(`PI_SUBAGENT_ID=${shellEscape(id)}`);
+    resumeEnvParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
+    if (autoExit) {
+      resumeEnvParts.push(`PI_SUBAGENT_AUTO_EXIT=1`);
+    }
+    const resumeEnvPrefix = resumeEnvParts.join(" ") + " ";
+
+    // Resume in the subagent's original cwd so its tools (safe_bash, edits)
+    // operate where they did before.
+    const resumeCdPrefix = loadout.cwd ? `cd ${shellEscape(loadout.cwd)} && ` : "";
+
+    const command = `${resumeCdPrefix}${resumeEnvPrefix}${parts.join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
+    const launchScriptFile = join(
+      artifactDir,
+      "subagent-scripts",
+      `${name
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "") || "resume"}-resume-${Date.now()}.sh`,
+    );
+    surface = deliverLaunchScript(name, command, {
+      surface,
+      scriptPath: launchScriptFile,
+      preamble: (s) =>
+        [
+          `# Subagent resume script for ${name}`,
+          `# Generated: ${new Date().toISOString()}`,
+          `# Session: ${sessionPath}`,
+          `# Surface: ${s}`,
+          ...(resumeMsgFile ? [`# Resume message file: ${resumeMsgFile}`] : []),
+        ].join("\n"),
+    });
+
+    await spawnQueue.acquire();
+
+    // Register as a running subagent for widget tracking
+    const running: RunningSubagent = {
+      id,
+      name,
+      task: message ?? "",
+      surface,
+      autoExit: true,
+      startTime,
+      sessionFile: sessionPath,
+      parentArtifactDir,
+      launchScriptFile,
+      activityFile,
+      interactive,
+      ...budgetRuntimeFields(
+        // Resume is the recovery path: the loadout budget that killed the
+        // child would re-breach instantly against the re-metered session
+        // file, so resumes run unenforced.
+        null,
+        surface,
+        sessionPath,
+      ),
+      statusState: createStatusState({
+        source: "pi",
+        startTimeMs: startTime,
+      }),
+    };
+    runningSubagents.set(id, running);
+    startWidgetRefresh();
+    startStatusRefresh(pi);
+
+    // Fire-and-forget watcher
+    const watcherAbort = new AbortController();
+    running.abortController = watcherAbort;
+
+    watchSubagent(running, watcherAbort.signal)
+      .then((result) => {
+        updateWidget();
+
+        if (running.delivered) return; // sweep already finalized this entry
+        const allEntries = getNewEntries(sessionPath, entryCountBefore);
+        const summary = findLastAssistantMessage(allEntries) ??
+          (result.errorMessage
+            ? `Subagent error: ${result.errorMessage}`
+            : result.exitCode !== 0
+              ? `Resumed session exited with code ${result.exitCode}`
+              : "Resumed session exited without new output");
+        const presentation = resolveResultPresentation(
+          { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId },
+          name,
+        );
+        running.delivered = true;
+        persistResultRecord(running, { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId });
+
+        pi.sendMessage(
+          {
+            customType: "subagent_result",
+            content: presentation,
+            display: true,
+            details: {
+              name,
+              task: message,
+              exitCode: result.exitCode,
+              elapsed: result.elapsed,
+              sessionFile: sessionPath,
+              sessionId: resumedSessionId,
+              ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+            },
+          },
+          { triggerTurn: true, deliverAs: "steer" },
+        );
+      })
+      .catch((err) => {
+        updateWidget();
+        pi.sendMessage(
+          {
+            customType: "subagent_result",
+            content: `Resume error: ${err?.message ?? String(err)}`,
+            display: true,
+            details: { name, error: err?.message },
+          },
+          { triggerTurn: true, deliverAs: "steer" },
+        );
+      })
+      .finally(() => spawnQueue.release());
+
+    return {
+      content: [{ type: "text", text: `Session "${name}" resumed.` }],
+      details: {
+        id,
+        name,
+        sessionId: resumedSessionId,
+        sessionFile: sessionPath,
+        launchScriptFile,
+        status: "started",
+      },
+    };
+  } catch (err) {
+    const failure = err instanceof Error ? err.message : String(err);
+    const text =
+      `Could not resume subagent "${params.name}": ${failure} ` +
+      `(pane loss recovery was attempted and failed). The session file is intact — ` +
+      `send the message again to retry the resume in a fresh pane.`;
+    return { content: [{ type: "text" as const, text }], details: { error: text } };
+  }
+}
+
+async function handleSubagentSteer(
   params: { name?: string; message?: string },
   send: (surface: string, command: string) => void = sendCommand,
 ) {
@@ -1153,7 +1516,7 @@ function handleSubagentSteer(
   const now = Date.now();
   observeRunningSubagent(running, now);
 
-  const steer = steerSubagent(running, message, send);
+  const steer = await steerSubagent(running, message, send);
   if ("error" in steer) {
     return {
       content: [{ type: "text" as const, text: steer.error }],
@@ -1270,6 +1633,9 @@ export const __test__ = {
   deliverSubagentResult,
   adoptPendingSubagents,
   steerSubagent,
+  resumeSubagentByName,
+  deliverLaunchScript,
+  launchSubagent,
   handleSubagentSteer,
   resolveResultPresentation,
   resolveResumeLaunchBehavior,
@@ -1338,7 +1704,7 @@ async function launchSubagent(
   // Use pre-created surface (parallel mode) or create a new one.
   // For new surfaces, pause briefly so the shell is ready before sending the command.
   const surfacePreCreated = !!options?.surface;
-  const surface = options?.surface ?? createSurface(params.name);
+  let surface = options?.surface ?? createSurface(params.name);
   if (!surfacePreCreated) {
     await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
   }
@@ -1415,13 +1781,15 @@ async function launchSubagent(
       .replace(/^-|-$/g, "") || "subagent"}-${id}.sh`;
     const launchScriptFile = join(artifactDir, "subagent-scripts", launchScriptName);
 
-    sendLongCommand(surface, command, {
+    surface = deliverLaunchScript(params.name, command, {
+      surface,
       scriptPath: launchScriptFile,
-      scriptPreamble: [
-        `# Claude Code subagent launch script for ${params.name}`,
-        `# Generated: ${new Date().toISOString()}`,
-        `# Surface: ${surface}`,
-      ].join("\n"),
+      preamble: (s) =>
+        [
+          `# Claude Code subagent launch script for ${params.name}`,
+          `# Generated: ${new Date().toISOString()}`,
+          `# Surface: ${s}`,
+        ].join("\n"),
     });
 
     const running: RunningSubagent = {
@@ -1564,14 +1932,16 @@ async function launchSubagent(
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "") || "subagent"}-${id}.sh`;
   const launchScriptFile = join(artifactDir, "subagent-scripts", launchScriptName);
-  sendLongCommand(surface, command, {
+  surface = deliverLaunchScript(params.name, command, {
+    surface,
     scriptPath: launchScriptFile,
-    scriptPreamble: [
-      `# Subagent launch script for ${params.name}`,
-      `# Generated: ${new Date().toISOString()}`,
-      `# Session: ${subagentSessionFile}`,
-      `# Surface: ${surface}`,
-    ].join("\n"),
+    preamble: (s) =>
+      [
+        `# Subagent launch script for ${params.name}`,
+        `# Generated: ${new Date().toISOString()}`,
+        `# Session: ${subagentSessionFile}`,
+        `# Surface: ${s}`,
+      ].join("\n"),
   });
 
   const running: RunningSubagent = {
@@ -2034,11 +2404,16 @@ function finalizeLostSubagent(
 async function watchSubagent(
   running: RunningSubagent,
   signal: AbortSignal,
-  deps: { poll?: typeof pollForExit; restart?: (r: RunningSubagent) => Promise<boolean> } = {},
+  deps: {
+    poll?: typeof pollForExit;
+    restart?: (r: RunningSubagent) => Promise<boolean>;
+    readScreen?: (surface: string, lines?: number) => string;
+  } = {},
 ): Promise<SubagentResult> {
   const { name, task, startTime, sessionFile } = running;
   const poll = deps.poll ?? pollForExit;
   const restart = deps.restart ?? restartLostPane;
+  const readPane = deps.readScreen ?? readScreen;
 
   try {
     let result: Awaited<ReturnType<typeof pollForExit>>;
@@ -2094,9 +2469,13 @@ async function watchSubagent(
       }
 
       if (!summary) {
-        summary = readScreen(running.surface, 200)
-          .replace(/__SUBAGENT_DONE_\d+__/, "")
-          .trimEnd();
+        // The pane may already be gone (child exited and closed it) — screen
+        // capture is best-effort; the exit-code fallback below still reports.
+        try {
+          summary = readPane(running.surface, 200)
+            .replace(/__SUBAGENT_DONE_\d+__/, "")
+            .trimEnd();
+        } catch {}
       }
 
       if (!summary) {
@@ -2523,7 +2902,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           running = await launchSubagent(params, ctx);
         } catch (err) {
           spawnQueue.release();
-          throw err;
+          // Wrap, never re-throw verbatim: a raw tmux failure here (pane lost
+          // mid-launch) reads as internal noise; the wrap names the subagent.
+          throw new Error(
+            `Failed to launch subagent "${params.name}": ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          );
         } finally {
           if (reservedName) reservedNames.delete(reservedName);
         }
@@ -2830,248 +3214,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         // ── Resume a finished session by name ──
-        const message = params.message;
-        const name = requestedName; // identity preservation: the resumed run reclaims its name
-        const { autoExit, interactive } = resolveResumeLaunchBehavior();
-        const startTime = Date.now();
-        const id = Math.random().toString(16).slice(2, 10);
-
-        // Resolve the name to its session file via this session's registry.
-        const parentArtifactDir = getArtifactDir(
-          ctx.sessionManager.getSessionDir(),
-          ctx.sessionManager.getSessionId(),
-        );
-        const entry = resolveNameInRegistry(parentArtifactDir, requestedName);
-        if (!entry) {
-          const known = Object.keys(readNameRegistry(parentArtifactDir));
-          const err =
-            `No subagent named "${requestedName}" in this session. ` +
-            (known.length > 0
-              ? `Known subagents: ${known.join(", ")}.`
-              : "No subagents have been spawned in this session yet.");
-          return { content: [{ type: "text" as const, text: err }], details: { error: err } };
-        }
-
-        const sessionPath = entry.sessionFile;
-        if (!sessionPath || !existsSync(sessionPath)) {
-          const err =
-            `Subagent "${requestedName}" is registered but its session file is gone ` +
-            `(${sessionPath}). It cannot be resumed. Spawn a fresh subagent instead.`;
-          return { content: [{ type: "text" as const, text: err }], details: { error: err } };
-        }
-
-        // Guard: never resume a session that is still running — two processes
-        // mutating the same .jsonl corrupts it. Steer it by name instead.
-        for (const r of runningSubagents.values()) {
-          if (resolve(r.sessionFile) === resolve(sessionPath)) {
-            const err = `Subagent "${requestedName}" is still running as "${r.name}". Your message will steer it; resending as a steer.`;
-            return handleSubagentSteer({ name: r.name, message: params.message });
-          }
-        }
-
-        // Reconstruct the sandbox from the snapshot written at spawn time.
-        // Without it we cannot safely resume: relaunching bare would load every
-        // global extension + the full toolset. Refuse rather than escalate.
-        const loadout = readSubagentLoadout(sessionPath);
-        if (!loadout) {
-          const err =
-            `Cannot safely resume "${requestedName}": no sandbox snapshot found for this session ` +
-            `(it predates sandboxed resume, or its .loadout.json sidecar was removed). ` +
-            `Resuming would relaunch with all global extensions and the full toolset, so this is refused. ` +
-            `Re-run the task as a fresh subagent instead.`;
-          return { content: [{ type: "text" as const, text: err }], details: { error: err } };
-        }
-
-        const resumedSessionId = entry.sessionId ?? getSessionId(sessionPath) ?? requestedName;
-
-        // Record entry count before resuming so we can extract new messages.
-        // Count lines cheaply (no per-line JSON.parse) so resuming a large
-        // transcript doesn't block the UI.
-        const entryCountBefore = countSessionEntryLines(sessionPath);
-
-        const surface = createSurface(name);
-        await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
-
-        // Build pi resume command
-        const parts = ["pi", "--session", shellEscape(sessionPath)];
-
-        // Load subagent-done extension so the agent can self-terminate if needed
-        const subagentDonePath = join(SUBAGENTS_DIR, "subagent-done.ts");
-        parts.push("-e", shellEscape(subagentDonePath));
-
-        const sessionId = ctx.sessionManager.getSessionId();
-        const artifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), sessionId);
-        const activityFile = getSubagentActivityFile(artifactDir, id);
-        mkdirSync(dirname(activityFile), { recursive: true });
-
-        // Replay the model, identity, and default-deny tool/extension sandbox.
-        applySandboxToParts(parts, loadout, { artifactDir, name });
-
-        let resumeMsgFile: string | undefined;
-        if (params.message) {
-          const msgTimestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-          resumeMsgFile = join(
-            artifactDir,
-            "subagent-resume",
-            `${name
-              .toLowerCase()
-              .replace(/[^a-z0-9\s-]/g, "")
-              .replace(/\s+/g, "-")
-              .replace(/-+/g, "-")
-              .replace(/^-|-$/g, "") || "resume"}-${msgTimestamp}.md`,
-          );
-          mkdirSync(dirname(resumeMsgFile), { recursive: true });
-          writeFileSync(resumeMsgFile, message, "utf8");
-          parts.push(shellEscape(`@${resumeMsgFile}`));
-        }
-
-        // Build env prefix — replay the snapshot's config dir + spawn whitelist
-        // so the resumed process resolves the same agents/extensions and keeps
-        // the same nested-spawn restriction it originally ran with.
-        const resumeEnvParts: string[] = [];
-        const resumeAgentDir = loadout.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? null;
-        if (resumeAgentDir) {
-          resumeEnvParts.push(`PI_CODING_AGENT_DIR=${shellEscape(resumeAgentDir)}`);
-        }
-        if (loadout.spawnable && loadout.spawnable.length > 0) {
-          resumeEnvParts.push(`PI_SUBAGENT_ALLOWED=${shellEscape(loadout.spawnable.join(","))}`);
-        }
-        if (loadout.agent) {
-          resumeEnvParts.push(`PI_SUBAGENT_AGENT=${shellEscape(loadout.agent)}`);
-        }
-        resumeEnvParts.push(`PI_SUBAGENT_NAME=${shellEscape(name)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_SESSION=${shellEscape(sessionPath)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_ID=${shellEscape(id)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
-        if (autoExit) {
-          resumeEnvParts.push(`PI_SUBAGENT_AUTO_EXIT=1`);
-        }
-        const resumeEnvPrefix = resumeEnvParts.join(" ") + " ";
-
-        // Resume in the subagent's original cwd so its tools (safe_bash, edits)
-        // operate where they did before.
-        const resumeCdPrefix = loadout.cwd ? `cd ${shellEscape(loadout.cwd)} && ` : "";
-
-        const command = `${resumeCdPrefix}${resumeEnvPrefix}${parts.join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
-        const launchScriptFile = join(
-          artifactDir,
-          "subagent-scripts",
-          `${name
-            .toLowerCase()
-            .replace(/[^a-z0-9\s-]/g, "")
-            .replace(/\s+/g, "-")
-            .replace(/-+/g, "-")
-            .replace(/^-|-$/g, "") || "resume"}-resume-${Date.now()}.sh`,
-        );
-        sendLongCommand(surface, command, {
-          scriptPath: launchScriptFile,
-          scriptPreamble: [
-            `# Subagent resume script for ${name}`,
-            `# Generated: ${new Date().toISOString()}`,
-            `# Session: ${sessionPath}`,
-            `# Surface: ${surface}`,
-            ...(resumeMsgFile ? [`# Resume message file: ${resumeMsgFile}`] : []),
-          ].join("\n"),
-        });
-
-        await spawnQueue.acquire();
-
-        // Register as a running subagent for widget tracking
-        const running: RunningSubagent = {
-          id,
-          name,
-          task: message,
-          surface,
-          autoExit: true,
-          startTime,
-          sessionFile: sessionPath,
-          parentArtifactDir,
-          launchScriptFile,
-          activityFile,
-          interactive,
-          ...budgetRuntimeFields(
-            // Resume is the recovery path: the loadout budget that killed the
-            // child would re-breach instantly against the re-metered session
-            // file, so resumes run unenforced.
-            null,
-            surface,
-            sessionPath,
-          ),
-          statusState: createStatusState({
-            source: "pi",
-            startTimeMs: startTime,
-          }),
-        };
-        runningSubagents.set(id, running);
-        startWidgetRefresh();
-        startStatusRefresh(pi);
-
-        // Fire-and-forget watcher
-        const watcherAbort = new AbortController();
-        running.abortController = watcherAbort;
-
-        watchSubagent(running, watcherAbort.signal)
-          .then((result) => {
-            updateWidget();
-
-            if (running.delivered) return; // sweep already finalized this entry
-            const allEntries = getNewEntries(sessionPath, entryCountBefore);
-            const summary = findLastAssistantMessage(allEntries) ??
-              (result.errorMessage
-                ? `Subagent error: ${result.errorMessage}`
-                : result.exitCode !== 0
-                  ? `Resumed session exited with code ${result.exitCode}`
-                  : "Resumed session exited without new output");
-            const presentation = resolveResultPresentation(
-              { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId },
-              name,
-            );
-            running.delivered = true;
-            persistResultRecord(running, { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId });
-
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: presentation,
-                display: true,
-                details: {
-                  name,
-                  task: message,
-                  exitCode: result.exitCode,
-                  elapsed: result.elapsed,
-                  sessionFile: sessionPath,
-                  sessionId: resumedSessionId,
-                  ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-                },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          })
-          .catch((err) => {
-            updateWidget();
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: `Resume error: ${err?.message ?? String(err)}`,
-                display: true,
-                details: { name, error: err?.message },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          })
-          .finally(() => spawnQueue.release());
-
-        return {
-          content: [{ type: "text", text: `Session "${name}" resumed.` }],
-          details: {
-            id,
-            name,
-            sessionId: resumedSessionId,
-            sessionFile: sessionPath,
-            launchScriptFile,
-            status: "started",
-          },
-        };
+        return await resumeSubagentByName(params, ctx);
       },
     });
 

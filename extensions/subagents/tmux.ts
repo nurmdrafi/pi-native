@@ -88,7 +88,7 @@ function runTmux(args: string[]): string {
 
 /** Whether an error is tmux reporting the target pane does not exist — the
  *  one pane failure creation can self-heal from by re-targeting the split. */
-function isPaneNotFound(err: unknown): boolean {
+export function isPaneNotFound(err: unknown): boolean {
   const stderr = typeof (err as { stderr?: unknown })?.stderr === "string" ? (err as { stderr: string }).stderr : "";
   const message = err instanceof Error ? err.message : String(err ?? "");
   return /can't find pane/i.test(stderr) || /can't find pane/i.test(message);
@@ -311,17 +311,13 @@ export function sendLongCommand(
   // the completion sentinel echo lives — alive after the script exits, matching
   // the old typed-in-a-shell behavior; the watcher closes the pane on
   // completion. SHELL falls back to /bin/sh for portability.
-  execFileSync(
-    "tmux",
-    [
-      "respawn-pane",
-      "-k",
-      "-t",
-      surface,
-      `bash ${shellEscape(scriptPath)}; exec "\${SHELL:-/bin/sh}"`,
-    ],
-    { encoding: "utf8" },
-  );
+  runTmux([
+    "respawn-pane",
+    "-k",
+    "-t",
+    surface,
+    `bash ${shellEscape(scriptPath)}; exec "\${SHELL:-/bin/sh}"`,
+  ]);
   return scriptPath;
 }
 
