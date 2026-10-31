@@ -72,7 +72,7 @@ import {
   type EnforcedBudget,
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
-import { appendSubagentResult, drainSubagentResults, repoRootFor } from "./inbox.ts";
+import { appendSubagentResult, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, repoRootFor, type SubagentHistoryExtra } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -694,6 +694,12 @@ interface SubagentResult {
   errorMessage?: string;
   /** Aggregate usage/model/tool stats parsed from the completed session file. */
   stats?: SessionStats;
+  /** Repo-relative paths added/removed/status-changed since the spawn-time git
+   * baseline (sorted, cap 200) — populated at delivery time when a baseline
+   * exists; absent when git was unavailable or the child cwd was not a repo. */
+  files_changed?: string[];
+  /** Provenance marker: files_changed came from a git status delta. */
+  files_changed_source?: "git_status_delta";
 }
 
 /**
@@ -708,6 +714,9 @@ interface RunningSubagent {
   startTime: number;
   sessionFile: string;
   parentArtifactDir?: string;
+  /** Spawn-time git baseline snapshot (PI_SUBAGENT_BASELINE) when the child
+   * cwd was inside a git repo; diffs at delivery time for files_changed. */
+  gitBaselinePath?: string;
   launchScriptFile?: string;
   activityFile?: string;
   activity?: SubagentActivityState;
@@ -2115,6 +2124,17 @@ async function launchSubagent(
   // The pane id does not exist until the pane is created below; the pane's
   // own tmux environment carries it, so expand it at run time inside the pane.
   envParts.push(`PI_SUBAGENT_SURFACE="\${TMUX_PANE}"`);
+  // Spawn-time git baseline for files_changed tracking. The path resolves
+  // synchronously so PI_SUBAGENT_BASELINE rides the pane env; the porcelain
+  // capture and file write run asynchronously — a spawn must never block on
+  // git, and the child guards a missing/empty baseline itself.
+  const gitBaselinePath = prepareGitBaseline(
+    join(artifactDir, `${id}.git-baseline.json`),
+    targetCwdForSession,
+  );
+  if (gitBaselinePath) {
+    envParts.push(`PI_SUBAGENT_BASELINE=${shellEscape(gitBaselinePath)}`);
+  }
   const envPrefix = envParts.join(" ") + " ";
 
   // Pass task and skill prompts to the sub-agent.
@@ -2185,6 +2205,7 @@ async function launchSubagent(
     startTime,
     sessionFile: subagentSessionFile,
     parentArtifactDir: artifactDir,
+    ...(gitBaselinePath ? { gitBaselinePath } : {}),
     launchScriptFile,
     activityFile,
     interactive: effectiveInteractive,
@@ -2373,31 +2394,38 @@ function synthesizeLostResult(
 
 /** Append a finished (or synthesized) result to the child's repo durable
  * inbox — always BEFORE in-memory delivery, so the result survives pane,
- * parent, or extension-process death. */
+ * parent, or extension-process death. `historyExtra` (files the child read,
+ * a capped diff) goes to the append-only history file only. */
 function persistResultRecord(
   running: RunningSubagent,
   result: SubagentResult,
   synthesized?: "pane_lost" | "stalled",
+  historyExtra?: SubagentHistoryExtra,
 ): void {
-  appendSubagentResult({
-    id: running.id,
-    ts: Date.now(),
-    name: result.name,
-    task: result.task,
-    agent: running.agent,
-    sessionFile: result.sessionFile ?? running.sessionFile,
-    sessionId: result.sessionId,
-    parentSessionId: running.parentSessionId ?? null,
-    observedByParent: true,
-    repoRoot: repoRootFor(running.cwd ?? process.cwd()),
-    summary: result.summary,
-    error: result.error,
-    errorMessage: result.errorMessage,
-    exitCode: result.exitCode,
-    elapsed: result.elapsed,
-    ...(result.stats ? { stats: result.stats } : {}),
-    ...(synthesized ? { synthesized } : {}),
-  });
+  appendSubagentResult(
+    {
+      id: running.id,
+      ts: Date.now(),
+      name: result.name,
+      task: result.task,
+      agent: running.agent,
+      sessionFile: result.sessionFile ?? running.sessionFile,
+      sessionId: result.sessionId,
+      parentSessionId: running.parentSessionId ?? null,
+      observedByParent: true,
+      repoRoot: repoRootFor(running.cwd ?? process.cwd()),
+      summary: result.summary,
+      error: result.error,
+      errorMessage: result.errorMessage,
+      exitCode: result.exitCode,
+      elapsed: result.elapsed,
+      ...(result.stats ? { stats: result.stats } : {}),
+      ...(synthesized ? { synthesized } : {}),
+      ...(result.files_changed ? { files_changed: result.files_changed } : {}),
+      ...(result.files_changed_source ? { files_changed_source: result.files_changed_source } : {}),
+    },
+    historyExtra,
+  );
 }
 
 /** Deliver a subagent result exactly once: durable inbox write first, then
@@ -2412,7 +2440,25 @@ function deliverSubagentResult(
 ): void {
   if (running.delivered) return; // sweep or watcher already finalized this entry
   running.delivered = true;
-  persistResultRecord(running, result, synthesized);
+  // Parent-side git delta at delivery time: the same baseline the child
+  // diffs against, so both records agree modulo seconds of skew. The richer
+  // context (files the child read, a capped diff) enriches the history file
+  // only — the drain-managed inbox record stays lean.
+  let historyExtra: SubagentHistoryExtra | undefined;
+  if (running.gitBaselinePath) {
+    const filesChanged = computeFilesChanged(running.gitBaselinePath);
+    if (filesChanged) {
+      result.files_changed = filesChanged;
+      result.files_changed_source = "git_status_delta";
+      const filesRead = extractFilesRead(result.sessionFile ?? running.sessionFile);
+      const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged);
+      historyExtra = {
+        ...(filesRead?.length ? { files_read: filesRead } : {}),
+        ...(diff ? { diff } : {}),
+      };
+    }
+  }
+  persistResultRecord(running, result, synthesized, historyExtra);
   runningSubagents.delete(running.id);
   try {
     running.abortController?.abort();
@@ -2441,6 +2487,7 @@ function deliverSubagentResult(
         ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
         ...(result.stats ? { stats: result.stats } : {}),
         ...(synthesized ? { synthesized } : {}),
+        ...(result.files_changed ? { files_changed: result.files_changed } : {}),
       },
     },
     { triggerTurn: true, deliverAs: "steer" },
@@ -3719,6 +3766,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             }
           }
           contentLines.push(theme.fg("muted", keyHint("app.tools.expand", "to expand")));
+        }
+
+        // files_changed renders capped; the full list stays in details only —
+        // a drain bystander echoes records into every repo session's
+        // transcript, so an uncapped list is a token-cost leak.
+        const filesChanged: string[] = Array.isArray(details.files_changed) ? details.files_changed : [];
+        if (filesChanged.length > 0) {
+          contentLines.push("");
+          for (const p of filesChanged.slice(0, 20)) {
+            contentLines.push(theme.fg("dim", `- ${p}`.slice(0, Math.max(1, width - 6))));
+          }
+          if (filesChanged.length > 20) {
+            contentLines.push(theme.fg("muted", `… +${filesChanged.length - 20} more`));
+          }
         }
 
         // Render via Box for background + padding, with blank line above for separation

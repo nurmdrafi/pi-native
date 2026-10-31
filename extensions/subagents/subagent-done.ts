@@ -17,7 +17,7 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder } from "./activity.ts";
-import { appendSubagentResult, repoRootFor } from "./inbox.ts";
+import { appendSubagentResult, computeFilesChanged, repoRootFor } from "./inbox.ts";
 import { findLastAssistantMessage, getNewEntries } from "./session.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
@@ -135,6 +135,11 @@ export function appendSelfResult(): void {
     summary = findLastAssistantMessage(getNewEntries(sessionFile, 0)) ?? summary;
   } catch {}
   const startMs = Number(process.env.PI_SUBAGENT_START_MS);
+  // Child-side git delta against the spawn-time baseline the parent wrote
+  // (PI_SUBAGENT_BASELINE). Missing/empty/unreadable baseline or any git
+  // failure simply omits the fields — the spawn must never depend on git.
+  const baselinePath = process.env.PI_SUBAGENT_BASELINE;
+  const filesChanged = baselinePath ? computeFilesChanged(baselinePath) : null;
   appendSubagentResult({
     id,
     ts: Date.now(),
@@ -148,6 +153,9 @@ export function appendSelfResult(): void {
     exitCode: 0,
     elapsed: Number.isFinite(startMs) && startMs > 0 ? Math.max(0, Math.floor((Date.now() - startMs) / 1000)) : 0,
     observedByParent: false,
+    ...(filesChanged
+      ? { files_changed: filesChanged, files_changed_source: "git_status_delta" as const }
+      : {}),
   });
 }
 
