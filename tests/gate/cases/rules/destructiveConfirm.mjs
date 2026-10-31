@@ -502,4 +502,72 @@ export const cases = [
       ]);
     },
   ],
+  // ---- H2 subagent autonomy: PI_SUBAGENT_NAME set -> fail closed instantly,
+  // never open a confirm dialog (children run unattended; nobody answers) ----
+  [
+    "H2 subagent: destructive with approving UI still blocks, spy never called",
+    "blocked",
+    async (pi) => {
+      process.env.PI_SUBAGENT_NAME = "gate-case-sub";
+      try {
+        let asks = 0;
+        const r = await bash(pi, "git reset --hard HEAD~1", {
+          hasUI: true,
+          mode: "tui",
+          ui: {
+            confirm: async () => {
+              asks++;
+              return true;
+            },
+          },
+        });
+        if (!r.blocked || asks !== 0)
+          return {
+            blocked: false,
+            reason: `subagent destructive approved or dialoged (blocked=${r.blocked}, dialog asks=${asks})`,
+          };
+        return r.reason?.includes("not permitted for subagents")
+          ? r
+          : { blocked: false, reason: `wrong text: ${r.reason}` };
+      } finally {
+        delete process.env.PI_SUBAGENT_NAME;
+      }
+    },
+  ],
+  [
+    "H2 subagent: destructive headless blocks with subagent text",
+    "blocked",
+    async (pi) => {
+      process.env.PI_SUBAGENT_NAME = "gate-case-sub";
+      try {
+        const r = await bash(pi, "git reset --hard HEAD~1", {
+          hasUI: false,
+          mode: "print",
+        });
+        return r.blocked && r.reason?.includes("not permitted for subagents")
+          ? r
+          : { blocked: false, reason: `wrong outcome: ${JSON.stringify(r)}` };
+      } finally {
+        delete process.env.PI_SUBAGENT_NAME;
+      }
+    },
+  ],
+  [
+    "H2 subagent: non-subagent with UI approval still passes (regression)",
+    "pass",
+    async (pi) => bash(pi, "git reset --hard HEAD~1"),
+  ],
+  [
+    "H2 subagent: non-subagent headless still asks in chat (regression)",
+    "blocked",
+    async (pi) => {
+      const r = await bash(pi, "git reset --hard HEAD~1", {
+        hasUI: false,
+        mode: "print",
+      });
+      return r.blocked && r.reason?.includes("ask in chat")
+        ? r
+        : { blocked: false, reason: `wrong outcome: ${JSON.stringify(r)}` };
+    },
+  ],
 ];

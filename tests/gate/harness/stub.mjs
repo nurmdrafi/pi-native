@@ -22,6 +22,11 @@ if (!existsSync(join(pkgLink, 'package.json'))) {
   symlinkSync(join(globalRoot, '@earendil-works', 'pi-coding-agent'), pkgLink, 'dir');
 }
 
+// The stub simulates a parent session: a subagent marker inherited from the
+// host env would flip every confirm into fail-closed subagent mode. Scrub it
+// here — subagent-mode cases set PI_SUBAGENT_NAME inside the case itself.
+delete process.env.PI_SUBAGENT_NAME;
+
 const gate = await import(join(ROOT, 'extensions', 'permission-gate', 'index.ts'));
 
 /** fresh gate instance (all gate state lives inside the factory) */

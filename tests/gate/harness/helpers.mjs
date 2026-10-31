@@ -55,6 +55,12 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 // tool name `pibash` — the path a real session takes; the dedicated P2 cases
 // pass `{ tool: "bash" }` to exercise the built-in name.
 
+// The harness simulates a parent session: a subagent marker inherited from
+// the host env would flip every confirm into fail-closed subagent mode.
+// Scrub it before the gate import — subagent-mode cases set
+// PI_SUBAGENT_NAME inside the case itself.
+delete process.env.PI_SUBAGENT_NAME;
+
 const gate = await import("../../../extensions/permission-gate/index.ts");
 const rc = await import("../../../extensions/permission-gate/rules/read-coverage.ts"); // S5: hash plumbing units
 

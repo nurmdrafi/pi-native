@@ -382,7 +382,10 @@ export default function (pi: ExtensionAPI) {
   /** H2 approval ladder, shared by destructive bash segments and the S4
    * fix 8 write/edit protected-path confirm: chat approval (promptApproves)
    * → remembered verbatim approval (2 min) → UI dialog with timeout (S-3) →
-   * fail closed. Returns undefined = allowed; otherwise the block reason. */
+   * fail closed. Subagent sessions (PI_SUBAGENT_NAME) short-circuit the
+   * whole ladder: instant fail-closed, never a dialog — children run
+   * unattended and nobody would answer it. Returns undefined = allowed;
+   * otherwise the block reason. */
   const confirmDestructive = async (
     key: string,
     subject: string,
@@ -393,6 +396,11 @@ export default function (pi: ExtensionAPI) {
         }
       | undefined,
   ): Promise<string | undefined> => {
+    // read at call time, not import time — the marker can differ per
+    // invocation in the same process
+    if (process.env.PI_SUBAGENT_NAME) {
+      return `Permission Gate (Destructive): ${subject} is not permitted for subagents — continue without it and note it in your report.`;
+    }
     if (promptApproves) return undefined;
     if (
       lastApprovedDestructive &&
