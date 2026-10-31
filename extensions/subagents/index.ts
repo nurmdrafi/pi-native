@@ -31,6 +31,7 @@ import {
 } from "./tmux.ts";
 
 import {
+  type SessionEntry,
   countSessionEntryLines,
   findLastAssistantMessage,
   getNewEntries,
@@ -737,6 +738,10 @@ interface RunningSubagent {
   /** Spawn-time git baseline snapshot (PI_SUBAGENT_BASELINE) when the child
    * cwd was inside a git repo; diffs at delivery time for files_changed. */
   gitBaselinePath?: string;
+  /** Child session entries parsed once at result-build time (watcher exit
+   * or loss synthesis) and reused by extractFilesRead at delivery, so the
+   * session file is parsed once per delivery. In-memory only. */
+  parsedEntries?: SessionEntry[] | null;
   /** Derived file scope. "declared" (from the files param) participates in
    * spawn-queue locking; "parsed" (from task text) is context-only — prior-
    * work injection and display. Survives pane-loss restarts because the
@@ -2496,6 +2501,7 @@ function synthesizeLostResult(
   // entries — the loss path used to re-read the whole file three times.
   const fileExists = existsSync(sessionFile);
   const entries = fileExists ? getNewEntries(sessionFile, 0) : [];
+  running.parsedEntries = entries;
   const lastText = fileExists ? findLastAssistantMessage(entries) : null;
   const stats = fileExists ? summarizeStatsFromEntries(entries) : null;
   const sessionId = fileExists ? getSessionIdFromEntries(entries) : null;
@@ -2665,7 +2671,10 @@ function deliverSubagentResult(
           ? intersectFilesChanged(filesChanged, running.scope.paths, repoRootFor(running.cwd ?? process.cwd()))
           : filesChanged;
       result.files_changed_source = "git_status_delta";
-      const filesRead = extractFilesRead(result.sessionFile ?? running.sessionFile);
+      const filesRead = extractFilesRead(
+        result.sessionFile ?? running.sessionFile,
+        running.parsedEntries,
+      );
       const diff = gitDiffForBaseline(running.gitBaselinePath, filesChanged, boundedGitSync);
       historyExtra = {
         ...(filesRead?.length ? { files_read: filesRead } : {}),
@@ -3120,6 +3129,7 @@ async function watchSubagent(
     // summary + stats + id from the same entries (was three full parses).
     let summary: string;
     const piEntries = existsSync(sessionFile) ? getNewEntries(sessionFile, 0) : null;
+    running.parsedEntries = piEntries;
     if (piEntries) {
       summary =
         findLastAssistantMessage(piEntries) ??

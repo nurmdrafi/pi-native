@@ -24,7 +24,7 @@ import "./test-env.ts";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -214,6 +214,55 @@ describe("extractFilesRead", () => {
       assert.equal(read[0], "f00.ts");
       assert.equal(read[49], "f49.ts");
       assert.equal(extractFilesRead(join(dir, "missing.jsonl")), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("extractFilesRead pre-parsed entries", () => {
+  it("uses pre-parsed entries without parsing the session file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inbox-files-preparsed-"));
+    try {
+      const sessionFile = join(dir, "child.jsonl");
+      // On-disk content names a DIFFERENT path: a file-based parse would win
+      // if the pre-parsed entries were ignored.
+      writeFileSync(
+        sessionFile,
+        JSON.stringify({
+          message: { role: "assistant", content: [{ type: "toolCall", name: "piread", arguments: { path: "src/on-disk.ts" } }] },
+        }) + "\n",
+        "utf8",
+      );
+      const entries: Record<string, any>[] = [
+        { message: { role: "assistant", content: [{ type: "toolCall", name: "piread", arguments: { path: "src/only-in-entries.ts" } }] } },
+        { message: { role: "assistant", content: [{ type: "toolCall", name: "piedit", arguments: { path: "src/also-entries.ts" } }] } },
+      ];
+      const parseCalls = { parses: 0 };
+      assert.deepEqual(
+        extractFilesRead(sessionFile, entries, { parseCalls }),
+        ["src/also-entries.ts", "src/only-in-entries.ts"],
+      );
+      assert.equal(parseCalls.parses, 0, "pre-parsed entries must not trigger a file parse");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts exactly one parse on the file-based path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inbox-files-parsecount-"));
+    try {
+      const sessionFile = join(dir, "child.jsonl");
+      writeFileSync(
+        sessionFile,
+        JSON.stringify({
+          message: { role: "assistant", content: [{ type: "toolCall", name: "piread", arguments: { path: "src/a.ts" } }] },
+        }) + "\n",
+        "utf8",
+      );
+      const parseCalls = { parses: 0 };
+      assert.deepEqual(extractFilesRead(sessionFile, undefined, { parseCalls }), ["src/a.ts"]);
+      assert.equal(parseCalls.parses, 1, "the file-based path parses exactly once");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -444,6 +493,32 @@ describe("history file and drain interplay", () => {
     );
     rmSync(join(repoRoot, ".pi"), { recursive: true, force: true });
     assert.deepEqual(readRecentResults(repoRoot, 5), []);
+  });
+});
+
+describe("readRecentResults stat cache", () => {
+  it("reuses the cached parse while the history stat is unchanged and re-parses after a change", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "recent-cache-"));
+    try {
+      const historyPath = subagentHistoryPath(repoRoot);
+      mkdirSync(join(repoRoot, ".pi"), { recursive: true });
+      const line = (n: number) =>
+        JSON.stringify({ id: `c${n}`, ts: n, name: `n${n}`, files_changed: ["f"], summary: `s${n}` });
+      writeFileSync(historyPath, line(1) + "\n", "utf8");
+      const parseCalls = { parses: 0 };
+      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1"]);
+      assert.equal(parseCalls.parses, 1, "first read parses");
+      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1"]);
+      assert.equal(parseCalls.parses, 1, "an unchanged stat reuses the cached parse");
+      // The cache holds the full deduped tail; a different limit still slices.
+      assert.deepEqual(readRecentResults(repoRoot, 1, { parseCalls }).map((r) => r.id), ["c1"]);
+      assert.equal(parseCalls.parses, 1);
+      appendFileSync(historyPath, line(2) + "\n", "utf8"); // stat change
+      assert.deepEqual(readRecentResults(repoRoot, 10, { parseCalls }).map((r) => r.id), ["c1", "c2"]);
+      assert.equal(parseCalls.parses, 2, "a changed stat re-parses");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 });
 

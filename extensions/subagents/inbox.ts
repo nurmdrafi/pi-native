@@ -217,10 +217,26 @@ export function computeFilesChanged(baselinePath: string, gitFn: GitRunner = run
 
 /** Paths the child READ via read-ish tool calls (piread/piedit `path`
  * argument), extracted from its session file's toolCall entries: deduped,
- * sorted, capped at 50. Null when the session file is unreadable. */
-export function extractFilesRead(sessionFile: string): string[] | null {
+ * sorted, capped at 50. Null when the session file is unreadable.
+ * The delivery path hands in the entries it already parsed for
+ * stats/summary (`preParsedEntries`) so the session file is parsed once per
+ * delivery; the file path stays for every other caller. The optional
+ * `options.parseCalls` is a `{ parses }` tally incremented on each real file
+ * parse (test hook). */
+export function extractFilesRead(
+  sessionFile: string,
+  preParsedEntries?: ReadonlyArray<unknown> | null,
+  options?: { parseCalls?: { parses: number } },
+): string[] | null {
   try {
-    const entries = getNewEntries(sessionFile, 0) as unknown as Array<Record<string, any>>;
+    let source: ReadonlyArray<unknown>;
+    if (Array.isArray(preParsedEntries)) {
+      source = preParsedEntries;
+    } else {
+      if (options?.parseCalls) options.parseCalls.parses += 1;
+      source = getNewEntries(sessionFile, 0);
+    }
+    const entries = source as unknown as Array<Record<string, any>>;
     const paths = new Set<string>();
     for (const entry of entries) {
       const content = entry?.message?.content;
@@ -358,13 +374,41 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
   }
 }
 
+/** Stat-keyed cache for readRecentResults — an unchanged history file
+ * (same mtimeMs + size) returns the cached parse instead of re-reading the
+ * whole tail on every spawn. */
+const recentResultsCache = new Map<
+  string,
+  { mtimeMs: number; size: number; records: SubagentHistoryRecord[] }
+>();
+
 /** Read the last `limit` history records, skipping corrupt lines and keeping
- * the last line per id (child self-report, then the richer parent record). */
-export function readRecentResults(repoRoot: string, limit: number): SubagentHistoryRecord[] {
+ * the last line per id (child self-report, then the richer parent record).
+ * Cached by stat (mtimeMs + size); the cache holds the full deduped list so
+ * different `limit`s slice their own tails. The optional `options.parseCalls`
+ * is a `{ parses }` tally incremented on each real parse (test hook). */
+export function readRecentResults(
+  repoRoot: string,
+  limit: number,
+  options?: { parseCalls?: { parses: number } },
+): SubagentHistoryRecord[] {
   if (!Number.isFinite(limit) || limit <= 0) return [];
+  const historyPath = subagentHistoryPath(repoRoot);
+  let stat: { mtimeMs: number; size: number };
+  try {
+    const st = statSync(historyPath);
+    stat = { mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return [];
+  }
+  const hit = recentResultsCache.get(historyPath);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
+    return hit.records.slice(Math.max(0, hit.records.length - limit));
+  }
+  if (options?.parseCalls) options.parseCalls.parses += 1;
   let raw: string;
   try {
-    raw = readFileSync(subagentHistoryPath(repoRoot), "utf8");
+    raw = readFileSync(historyPath, "utf8");
   } catch {
     return [];
   }
@@ -379,6 +423,7 @@ export function readRecentResults(repoRoot: string, limit: number): SubagentHist
     }
   }
   const all = [...byId.values()];
+  recentResultsCache.set(historyPath, { mtimeMs: stat.mtimeMs, size: stat.size, records: all });
   return all.slice(Math.max(0, all.length - limit));
 }
 
@@ -469,18 +514,66 @@ export function buildPriorWorkBlock(
   return block;
 }
 
+type DrainFileStat = { mtimeMs: number; size: number } | null;
+
+/** turn_start drains re-run every turn; this gate keeps an UNCHANGED inbox
+ * (same mtimeMs + size, plus the drain state file's stat) from being
+ * re-read and re-parsed each time. Keyed per inbox path AND session id —
+ * the skip decision depends on which session is draining (own-parent
+ * records stay claimable by their parent). The state file's stat is part
+ * of the key so deleting it re-opens the gate instead of wedging it: with
+ * the state gone every record is fresh again and must be re-read. */
+const drainStatGate = new Map<string, { inbox: DrainFileStat; state: DrainFileStat }>();
+
+function statOf(path: string): DrainFileStat {
+  try {
+    const st = statSync(path);
+    return { mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+function sameFileStat(a: DrainFileStat, b: DrainFileStat): boolean {
+  if (a === null || b === null) return a === b;
+  return a.mtimeMs === b.mtimeMs && a.size === b.size;
+}
+
 /** Records not yet drained for this repo, oldest first. The spawning parent's
  * own records are skipped (it received the direct in-memory steer) but stay
- * claimable — another session in the repo still surfaces them. */
-export function drainSubagentResults(repoRoot: string, sessionId?: string | null): InboxRecord[] {
+ * claimable — another session in the repo still surfaces them. The optional
+ * `options.reads` is a `{ count }` tally incremented on each real inbox read
+ * (test hook for the stat gate). */
+export function drainSubagentResults(
+  repoRoot: string,
+  sessionId?: string | null,
+  options?: { reads?: { count: number } },
+): InboxRecord[] {
   const inboxPath = resultInboxPath(repoRoot);
-  let records: InboxRecord[] = [];
-  let readAtMs = 0;
-  let readAtSize = 0;
+  const statePath = drainStatePath(repoRoot);
+  const gateKey = `${inboxPath}\u0000${sessionId ?? ""}`;
+  // Gate marks record what a completed drain observed; a read AT stat older
+  // than the disk (an append raced us) re-opens the gate next drain.
+  const setGate = (inbox: DrainFileStat): void => {
+    drainStatGate.set(gateKey, { inbox, state: statOf(statePath) });
+  };
+  const stat = statOf(inboxPath);
+  const gate = drainStatGate.get(gateKey);
+  if (gate && sameFileStat(gate.inbox, stat) && sameFileStat(gate.state, statOf(statePath))) {
+    return [];
+  }
+  if (stat === null) {
+    // Missing file: nothing to drain. Record the observation so repeat
+    // turn_start drains skip straight past it; a newly created file changes
+    // the stat and is read normally.
+    setGate(null);
+    return [];
+  }
+  const readAtMs = stat.mtimeMs;
+  const readAtSize = stat.size;
+  let records: InboxRecord[];
   try {
-    const st = statSync(inboxPath);
-    readAtMs = st.mtimeMs;
-    readAtSize = st.size;
+    if (options?.reads) options.reads.count += 1;
     const raw = readFileSync(inboxPath, "utf8");
     records = raw
       .split("\n")
@@ -495,10 +588,9 @@ export function drainSubagentResults(repoRoot: string, sessionId?: string | null
         }
       });
   } catch {
+    // A transient read failure must never be cached as "drained".
     return [];
   }
-
-  const statePath = drainStatePath(repoRoot);
   let drainedIds: string[] = [];
   try {
     const state = JSON.parse(readFileSync(statePath, "utf8")) as { drained?: string[] };
@@ -510,14 +602,20 @@ export function drainSubagentResults(repoRoot: string, sessionId?: string | null
   // keep the last line — the parent's record is richer and marked observed.
   const byId = new Map(records.map((r) => [r.id, r]));
   const fresh = [...byId.values()].filter((r) => !seen.has(r.id));
-  if (fresh.length === 0) return [];
+  if (fresh.length === 0) {
+    setGate({ mtimeMs: readAtMs, size: readAtSize });
+    return [];
+  }
 
   // A record the spawning parent never observed surfaces even to that same
   // (resumed) session — the in-memory steer never happened.
   const toSurface = fresh.filter(
     (r) => r.observedByParent === false || !sessionId || r.parentSessionId !== sessionId,
   );
-  if (toSurface.length === 0) return [];
+  if (toSurface.length === 0) {
+    setGate({ mtimeMs: readAtMs, size: readAtSize });
+    return [];
+  }
 
   // Only surfaced records are marked drained — a record skipped because the
   // draining session IS its parent must stay claimable by other sessions.
@@ -537,10 +635,14 @@ export function drainSubagentResults(repoRoot: string, sessionId?: string | null
       if (st.mtimeMs === readAtMs && st.size === readAtSize) {
         writeFileSync(inboxPath, "", "utf8");
         unlinkSync(statePath);
+        // The compacted (empty) file's fresh stat is the safe skip point.
+        setGate(statOf(inboxPath));
+        return toSurface;
       }
     } catch {
       // Compaction is best-effort; the state file still prevents resurfacing.
     }
   }
+  setGate({ mtimeMs: readAtMs, size: readAtSize });
   return toSurface;
 }

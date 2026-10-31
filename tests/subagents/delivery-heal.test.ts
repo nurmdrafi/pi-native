@@ -23,13 +23,13 @@ import "./test-env.ts";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { __surfaceTest__ } from "../../extensions/subagents/tmux.ts";
 import { registerName, writeSubagentLoadout } from "../../extensions/subagents/session.ts";
-import { appendSubagentResult } from "../../extensions/subagents/inbox.ts";
+import { appendSubagentResult, drainSubagentResults } from "../../extensions/subagents/inbox.ts";
 
 // The spawn allowlist is captured when the extension module loads; scrub it
 // BEFORE importing the extension so these fixtures are not gated by whatever
@@ -476,5 +476,94 @@ describe("inbox drain delivery", () => {
     assert.equal(opts?.triggerTurn, true, "parent reclaims via a triggered turn");
     assert.equal(opts?.deliverAs, "steer");
     assert.ok(!msg.details.contextOnly, "not marked context-only");
+  });
+});
+
+// ── drain read gate: turn_start drains must not re-read an unchanged inbox ──
+
+describe("inbox drain read gate", () => {
+  const gateRecord = (root: string, id: string, parentSessionId: string, observed: boolean) => ({
+    id,
+    ts: Date.now(),
+    name: "w",
+    task: "t",
+    sessionFile: "/tmp/s.jsonl",
+    parentSessionId,
+    repoRoot: root,
+    summary: `body ${id}`,
+    exitCode: 0,
+    elapsed: 1,
+    observedByParent: observed,
+  });
+
+  it("skips the inbox read while the stat is unchanged and re-reads after a change", () => {
+    const root = mkdtempSync(join(tmpdir(), "inbox-gate-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    delete process.env.PI_SUBAGENT_INBOX;
+    try {
+      appendSubagentResult(gateRecord(root, "gate-1", "other-parent", false));
+      const reads = { count: 0 };
+      const first = drainSubagentResults(root, "gate-session", { reads });
+      assert.deepEqual(first.map((r) => r.id), ["gate-1"], "first drain surfaces the record");
+      assert.equal(reads.count, 1, "first drain reads the file");
+      const second = drainSubagentResults(root, "gate-session", { reads });
+      assert.deepEqual(second, [], "nothing new to surface");
+      assert.equal(reads.count, 1, "an unchanged stat skips the read");
+      appendSubagentResult(gateRecord(root, "gate-2", "other-parent", false)); // file touch
+      const third = drainSubagentResults(root, "gate-session", { reads });
+      assert.deepEqual(third.map((r) => r.id), ["gate-2"], "touched record surfaces");
+      assert.equal(reads.count, 2, "a changed stat re-reads");
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("re-reads when the drain state file is deleted", () => {
+    const root = mkdtempSync(join(tmpdir(), "inbox-gate-state-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    delete process.env.PI_SUBAGENT_INBOX;
+    try {
+      appendSubagentResult(gateRecord(root, "a", "elsewhere", true));
+      appendSubagentResult(gateRecord(root, "b", "gate-owner", true));
+      const reads = { count: 0 };
+      const first = drainSubagentResults(root, "gate-owner", { reads });
+      assert.deepEqual(first.map((r) => r.id), ["a"], "own record stays unclaimed");
+      assert.equal(reads.count, 1);
+      drainSubagentResults(root, "gate-owner", { reads });
+      assert.equal(reads.count, 1, "unchanged stat skips the read");
+      rmSync(join(root, ".pi", "subagent-results.drain.json"), { force: true });
+      const third = drainSubagentResults(root, "gate-owner", { reads });
+      assert.equal(reads.count, 2, "state deletion re-opens the gate");
+      assert.deepEqual(third.map((r) => r.id), ["a"], "records are fresh again once the state is gone");
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a missing inbox as a skip and still reads the file once it appears", () => {
+    const root = mkdtempSync(join(tmpdir(), "inbox-gate-missing-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    delete process.env.PI_SUBAGENT_INBOX;
+    try {
+      const reads = { count: 0 };
+      assert.deepEqual(drainSubagentResults(root, "gate-session", { reads }), []);
+      assert.deepEqual(drainSubagentResults(root, "gate-session", { reads }), []);
+      assert.equal(reads.count, 0, "a missing inbox never reaches the read");
+      appendSubagentResult(gateRecord(root, "late-1", "other-parent", false));
+      const surfaced = drainSubagentResults(root, "gate-session", { reads });
+      assert.deepEqual(surfaced.map((r) => r.id), ["late-1"], "a once-missing inbox is read when it appears");
+      assert.equal(reads.count, 1);
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
