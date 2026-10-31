@@ -1,21 +1,26 @@
 /**
- * Launch-delivery self-heal (spawn + resume flows).
+ * Atomic launch and launch-failure containment (spawn + resume flows).
  *
- * Defect: creating a subagent pane self-heals a dead split origin, but the
- * very next step — delivering the launch script with `tmux respawn-pane`
- * against the pane id the split just returned — had no recovery of its own.
- * A pane that died inside the shell-settling window between split and
- * respawn made spawn re-throw the raw `Command failed: tmux respawn-pane
- * ... can't find pane: %N` error, and resume throw it out of an execute
- * body with no catch at all.
+ * The old delivery model created a pane running the user's default shell,
+ * slept a fixed shell-ready delay, and delivered the launch script with
+ * `tmux respawn-pane -k` against the pane id the split returned. A pane that
+ * died inside that window made spawn re-throw raw `Command failed: tmux
+ * respawn-pane ... can't find pane: %N` errors, and resume throw out of an
+ * execute body with no catch at all.
  *
- * Fix: all three delivery sites (spawn claude, spawn pi, resume) share one
- * heal — on a pane-not-found failure the surface is re-created (createSurface
- * re-derives a live split origin) and the script is delivered once to the
- * replacement pane. A final failure throws a contextual error, the spawn
- * execute wraps whatever still escapes, and the resume execute converts
+ * Fix: the pane is BORN running the launch script — one atomic split-window
+ * whose command runs the script, signals the wait-for channel, and keeps an
+ * interactive shell. No default-shell window ever exists, so respawn-pane is
+ * never called on launch and the pane race cannot occur (dead-split-origin
+ * healing is exercised by the surface suite). What remains observable from
+ * the outside: the spawn execute wraps launch failures with context instead
+ * of re-throwing verbatim tmux errors, and the resume execute converts
  * unexpected throws into actionable { error } results.
  */
+// Scrub inherited child-identity env and redirect the durable inbox BEFORE any
+// extension import loads — every invocation style must get the same isolation.
+import "./test-env.ts";
+
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
@@ -24,6 +29,7 @@ import { tmpdir } from "node:os";
 
 import { __surfaceTest__ } from "../../extensions/subagents/tmux.ts";
 import { registerName, writeSubagentLoadout } from "../../extensions/subagents/session.ts";
+import { appendSubagentResult } from "../../extensions/subagents/inbox.ts";
 
 // The spawn allowlist is captured when the extension module loads; scrub it
 // BEFORE importing the extension so these fixtures are not gated by whatever
@@ -68,11 +74,11 @@ function fakeTmux(opts: {
   failAllRespawns?: boolean;
   respawnErr?: (target: string) => Error;
 }) {
-  const calls: { cmd: string; target: string | null }[] = [];
+  const calls: { cmd: string; target: string | null; args: string[] }[] = [];
   let splits = 0;
   const runner = (args: string[]): string => {
     const target = targetOf(args);
-    calls.push({ cmd: args[0], target });
+    calls.push({ cmd: args[0], target, args });
     switch (args[0]) {
       case "has-session":
         throw Object.assign(new Error("tmux exited 1"), { code: 1 });
@@ -100,7 +106,11 @@ function fakeTmux(opts: {
   };
   const targets = (cmd: string): (string | null)[] =>
     calls.filter((c) => c.cmd === cmd).map((c) => c.target);
-  return { runner, calls, targets };
+  /** Last argv element of the Nth call to cmd — where split-window carries
+   *  the pane command the new pane is born running. */
+  const paneCommandOf = (cmd: string, n = 0): string =>
+    calls.filter((c) => c.cmd === cmd)[n]?.args.at(-1) ?? "";
+  return { runner, calls, targets, paneCommandOf };
 }
 
 // ── fixtures ──
@@ -166,107 +176,36 @@ afterEach(() => {
   }
 });
 
-// ── the shared delivery heal ──
+// ── spawn flow: the pi launch site, end to end through launchSubagent ──
 
-describe("deliverLaunchScript (shared by spawn-claude, spawn-pi, resume)", () => {
-  it("heals a pane lost mid-delivery and returns the replacement pane", () => {
-    const dir = mkdtempSync(join(tmpdir(), "delivery-heal-unit-"));
-    const sends: { surface: string; preamble: string }[] = [];
-    let created = 0;
-
-    const surface = __test__.deliverLaunchScript(
-      "worker",
-      "cmd-x",
-      { surface: "%100", scriptPath: join(dir, "launch.sh"), preamble: (s) => `# Surface: ${s}` },
-      {
-        create: (name) => {
-          created += 1;
-          assert.equal(name, "worker");
-          return "%101";
-        },
-        send: (surface, _command, opts) => {
-          sends.push({ surface, preamble: opts?.scriptPreamble ?? "" });
-          if (surface === "%100") throw paneNotFoundErr(surface);
-        },
-      },
-    );
-
-    assert.equal(surface, "%101", "returns the healed surface so callers track the live pane");
-    assert.equal(created, 1, "re-splits exactly once");
-    assert.deepEqual(
-      sends.map((s) => s.surface),
-      ["%100", "%101"],
-      "delivers to the original pane, then the replacement",
-    );
-    assert.match(sends[1].preamble, /# Surface: %101/, "preamble reflects the replacement pane");
-  });
-
-  it("propagates unrelated tmux failures without re-splitting", () => {
-    const sends: string[] = [];
-    assert.throws(
-      () =>
-        __test__.deliverLaunchScript(
-          "worker",
-          "cmd-x",
-          { surface: "%100", scriptPath: "/tmp/x.sh", preamble: () => "" },
-          {
-            create: () => {
-              throw new Error("create must not run");
-            },
-            send: (surface) => {
-              sends.push(surface);
-              throw noServerErr("respawn-pane");
-            },
-          },
-        ),
-      /no server running/,
-    );
-    assert.deepEqual(sends, ["%100"], "no retry for non-pane failures");
-  });
-
-  it("throws a contextual error when the healed delivery also fails", () => {
-    assert.throws(
-      () =>
-        __test__.deliverLaunchScript(
-          "worker",
-          "cmd-x",
-          { surface: "%100", scriptPath: "/tmp/x.sh", preamble: () => "" },
-          {
-            create: () => "%101",
-            send: (surface) => {
-              throw paneNotFoundErr(surface);
-            },
-          },
-        ),
-      (err: Error) => {
-        assert.match(err.message, /Failed to deliver the launch script to subagent "worker"/);
-        assert.match(err.message, /retry/i);
-        assert.doesNotMatch(err.message, /^Command failed/, "not a verbatim tmux error");
-        return true;
-      },
-    );
-  });
-});
-
-// ── spawn flow: the pi delivery site, end to end through launchSubagent ──
-
-describe("launchSubagent delivery heal (pi flow)", () => {
-  it("re-splits and redelivers when the fresh pane dies before respawn", async () => {
+describe("launchSubagent atomic pane launch (pi flow)", () => {
+  it("succeeds with zero respawn-pane even when every respawn fails", async () => {
     const { agentDir, ctx } = freshRoot("worker");
     savedEnv["PI_CODING_AGENT_DIR"] = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
-    const fake = fakeTmux({ splitPanes: ["%100", "%101"], failRespawnOn: ["%100"] });
+    // The exact production defect shape: with atomic creation the launch
+    // never routes through respawn-pane, so respawn being unusable — the
+    // old pane race — cannot affect it at all.
+    const fake = fakeTmux({ splitPanes: ["%100"], failAllRespawns: true });
     __surfaceTest__.setTmuxRunner(fake.runner);
 
     const running = await __test__.launchSubagent(
-      { agent: "worker", task: "verify delivery heal", name: "heal-pi" } as never,
+      { agent: "worker", task: "verify atomic launch", name: "atomic-pi" } as never,
       ctx as never,
     );
 
-    assert.equal(running.surface, "%101", "tracks the replacement pane after the heal");
-    assert.deepEqual(fake.targets("respawn-pane"), ["%100", "%101"], "delivered to both panes");
-    assert.equal(fake.targets("split-window").length, 2, "split once, healed split once");
+    assert.ok(running, "launch succeeds despite respawn-pane being unusable");
+    assert.equal(running.surface, "%100", "surface is the pane the split returned");
+    assert.equal(fake.targets("respawn-pane").length, 0, "launch never respawns a pane");
+    assert.equal(fake.targets("split-window").length, 1, "exactly one split-window");
+    const paneCommand = fake.paneCommandOf("split-window");
+    assert.match(paneCommand, /bash '.+\.sh'/, "the pane is born running the launch script");
+    assert.match(paneCommand, /tmux wait-for -S pi-subagent-/, "signals the wake channel");
+    assert.ok(
+      paneCommand.includes(`bash '${running.launchScriptFile}'`),
+      "runs the archived launch script",
+    );
   });
 });
 
@@ -278,11 +217,8 @@ describe("subagent tool final-failure wrap", () => {
     savedEnv["PI_CODING_AGENT_DIR"] = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
-    const fake = fakeTmux({
-      splitPanes: ["%100"],
-      failAllRespawns: true,
-      respawnErr: (t) => noServerErr(`respawn-pane -k -t ${t}`),
-    });
+    // Atomic creation means launch failures come from the split itself.
+    const fake = fakeTmux({ failSplitFrom: 0, failSplitWith: noServerErr("split-window") });
     __surfaceTest__.setTmuxRunner(fake.runner);
 
     const tools: Record<string, unknown>[] = [];
@@ -324,7 +260,7 @@ describe("subagent tool final-failure wrap", () => {
 // ── resume flow: unexpected throws become actionable error results ──
 
 describe("resume error containment", () => {
-  it("returns an actionable error result when the pane is lost and recovery fails", async () => {
+  it("returns an actionable error result when pane creation fails", async () => {
     const { agentDir, projectDir, ctx } = freshRoot("worker");
     savedEnv["PI_CODING_AGENT_DIR"] = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -347,14 +283,9 @@ describe("resume error containment", () => {
       sessionId: "child-sid",
     });
 
-    // Split succeeds (%100), the pane dies before respawn, and the healing
-    // re-split also fails — the worst case the execute must contain.
-    const fake = fakeTmux({
-      splitPanes: ["%100"],
-      failSplitFrom: 1,
-      failSplitWith: noServerErr("split-window"),
-      failRespawnOn: ["%100"],
-    });
+    // The atomic pane creation itself fails — the worst case the execute
+    // must contain.
+    const fake = fakeTmux({ failSplitFrom: 0, failSplitWith: noServerErr("split-window") });
     __surfaceTest__.setTmuxRunner(fake.runner);
 
     const result = (await __test__.resumeSubagentByName(
@@ -368,5 +299,123 @@ describe("resume error containment", () => {
     assert.match(error, /again|retry/i, "tells the user what to do next");
     assert.doesNotMatch(error, /^Command failed/, "no raw tmux stderr");
     assert.match(result.content[0].text, /resumee/);
+  });
+});
+
+// ── durable inbox drain: stale dead-parent records must not task-steer ──
+
+describe("inbox drain delivery", () => {
+  it("delivers a dead-parent record to an unrelated session context-only (no trigger, no steer)", () => {
+    const root = mkdtempSync(join(tmpdir(), "inbox-unrelated-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    delete process.env.PI_SUBAGENT_INBOX;
+    appendSubagentResult({
+      id: "stale-1",
+      ts: Date.now(),
+      name: "Worker-old",
+      task: "old task",
+      sessionFile: "/tmp/old.jsonl",
+      parentSessionId: "dead-parent",
+      repoRoot: root,
+      summary: "stale result body",
+      exitCode: 0,
+      elapsed: 1,
+      observedByParent: false,
+    });
+
+    const handlers: Record<string, Function> = {};
+    const sent: { msg: any; opts: any }[] = [];
+    subagentsExtension({
+      on: (ev: string, fn: Function) => {
+        handlers[ev] = fn;
+      },
+      registerCommand: () => {},
+      registerMessageRenderer: () => {},
+      registerShortcut: () => {},
+      sendUserMessage: () => {},
+      sendMessage: (msg: any, opts: any) => {
+        sent.push({ msg, opts });
+      },
+      getAllTools: () => [],
+      registerTool: () => {},
+      getActiveTools: () => [],
+      setActiveTools: () => {},
+    } as never);
+
+    try {
+      handlers["session_start"]?.(null, {
+        cwd: root,
+        sessionManager: { getSessionId: () => "fresh-session" },
+      });
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+    }
+
+    const inboxSent = sent.filter((s) => s.msg?.details?.fromInbox);
+    assert.equal(inboxSent.length, 1, "record surfaced once");
+    const { msg, opts } = inboxSent[0];
+    assert.equal(msg.customType, "subagent_result");
+    assert.equal(msg.details.contextOnly, true, "marked context-only");
+    assert.ok(!opts?.triggerTurn, "must not force a turn");
+    assert.ok(!opts?.deliverAs, "must not queue as steer/followUp/nextTurn");
+    assert.match(msg.content, /Informational/i, "phrased as informational");
+  });
+
+  it("still steers an unobserved record into its own resumed parent", () => {
+    const root = mkdtempSync(join(tmpdir(), "inbox-own-"));
+    mkdirSync(join(root, ".git"), { recursive: true });
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    delete process.env.PI_SUBAGENT_INBOX;
+    appendSubagentResult({
+      id: "own-1",
+      ts: Date.now(),
+      name: "Worker-own",
+      task: "my task",
+      sessionFile: "/tmp/own.jsonl",
+      parentSessionId: "parent-1",
+      repoRoot: root,
+      summary: "result the parent never saw",
+      exitCode: 0,
+      elapsed: 1,
+      observedByParent: false,
+    });
+
+    const handlers: Record<string, Function> = {};
+    const sent: { msg: any; opts: any }[] = [];
+    subagentsExtension({
+      on: (ev: string, fn: Function) => {
+        handlers[ev] = fn;
+      },
+      registerCommand: () => {},
+      registerMessageRenderer: () => {},
+      registerShortcut: () => {},
+      sendUserMessage: () => {},
+      sendMessage: (msg: any, opts: any) => {
+        sent.push({ msg, opts });
+      },
+      getAllTools: () => [],
+      registerTool: () => {},
+      getActiveTools: () => [],
+      setActiveTools: () => {},
+    } as never);
+
+    try {
+      handlers["session_start"]?.(null, {
+        cwd: root,
+        sessionManager: { getSessionId: () => "parent-1" },
+      });
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+    }
+
+    const inboxSent = sent.filter((s) => s.msg?.details?.fromInbox);
+    assert.equal(inboxSent.length, 1, "record surfaced once");
+    const { msg, opts } = inboxSent[0];
+    assert.equal(opts?.triggerTurn, true, "parent reclaims via a triggered turn");
+    assert.equal(opts?.deliverAs, "steer");
+    assert.ok(!msg.details.contextOnly, "not marked context-only");
   });
 });

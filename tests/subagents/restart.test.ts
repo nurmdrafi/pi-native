@@ -14,6 +14,10 @@
  * restarted) synthesizes and delivers `pane_lost` as before, noting that a
  * restart was attempted.
  */
+// Scrub inherited child-identity env and redirect the durable inbox BEFORE any
+// extension import loads — every invocation style must get the same isolation.
+import "./test-env.ts";
+
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from "node:fs";
@@ -95,27 +99,21 @@ function fakePi() {
   };
 }
 
-function fakeRestartDeps(failSend = false) {
-  const created: string[] = [];
-  const closed: string[] = [];
-  const sent: { surface: string; command: string; scriptPath: string }[] = [];
+function fakeRestartDeps(failSpawn = false) {
+  const created: { name: string; paneCommand: string }[] = [];
+  const written: { scriptPath: string; command: string; preamble: string }[] = [];
   return {
     created,
-    closed,
-    sent,
+    written,
     deps: {
-      createSurface: (name: string) => {
-        created.push(name);
+      writeScript: (scriptPath: string, command: string, preamble: string) => {
+        written.push({ scriptPath, command, preamble });
+      },
+      createSurfaceRunning: (name: string, paneCommand: string) => {
+        if (failSpawn) throw new Error("split-window failed");
+        created.push({ name, paneCommand });
         return "%777";
       },
-      sendScript: (surface: string, command: string, opts: { scriptPath: string }) => {
-        if (failSend) throw new Error("send-keys failed");
-        sent.push({ surface, command, scriptPath: opts.scriptPath });
-      },
-      closeSurface: (surface: string) => {
-        closed.push(surface);
-      },
-      shellDelayMs: 0,
     },
   };
 }
@@ -214,10 +212,10 @@ describe("restartLostPane", () => {
     const ok = await __test__.restartLostPane(running as never, f.deps);
     assert.equal(ok, true);
 
-    assert.deepEqual(f.created, ["Scout-1"], "one new pane for the child");
-    assert.equal(f.sent.length, 1);
-    assert.equal(f.sent[0].surface, "%777", "command sent to the new pane");
-    const command = f.sent[0].command;
+    assert.deepEqual(f.created.map((c) => c.name), ["Scout-1"], "one new pane for the child");
+    assert.equal(f.written.length, 1);
+    assert.equal(running.surface, "%777", "entry points at the pane born running the script");
+    const command = f.written[0].command;
     assert.ok(command.includes(`cd '${dir}' && `), "resumes in the child's original cwd");
     assert.ok(command.includes(`pi --session '${sessionFile}'`), "resumes the durable session file");
     assert.ok(command.includes("subagent-done.ts"), "self-termination extension loaded");
@@ -226,11 +224,21 @@ describe("restartLostPane", () => {
     assert.ok(command.includes("PI_SUBAGENT_TASK="), "task replayed for self-report");
     assert.ok(command.includes("PI_SUBAGENT_PARENT_SESSION="), "parent id replayed for self-report");
     assert.ok(command.includes("PI_SUBAGENT_START_MS="), "start clock preserved for self-report");
-    assert.ok(command.includes("PI_SUBAGENT_SURFACE='%777'"));
+    // The pane id cannot be composed in before the pane exists; the pane's
+    // own tmux environment carries it into the child.
+    assert.ok(command.includes('PI_SUBAGENT_SURFACE="${TMUX_PANE}"'));
     assert.ok(command.includes("PI_SUBAGENT_AGENT='scout'"), "agent identity replayed");
     assert.ok(command.includes(`echo '__SUBAGENT_DONE_'$?'__'`), "exit sentinel echoed");
 
-    assert.ok(f.sent[0].scriptPath.startsWith(join(artifactDir, "subagent-scripts")), "script archived under artifacts");
+    assert.ok(f.written[0].scriptPath.startsWith(join(artifactDir, "subagent-scripts")), "script archived under artifacts");
+    // The pane is born running the archived script and re-signals the wake
+    // channel its watcher parks on.
+    assert.ok(
+      f.created[0].paneCommand.includes(`bash '${f.written[0].scriptPath}'`),
+      "pane born running the restart script",
+    );
+    assert.match(f.created[0].paneCommand, /tmux wait-for -S pi-subagent-/, "wake channel signaled");
+    assert.ok(running.waitChannel, "entry carries the wake channel");
     const resumeDir = join(artifactDir, "subagent-resume");
     const msgFile = readdirSync(resumeDir).find((f2) => f2.endsWith(".md"));
     assert.ok(msgFile, "restart nudge message written");
@@ -255,16 +263,16 @@ describe("restartLostPane", () => {
     assert.equal(running.restart?.attemptedAt != null, true, "attempt recorded so nothing retries");
   });
 
-  it("restores the dead pane id when the respawned pane cannot be seeded", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "restart-sendfail-"));
+  it("keeps the dead pane id when the replacement pane cannot be created", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "restart-spawnfail-"));
     const sessionFile = writeSessionFixture(dir);
     writeLoadoutFixture(sessionFile, dir);
     const running = fakeRunning({ sessionFile });
-    const f = fakeRestartDeps(true /* send fails */);
+    const f = fakeRestartDeps(true /* split fails */);
 
     assert.equal(await __test__.restartLostPane(running, f.deps), false);
-    assert.deepEqual(f.closed, ["%777"], "empty replacement pane closed");
-    assert.equal(running.surface, "%424242", "entry restored so the loss is re-detected");
+    assert.deepEqual(f.created, [], "no pane claimed");
+    assert.equal(running.surface, "%424242", "entry keeps the dead pane id so the loss is re-detected");
   });
 });
 

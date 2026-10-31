@@ -94,6 +94,24 @@ export function isPaneNotFound(err: unknown): boolean {
   return /can't find pane/i.test(stderr) || /can't find pane/i.test(message);
 }
 
+/** Whether an error means the multiplexer layer itself is gone or racing —
+ *  server killed or never started (`no server running on <socket>`), the
+ *  on-demand session reaped (`no such session` / `can't find session`), or
+ *  two parallel first-spawns both creating that session (`duplicate
+ *  session`). All are recoverable by re-deriving state from the live server
+ *  (recreating it when needed) instead of failing every spawn until process
+ *  restart. The matched strings are tmux's own and identical on macOS and
+ *  Linux; only the socket path varies between machines, so it is matched by
+ *  prefix and never parsed. */
+export function isMuxRecoverableError(err: unknown): boolean {
+  if (isPaneNotFound(err)) return true;
+  const stderr2 = typeof (err as { stderr?: unknown })?.stderr === "string" ? (err as { stderr: string }).stderr : "";
+  const message2 = err instanceof Error ? err.message : String(err ?? "");
+  return /no server running|no such session|can't find session|duplicate session/i.test(
+    `${stderr2}\n${message2}`,
+  );
+}
+
 /**
  * Ensure the dedicated agents session exists and return a pane id inside it
  * that new subagent panes can be split from. Detached by default so it never
@@ -107,7 +125,21 @@ function ensureAgentsSessionPane(): string {
     exists = true;
   } catch {}
   if (!exists) {
-    runTmux(["new-session", "-d", "-s", AGENTS_TMUX_SESSION, "-x", "200", "-y", "50"]);
+    try {
+      runTmux(["new-session", "-d", "-s", AGENTS_TMUX_SESSION, "-x", "200", "-y", "50"]);
+    } catch (err) {
+      // Parallel first-spawn race: both saw no session, both create it; the
+      // loser is told `duplicate session`. The winner's session now exists,
+      // so re-probe before treating this as fatal — any other failure throws.
+      if (!/duplicate session/i.test(err instanceof Error ? err.message : String(err ?? ""))) {
+        throw err;
+      }
+      try {
+        runTmux(["has-session", "-t", AGENTS_TMUX_SESSION]);
+      } catch {
+        throw err;
+      }
+    }
   }
   const paneList = runTmux([
     "list-panes",
@@ -199,10 +231,13 @@ export function createSurface(name: string): string {
 }
 
 /** Run one split-window against `fromSurface` (or the current window when
- *  absent) and return the new pane id. */
+ *  absent) and return the new pane id. With `command` the pane is born running
+ *  it — tmux takes the command as the LAST argv element, so no separate
+ *  respawn has to race the pane's default shell. */
 function splitPaneOnce(
   direction: "left" | "right" | "up" | "down",
   fromSurface?: string,
+  command?: string,
 ): string {
   const args = ["split-window", "-d"];
   if (direction === "left" || direction === "right") {
@@ -217,6 +252,7 @@ function splitPaneOnce(
     args.push("-t", fromSurface);
   }
   args.push("-P", "-F", "#{pane_id}");
+  if (command !== undefined) args.push(command);
 
   const pane = runTmux(args).trim();
   if (!pane.startsWith("%")) {
@@ -227,13 +263,8 @@ function splitPaneOnce(
 
 /**
  * Create a new split in the given direction from an optional source pane.
- * Returns the new pane id (e.g. `%12`).
- *
- * Self-heal: when the from-pane is dead — its window reaped, or a parent pane
- * id gone stale after a reload — tmux answers `can't find pane` and every
- * spawn would keep failing until process restart. Retry exactly once against
- * a live pane of the dedicated agents session, re-derived from live tmux
- * state (never the stale cache). Any other failure propagates unchanged.
+ * Returns the new pane id (e.g. `%12`). Dead from-panes self-heal once —
+ * see splitWithHeal.
  */
 export function createSurfaceSplit(
   name: string,
@@ -243,14 +274,46 @@ export function createSurfaceSplit(
   void name;
   requireTmux();
 
-  let pane: string;
+  const pane = splitWithHeal(direction, fromSurface);
+
+  rebalanceSurfaces(pane);
+  return pane;
+}
+
+/** Split with the dead-origin heal shared by every pane-creation path: when
+ *  the from-pane is dead — its window reaped, or a parent pane id gone stale
+ *  after a reload — tmux answers `can't find pane` and every spawn would keep
+ *  failing until process restart. Retry exactly once against a live pane of
+ *  the dedicated agents session, re-derived from live tmux state (never the
+ *  stale cache; the session is recreated on demand when the server is
+ *  empty). Any other failure propagates unchanged. See isMuxRecoverableError
+ *  for which failure classes heal. */
+function splitWithHeal(
+  direction: "left" | "right" | "up" | "down",
+  fromSurface: string | undefined,
+  command?: string,
+): string {
   try {
-    pane = splitPaneOnce(direction, fromSurface);
+    return splitPaneOnce(direction, fromSurface, command);
   } catch (err) {
-    if (!fromSurface || !isPaneNotFound(err)) throw err;
+    if (!isMuxRecoverableError(err)) throw err;
     agentsSessionBasePane = null;
-    pane = splitPaneOnce(direction, ensureAgentsSessionPane());
+    return splitPaneOnce(direction, ensureAgentsSessionPane(), command);
   }
+}
+
+/**
+ * Create a subagent pane that is BORN running `paneCommand`: one atomic
+ * split-window whose command is the last argv element. No default-shell
+ * window ever exists, so the pane cannot die between creation and command
+ * delivery the way a split-then-respawn sequence can.
+ * Returns the new pane id (e.g. `%12`).
+ */
+export function createSurfaceRunning(name: string, paneCommand: string): string {
+  void name; // tmux panes are not named; the pi process inside shows its own title.
+  requireTmux();
+
+  const pane = splitWithHeal("right", splitOriginPane(), paneCommand);
 
   rebalanceSurfaces(pane);
   return pane;
@@ -456,11 +519,37 @@ export async function pollForExit(
     sessionFile?: string;
     sentinelFile?: string;
     onTick?: (elapsed: number) => void;
+    /** wait-for channel the child signals on completion: between ticks the
+     *  poll parks on `tmux wait-for <channel>`, so wake is push-driven
+     *  instead of bound to the interval. Absent → plain interval ticking. */
+    waitChannel?: string;
+    /** Screen reader / wait-for runner seams (defaults: readScreenAsync and
+     *  the real tmux binary). */
+    deps?: {
+      readScreen?: (surface: string, lines?: number) => Promise<string> | string;
+      waitTmux?: (args: string[]) => Promise<unknown>;
+    };
   },
 ): Promise<PollResult> {
   const start = Date.now();
   let goneTicks = 0;
+  const readScreen = options.deps?.readScreen ?? readScreenAsync;
+  // One wait-for may be outstanding for the whole poll, reused across ticks.
+  // A fresh wait-for per tick leaks a blocked tmux subprocess every time the
+  // interval timer wins the race, and each `-S` wakes exactly one waiter, so
+  // abandoned waiters also steal the signal from the live poll.
+  const waitAbort = new AbortController();
+  const waitTmux =
+    options.deps?.waitTmux ??
+    ((args: string[]) => execFileAsync("tmux", args, { signal: waitAbort.signal }));
+  // A wait-for that failed once (server down, bad channel) will keep failing:
+  // stop racing it and let the interval timer govern the rest of the poll.
+  let waitUsable = options.waitChannel !== undefined;
+  let waitPromise: Promise<unknown> | null = null;
+  const onOuterAbort = () => waitAbort.abort();
+  signal.addEventListener("abort", onOuterAbort, { once: true });
 
+  try {
   for (;;) {
     if (signal.aborted) {
       throw new Error("Aborted while waiting for subagent to finish");
@@ -489,8 +578,11 @@ export async function pollForExit(
 
     // Slow path: read terminal screen for sentinel (crash detection)
     try {
-      const screen = await readScreenAsync(surface, 5);
-      const match = screen.match(/__SUBAGENT_DONE_(\d+)__/);
+      const screen = await readScreen(surface, 5);
+      // The real echo prints the marker alone on its own line; a task text
+      // that merely mentions the marker is not completion — anchor the match
+      // to a whole line or a live pane gets reaped on a false positive.
+      const match = screen.match(/^__SUBAGENT_DONE_(\d+)__[ \t\r]*$/m);
       if (match) {
         return { reason: "sentinel", exitCode: parseInt(match[1], 10) };
       }
@@ -519,17 +611,51 @@ export async function pollForExit(
     const elapsed = Math.floor((Date.now() - start) / 1000);
     options.onTick?.(elapsed);
 
+    // Sleep until the next tick: the interval timer raced against the ONE
+    // persistent wait-for. Whichever fires first wakes the poll; a resolved
+    // wait-for is consumed (the next sleep starts a fresh one), and a rejected
+    // one marks wait-for unusable for the rest of the poll.
     await new Promise<void>((resolve, reject) => {
       if (signal.aborted) return reject(new Error("Aborted"));
+      let settled = false;
       const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         signal.removeEventListener("abort", onAbort);
         resolve();
       }, options.interval);
       function onAbort() {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         reject(new Error("Aborted"));
       }
       signal.addEventListener("abort", onAbort, { once: true });
+      if (waitUsable && options.waitChannel && !waitPromise) {
+        waitPromise = waitTmux(["wait-for", options.waitChannel]);
+      }
+      if (waitPromise) {
+        waitPromise.then(
+          () => {
+            waitPromise = null; // consumed — next sleep issues a fresh one
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+          },
+          () => {
+            waitPromise = null;
+            waitUsable = false;
+          },
+        );
+      }
     });
+  }
+  } finally {
+    // Kill any outstanding wait-for subprocess and drop the abort listener —
+    // abandoned blocked processes would otherwise outlive the poll forever.
+    waitAbort.abort();
+    signal.removeEventListener("abort", onOuterAbort);
   }
 }

@@ -11,12 +11,17 @@
  * against a live pane of the dedicated agents session, re-derived from live
  * tmux state (never the stale cache). Any other failure propagates unchanged.
  */
+// Scrub inherited child-identity env and redirect the durable inbox BEFORE any
+// extension import loads — every invocation style must get the same isolation.
+import "./test-env.ts";
+
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   createSurface,
   createSurfaceSplit,
+  pollForExit,
   __surfaceTest__,
 } from "../../extensions/subagents/tmux.ts";
 
@@ -153,5 +158,30 @@ describe("createSurface self-heal", () => {
     assert.equal(pane, "%100");
     assert.equal(splitTarget(tmux.attempts[0]), "%5", "parent pane tried first");
     assert.equal(splitTarget(tmux.attempts[1]), "%70", "agents session pane as fallback");
+  });
+});
+
+describe("sentinel scrape anchoring (pollForExit)", () => {
+  it("ignores the marker mid-sentence but still matches the standalone echo line", async () => {
+    // A subagent whose TASK TEXT mentions the sentinel must not be declared
+    // finished — only the echo, which prints the marker alone on its own
+    // line, may complete the poll. Regression: the old match hit the marker
+    // anywhere on screen, so live panes were reaped on a false positive.
+    let screen = "the task says: echo `__SUBAGENT_DONE_0__` when finished\nrunning…\n";
+    const poll = pollForExit("%100", new AbortController().signal, {
+      interval: 5,
+      deps: { readScreen: () => screen },
+    } as never);
+
+    const early = await Promise.race([
+      poll,
+      new Promise<"pending">((r) => setTimeout(() => r("pending"), 60)),
+    ]);
+    assert.equal(early, "pending", "a marker inside prose is not completion");
+
+    screen = "the task says: echo `__SUBAGENT_DONE_0__` when finished\n__SUBAGENT_DONE_0__\n";
+    const result = await poll;
+    assert.equal(result.reason, "sentinel");
+    assert.equal(result.exitCode, 0);
   });
 });
