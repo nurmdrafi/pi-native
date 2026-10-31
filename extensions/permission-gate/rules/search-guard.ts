@@ -131,10 +131,23 @@ export function swallowCheck(seg: string): string | undefined {
  * view-command credit (2026-10-29): the preference stands — piread gives
  * offset windows and compaction markers, bash output is capped and
  * unnumbered — but the printed lines of a mappable single-file view DO
- * certify spans, so the reason must not claim they seed nothing. */
+ * certify spans, so the reason must not claim they seed nothing.
+ *
+ * The rule text and this check must agree on two shapes (2026-11-01):
+ * a `|`-prefixed `sed -n` filters output a command already produced, which
+ * the shell rules allow, so only a read-position `sed -n` (start, `;`,
+ * `&&`, `||`, `do`, `then`) is flagged; and `cat` used as a writer
+ * (`cat > f`, `cat >> f`, `cat <<EOF`, or bare `cat` piping stdin) reads no
+ * window, so only a `cat` with a real operand is flagged. */
 export function readerBypassCheck(cmd: string): string | undefined {
-  return /(?:^|&&|\|\||;|\||\bdo\b|\bthen\b)\s*(?:sed\s+[^|;&]*-n\b|cat\s)/.test(cmd)
-    ? "Hygiene (Reader-bypass): read windows go through piread — not cat/sed; a view command prints lines but is not the read tool."
+  const reason =
+    "Hygiene (Reader-bypass): read windows go through piread — not cat/sed; a view command prints lines but is not the read tool.";
+  const head = String.raw`(?:^|&&|\|\||;|\bdo\b|\bthen\b)\s*`;
+  const sedReader = new RegExp(String.raw`${head}sed\s+[^|;&]*-n\b`);
+  const catReader = new RegExp(String.raw`${head}cat\s+(?![<>|])`);
+  const pipedCat = /\|\s*cat\s+(?![<>|])/;
+  return sedReader.test(cmd) || catReader.test(cmd) || pipedCat.test(cmd)
+    ? reason
     : undefined;
 }
 
