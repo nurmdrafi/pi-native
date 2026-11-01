@@ -109,6 +109,20 @@ discovery off; the permission-gate extension is re-enabled by default (its
 `extensions/permission-gate` directory under the agent home), and
 `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated paths) overrides that default.
 
+## Budgets
+
+Ceilings per dimension — wall-clock seconds, assistant turns, cumulative
+provider-reported USD cost — resolved role frontmatter `budget:` →
+`budgetDefaults` in `config.json` (absent file → `config.json.example`:
+1800 s / 60 turns / $3) → unenforced. `budget: none` returns before a spawn
+override is read, so an exempt agent cannot be given a ceiling at spawn; on a
+non-exempt agent an override only lowers the resolved value. On breach the
+child is interrupted (Ctrl-C), killed after a 10 s grace, and the result
+carries `budget_exceeded`; the session file is preserved for resume, and a
+resumed or auto-restarted run attaches no ceiling. A child whose parent session
+ends stops being budgeted. A dimension the provider leaves unreported does not
+bind. `bench-runner`'s wall budget is its prompt, not this code.
+
 ## Result records and history
 
 A delivered result carries `files_changed` — repo-relative paths added,
@@ -138,6 +152,33 @@ touching your scope" block to the task text — at most 2 of the last 20
 records, 1200 chars total (changed paths capped at 10, diff excerpt 800,
 summary 300) — telling the child not to re-read those files to reconstruct
 context. It runs in every `PI_SUBAGENTS_SCOPE_MODE`.
+
+## Effort ledger (reference)
+
+Doctrine for the ledger lives in the Subagents doc; this page holds its formats.
+Location: `~/.pi/efforts/<effort-id>/plan.md` and `status.jsonl`, never inside a
+tracked tree, so they cannot enter any child's `files_changed`.
+
+`plan.md` carries the goal, the wave order, and one row per task — name, agent,
+cwd, `files`, deps, verify command, report format. The orchestrator rewrites it
+through a temp file plus `mv`, keeping it under 64 KiB.
+
+`status.jsonl` takes one object per state change:
+`{ts, effort, wave, name, agent, cwd, files, baseline_sha, state, verdict, paths,
+check:{by,result}}`, `state` in
+`queued | running | delivered | verified | failed | cancelled`, `check` null
+until a reviewer or verifier reports. Append one line per write
+(`printf '%s\n' "$line" >> status.jsonl`): a write under 4 KiB reaches a local
+filesystem whole, so parallel deliveries never interleave. `files` and `paths`
+cap at 20 a line and the file never rotates — a resume replays from line 1.
+
+Reconcile one-liners:
+
+    jq -rs 'group_by(.name) | map(max_by(.ts))' status.jsonl
+    jq -rs 'group_by(.name) | map(max_by(.ts)) | map(select(.state=="delivered"))' status.jsonl
+    jq -rs 'group_by(.name) | map(max_by(.ts)) | map(select(.state=="running")) | .[].name' status.jsonl
+
+The extension never reads the ledger: it is plain data for the orchestrator.
 
 ## Steering and resume
 
@@ -180,14 +221,15 @@ message, so do not poll.
 the usage fields rather than zero-filling; queued entries show
 `name · queued`. A running child whose elapsed exceeds its agent's p90
 history baseline is flagged `past p90 (Nm)`, N being the baseline's p90 in
-minutes — baselines need at least three usable history rows, so rarely-run
+minutes — a baseline needs at least three history rows with a positive
+`durationMs` (cancelled and budget-stopped runs count), so rarely-run
 agents are never flagged.
 
 The spawn ack (launched or queued) carries two history-derived notes. A
 time-sense line — ``typical for `worker`: median 5m · p90 15m · $0.34`` —
 gives the agent's median and p90 duration plus median cost from recent
 history (cost omitted when no row carried one; sub-minute figures clamp up
-to 1m; also gated on three usable rows). A warn-only duplicate note fires
+to 1m; also gated on the same three-row minimum). A warn-only duplicate note fires
 when a near-identical same-agent task is already running — steer that child
 instead of respawning — or a near-identical task ran before — re-check that
 result before respawning. Both are hints, not blocks; the orchestrator
