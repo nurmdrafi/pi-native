@@ -9,15 +9,16 @@
  * Panes are identified by tmux pane ids (e.g. `%12`). When the parent pi
  * runs inside tmux, splits target the parent pi's pane (`$TMUX_PANE`) so they
  * follow the agent. When the parent runs outside tmux, panes are created in a
- * dedicated detached session (`pi-agents`) that is created on demand — the
- * user can watch with `tmux attach -t pi-agents` and the parent terminal is
- * never required to be inside tmux.
+ * dedicated detached per-project session (`pi-agents-…`) created on demand
+ * — the user can watch with `tmux attach -t <session name>` and the parent
+ * terminal is never required to be inside tmux.
  */
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,13 +44,35 @@ function hasCommand(command: string): boolean {
 }
 
 /**
- * Dedicated detached tmux session used when the parent pi runs OUTSIDE tmux.
- * Created on demand; watch with `tmux attach -t pi-agents`.
+ * Dedicated detached tmux sessions used when the parent pi runs OUTSIDE tmux.
+ * One session per project root (see agentsSessionNameFor), created on demand;
+ * watch yours with `tmux attach -t <session name>`.
  */
 const AGENTS_TMUX_SESSION = "pi-agents";
 
-/** Cached base pane id of the dedicated agents session (outside-tmux mode). */
-let agentsSessionBasePane: string | null = null;
+/**
+ * Per-project tmux session name: each project's subagent panes live in their
+ * own detached session, so panes of different projects never share a
+ * multiplexer session — reaping, killing, or attaching one project's session
+ * can never touch another project's children. Stable for a given repo root:
+ * basename slug plus a short hash of the full path (tmux session names must
+ * avoid `:` and `.`).
+ */
+export function agentsSessionNameFor(repoRoot: string): string {
+  const root = (repoRoot ?? "").trim();
+  if (!root) return AGENTS_TMUX_SESSION;
+  const slug =
+    basename(root)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24) || "root";
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 8);
+  return `pi-agents-${slug}-${hash}`;
+}
+
+/** Cached base pane id per dedicated agents session (outside-tmux mode). */
+const agentsSessionBasePanes = new Map<string, string>();
 
 /**
  * True when the tmux binary is available. The parent pi does NOT need to be
@@ -117,16 +140,17 @@ export function isMuxRecoverableError(err: unknown): boolean {
  * that new subagent panes can be split from. Detached by default so it never
  * steals the user's terminal; `tmux attach -t pi-agents` shows it on demand.
  */
-function ensureAgentsSessionPane(): string {
-  if (agentsSessionBasePane) return agentsSessionBasePane;
+function ensureAgentsSessionPane(sessionName: string = AGENTS_TMUX_SESSION): string {
+  const cached = agentsSessionBasePanes.get(sessionName);
+  if (cached) return cached;
   let exists = false;
   try {
-    runTmux(["has-session", "-t", AGENTS_TMUX_SESSION]);
+    runTmux(["has-session", "-t", sessionName]);
     exists = true;
   } catch {}
   if (!exists) {
     try {
-      runTmux(["new-session", "-d", "-s", AGENTS_TMUX_SESSION, "-x", "200", "-y", "50"]);
+      runTmux(["new-session", "-d", "-s", sessionName, "-x", "200", "-y", "50"]);
     } catch (err) {
       // Parallel first-spawn race: both saw no session, both create it; the
       // loser is told `duplicate session`. The winner's session now exists,
@@ -135,7 +159,7 @@ function ensureAgentsSessionPane(): string {
         throw err;
       }
       try {
-        runTmux(["has-session", "-t", AGENTS_TMUX_SESSION]);
+        runTmux(["has-session", "-t", sessionName]);
       } catch {
         throw err;
       }
@@ -144,7 +168,7 @@ function ensureAgentsSessionPane(): string {
   const paneList = runTmux([
     "list-panes",
     "-t",
-    AGENTS_TMUX_SESSION,
+    sessionName,
     "-F",
     "#{pane_id}",
   ]);
@@ -158,9 +182,9 @@ function ensureAgentsSessionPane(): string {
     .map((line) => line.trim())
     .find((line) => /^%\d+$/.test(line));
   if (!pane) {
-    throw new Error(`No panes found in tmux session ${AGENTS_TMUX_SESSION}`);
+    throw new Error(`No panes found in tmux session ${sessionName}`);
   }
-  agentsSessionBasePane = pane;
+  agentsSessionBasePanes.set(sessionName, pane);
   return pane;
 }
 
@@ -168,8 +192,8 @@ function ensureAgentsSessionPane(): string {
  * The pane new subagent panes are split from: the parent pi's pane when pi
  * runs inside tmux, otherwise a pane in the dedicated agents session.
  */
-function splitOriginPane(): string {
-  return process.env.TMUX_PANE ?? ensureAgentsSessionPane();
+function splitOriginPane(sessionName: string = AGENTS_TMUX_SESSION): string {
+  return process.env.TMUX_PANE ?? ensureAgentsSessionPane(sessionName);
 }
 
 // ── Shell helpers ──
@@ -199,8 +223,9 @@ let rebalanceTimer: ReturnType<typeof setTimeout> | null = null;
  */
 function rebalanceSurfaces(hintPane?: string): void {
   // Prefer the parent pi pane (stable; survives a closing subagent pane);
-  // outside tmux, balance the dedicated agents session's window instead.
-  const target = process.env.TMUX_PANE ?? agentsSessionBasePane ?? hintPane;
+  // outside tmux, balance any live dedicated agents session's window instead.
+  const anyBase = agentsSessionBasePanes.values().next().value as string | undefined;
+  const target = process.env.TMUX_PANE ?? anyBase ?? hintPane;
   if (!target) return;
   if (rebalanceTimer) clearTimeout(rebalanceTimer);
   rebalanceTimer = setTimeout(() => {
@@ -292,13 +317,14 @@ function splitWithHeal(
   direction: "left" | "right" | "up" | "down",
   fromSurface: string | undefined,
   command?: string,
+  sessionName: string = AGENTS_TMUX_SESSION,
 ): string {
   try {
     return splitPaneOnce(direction, fromSurface, command);
   } catch (err) {
     if (!isMuxRecoverableError(err)) throw err;
-    agentsSessionBasePane = null;
-    return splitPaneOnce(direction, ensureAgentsSessionPane(), command);
+    agentsSessionBasePanes.delete(sessionName);
+    return splitPaneOnce(direction, ensureAgentsSessionPane(sessionName), command);
   }
 }
 
@@ -309,11 +335,15 @@ function splitWithHeal(
  * delivery the way a split-then-respawn sequence can.
  * Returns the new pane id (e.g. `%12`).
  */
-export function createSurfaceRunning(name: string, paneCommand: string): string {
+export function createSurfaceRunning(
+  name: string,
+  paneCommand: string,
+  sessionName: string = AGENTS_TMUX_SESSION,
+): string {
   void name; // tmux panes are not named; the pi process inside shows its own title.
   requireTmux();
 
-  const pane = splitWithHeal("right", splitOriginPane(), paneCommand);
+  const pane = splitWithHeal("right", splitOriginPane(sessionName), paneCommand, sessionName);
 
   rebalanceSurfaces(pane);
   return pane;
@@ -495,7 +525,7 @@ export const __pollForExitTest__ = { interpretExitSidecar };
 export const __surfaceTest__ = {
   setTmuxRunner(fn: ((args: string[]) => string) | null): void {
     tmuxRunner = fn;
-    agentsSessionBasePane = null;
+    agentsSessionBasePanes.clear();
     if (fn) commandAvailability.set("tmux", true);
     else commandAvailability.delete("tmux");
     if (rebalanceTimer) {

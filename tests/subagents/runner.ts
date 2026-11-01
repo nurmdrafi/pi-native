@@ -2391,6 +2391,9 @@ describe("subagent interruption", () => {
       surface: "pane-1",
       startTime: 0,
       sessionFile: "worker.jsonl",
+      // Scope-matching cwd: steer paths filter by the session project scope,
+      // so a fixture child must live in the runner process project.
+      cwd: process.cwd(),
       interactive: false,
       statusState: createStatusState({ source: "pi", startTimeMs: 0 }),
       ...overrides,

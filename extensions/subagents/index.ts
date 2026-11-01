@@ -17,6 +17,7 @@ import {
 import { execFile, execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import {
+  agentsSessionNameFor,
   isMuxAvailable,
   muxSetupHint,
   createSurfaceRunning,
@@ -1003,6 +1004,11 @@ interface RunningSubagent {
   cwd?: string;
   /** Session id of the spawning parent, for inbox drain routing. */
   parentSessionId?: string | null;
+  /** Project scope of the child (repo root of its cwd), pinned at
+   *  registration: every registry read filters by the calling session's
+   *  scope, so children of other projects sharing this process are never
+   *  visible, addressable, or reaped from here. */
+  scopeKey?: string;
   /** Set once a result was delivered; guards sweep/watcher double-send. */
   delivered?: boolean;
   /** Reconciliation bookkeeping (owned by the sweep). */
@@ -1044,8 +1050,37 @@ interface RunningSubagent {
   waitChannel?: string;
 }
 
-/** All currently running subagents, keyed by id. */
+/** All currently running subagents, keyed by id. Shared by every session in
+ *  this process — one process can host sessions of several projects, so every
+ *  read that answers a session filters by that session's project scope. */
 const runningSubagents = new Map<string, RunningSubagent>();
+
+/** The project scope of a child: its recorded scope key, else the repo root
+ *  of its working directory ("" when neither is known). */
+function childScopeKey(running: RunningSubagent): string {
+  return running.scopeKey ?? (running.cwd ? repoRootFor(running.cwd) : "");
+}
+
+/** Children whose project scope equals `scope` — the only ones a session in
+ *  that project may list, name-match, or treat as duplicates. An entry with
+ *  no recorded scope key predates scoping (or is a bare test fixture): it
+ *  stays visible to every scope rather than invisible to all, while every
+ *  production registration path pins the key (attachScopeKey). */
+function runningInScope(scope: string): RunningSubagent[] {
+  return Array.from(runningSubagents.values()).filter(
+    (r) => r.scopeKey === undefined || r.scopeKey === scope,
+  );
+}
+
+/** The project scope of a session: the repo root of its working directory. */
+function currentScopeKey(ctx?: ExtensionContext | null): string {
+  return repoRootFor(ctx?.cwd ?? latestCtx?.cwd ?? process.cwd());
+}
+
+/** Pin a child's project scope once, at registration. */
+function attachScopeKey(running: RunningSubagent): void {
+  if (!running.scopeKey) running.scopeKey = repoRootFor(running.cwd ?? process.cwd());
+}
 
 /** Caps simultaneous children: parallel spawns share one provider quota and
  * 429-storm it. `PI_SUBAGENT_MAX_CONCURRENT` (default 5, <1 = unlimited). */
@@ -1330,7 +1365,8 @@ function updateWidget() {
   try {
     if (!latestCtx?.hasUI) return;
 
-  if (runningSubagents.size === 0) {
+  const widgetScope = runningInScope(currentScopeKey());
+  if (widgetScope.length === 0) {
     latestCtx.ui.setWidget("subagent-status", undefined);
     if (widgetInterval) {
       clearInterval(widgetInterval);
@@ -1346,7 +1382,7 @@ function updateWidget() {
       return {
         invalidate() {},
         render(width: number) {
-          return renderSubagentWidgetLines(Array.from(runningSubagents.values()), width);
+          return renderSubagentWidgetLines(widgetScope, width);
         },
       };
     },
@@ -1570,8 +1606,13 @@ const reservedNames = new Set<string>();
  * `registryNames` is the set of names already taken in the registry (empty when
  * there is no session file / artifact dir yet).
  */
-function uniqueRunningName(base: string, registryNames?: Set<string>): string {
-  const taken = new Set(Array.from(runningSubagents.values()).map((r) => r.name));
+function uniqueRunningName(base: string, registryNames?: Set<string>, scope?: string): string {
+  // Scope-aware: with a project scope, only same-project children count as
+  // taken — another project reusing the name is isolation, not a conflict.
+  // (Reserved names stay global: over-avoiding a parallel reservation in
+  // another project only suffixes a default name; it never under-avoids.)
+  const running = scope === undefined ? Array.from(runningSubagents.values()) : runningInScope(scope);
+  const taken = new Set(running.map((r) => r.name));
   for (const reserved of reservedNames) taken.add(reserved);
   if (registryNames) for (const n of registryNames) taken.add(n);
   if (!taken.has(base)) return base;
@@ -1580,7 +1621,10 @@ function uniqueRunningName(base: string, registryNames?: Set<string>): string {
   return `${base}-${n}`;
 }
 
-function resolveRunningByName(name: string):
+function resolveRunningByName(
+  name: string,
+  scope?: string,
+):
   | { running: RunningSubagent }
   | { error: string } {
   const requestedName = name.trim();
@@ -1588,10 +1632,14 @@ function resolveRunningByName(name: string):
     return { error: "Provide the exact display name of a running subagent." };
   }
 
-  const matches = Array.from(runningSubagents.values()).filter((running) => running.name === requestedName);
+  // Scope-aware: a session only addresses children of its own project — a
+  // same-named child in another project is invisible, never a hit or an
+  // ambiguity. Without a scope (legacy callers) every child matches.
+  const pool = scope === undefined ? Array.from(runningSubagents.values()) : runningInScope(scope);
+  const matches = pool.filter((running) => running.name === requestedName);
   if (matches.length === 1) return { running: matches[0] };
   if (matches.length === 0) {
-    const names = Array.from(runningSubagents.values()).map((r) => r.name);
+    const names = pool.map((r) => r.name);
     const hint = names.length
       ? ` Currently running: ${[...new Set(names)].join(", ")}.`
       : " No subagents are currently running.";
@@ -1718,9 +1766,10 @@ function launchScriptedPane(
   scriptPath: string,
   preamble: string,
   waitChannel: string,
+  sessionName?: string,
 ): string {
   writeLaunchScript(scriptPath, command, preamble);
-  return createSurfaceRunning(name, launchPaneCommand(scriptPath, waitChannel));
+  return createSurfaceRunning(name, launchPaneCommand(scriptPath, waitChannel), sessionName);
 }
 
 /**
@@ -1881,6 +1930,7 @@ async function resumeSubagentByName(
         ...(resumeMsgFile ? [`# Resume message file: ${resumeMsgFile}`] : []),
       ].join("\n"),
       waitChannel,
+      agentsSessionNameFor(currentScopeKey()),
     );
 
     await spawnQueue.acquire();
@@ -1912,6 +1962,7 @@ async function resumeSubagentByName(
         startTimeMs: startTime,
       }),
     };
+    attachScopeKey(running);
     runningSubagents.set(id, running);
     startWidgetRefresh();
     startStatusRefresh(pi);
@@ -2004,7 +2055,7 @@ async function handleSubagentSteer(
     return { content: [{ type: "text" as const, text: err }], details: { error: err } };
   }
 
-  const resolved = resolveRunningByName(params.name ?? "");
+  const resolved = resolveRunningByName(params.name ?? "", currentScopeKey());
   if ("error" in resolved) {
     return {
       content: [{ type: "text" as const, text: resolved.error }],
@@ -2174,6 +2225,10 @@ export const __test__ = {
   resolveResultPresentation,
   resolveResumeLaunchBehavior,
   runningSubagents,
+  runningInScope,
+  childScopeKey,
+  currentScopeKey,
+  handleSessionShutdown,
   formatElapsed,
   formatTokens,
   formatContextUsage,
@@ -2427,6 +2482,7 @@ async function launchSubagent(
         `# Generated: ${new Date().toISOString()}`,
       ].join("\n"),
       waitChannel,
+      agentsSessionNameFor(scopeRepoRoot),
     );
 
     const running: RunningSubagent = {
@@ -2454,6 +2510,7 @@ async function launchSubagent(
       }),
     };
 
+    attachScopeKey(running);
     runningSubagents.set(id, running);
     return running;
   }
@@ -2599,6 +2656,7 @@ async function launchSubagent(
       `# Session: ${subagentSessionFile}`,
     ].join("\n"),
     waitChannel,
+    agentsSessionNameFor(scopeRepoRoot),
   );
 
   const running: RunningSubagent = {
@@ -2627,6 +2685,7 @@ async function launchSubagent(
     }),
   };
 
+  attachScopeKey(running);
   runningSubagents.set(id, running);
   return running;
 }
@@ -3753,6 +3812,7 @@ async function adoptPendingSubagents(
       statusState: createStatusState({ source: "pi", startTimeMs: p.startedAt }),
     };
     if (live !== null && live.has(p.surface)) {
+      attachScopeKey(running);
       runningSubagents.set(running.id, running);
       watchSubagent(running, getModuleAbortSignal()).then(
         (result) => deliverSubagentResult(pi, running, result),
@@ -3763,6 +3823,27 @@ async function adoptPendingSubagents(
     }
   }
   updateWidget();
+}
+
+/** Session-shutdown core, extracted for testing: detach only the dying
+ *  session's own children — persist their orphan sidecars, abort their
+ *  watchers, drop their entries. Other projects' children sharing this
+ *  process keep their supervision: clearing everything is how a project
+ *  switch used to strand another project's subagents as unsupervised panes
+ *  that later surfaced as unrecoverable pane losses. */
+function handleSessionShutdown(ctx?: ExtensionContext | null): void {
+  const sessionId = (ctx as any)?.sessionManager?.getSessionId?.() ?? null;
+  const scope = currentScopeKey(ctx ?? null);
+  const own = [...runningSubagents.values()].filter((r) =>
+    r.parentSessionId != null ? r.parentSessionId === sessionId : childScopeKey(r) === scope,
+  );
+  if (own.length > 0) {
+    writePendingDetachedSubagents(own, Date.now());
+  }
+  for (const agent of own) {
+    agent.abortController?.abort();
+    runningSubagents.delete(agent.id);
+  }
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
@@ -3832,13 +3913,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   // Clean up on session shutdown
   pi.on("turn_start", () => drainResultInbox(pi, latestCtx));
 
-  pi.on("session_shutdown", (_event, _ctx) => {
-    // Persist orphans before aborting: the dying session cannot receive the
-    // detached steer, so the loss would otherwise be invisible. The next
-    // session_start in this project surfaces these sidecars.
-    if (runningSubagents.size > 0) {
-      writePendingDetachedSubagents([...runningSubagents.values()], Date.now());
-    }
+  pi.on("session_shutdown", (_event, ctx) => {
+    // Detach only this session's own children: their orphan sidecars persist
+    // before their watchers abort, so the next session_start in this project
+    // surfaces and adopts them. Children of other projects sharing this
+    // process keep their supervision (see handleSessionShutdown).
+    handleSessionShutdown(ctx);
     if (widgetInterval) {
       clearInterval(widgetInterval);
       widgetInterval = null;
@@ -3849,12 +3929,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       statusInterval = null;
       (globalThis as any)[STATUS_INTERVAL_KEY] = null;
     }
-    const moduleAbort = (globalThis as any)[POLL_ABORT_KEY] as AbortController | undefined;
-    if (moduleAbort) moduleAbort.abort();
-    for (const [_id, agent] of runningSubagents) {
-      agent.abortController?.abort();
+    // The registries are shared by every session in this process: only tear
+    // the module poll down once no other project's children remain to watch.
+    if (runningSubagents.size === 0) {
+      const moduleAbort = (globalThis as any)[POLL_ABORT_KEY] as AbortController | undefined;
+      if (moduleAbort) moduleAbort.abort();
     }
-    runningSubagents.clear();
   });
 
   // The spawning tools are always registered here. Whether a child process can
@@ -3990,7 +4070,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         let reservedName: string | null = null;
         if (!params.name?.trim()) {
           const registryNames = new Set(Object.keys(readNameRegistry(parentArtifactDir)));
-          params.name = uniqueRunningName(params.agent, registryNames);
+          params.name = uniqueRunningName(params.agent, registryNames, currentScopeKey());
           reservedName = params.name;
           reservedNames.add(reservedName);
         }
@@ -4255,7 +4335,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const metrics: ChildMetrics[] = annotatePastP90(
           [
             ...pendingSpawns.map(queuedChildMetrics),
-            ...[...runningSubagents.values()].map(runningChildMetrics),
+            ...runningInScope(exposureRoot).map(runningChildMetrics),
           ],
           readRecentResults(exposureRoot, 20),
         );
@@ -4388,7 +4468,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         if (params.action === "cancel") {
-          const resolved = resolveRunningByName(name);
+          const resolved = resolveRunningByName(name, currentScopeKey());
           if ("running" in resolved) {
             // Fire-and-forget like spawn: the stop waits out the grace
             // window and the cancelled result arrives as a steer.
@@ -4419,7 +4499,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         // restart
-        const resolved = resolveRunningByName(name);
+        const resolved = resolveRunningByName(name, currentScopeKey());
         if ("running" in resolved) {
           if (!canRestartLostPane(resolved.running)) {
             return single(
@@ -4526,7 +4606,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
         // ── Steer a running subagent ──
         // A name that matches a currently-running subagent always steers it.
-        const runningMatch = Array.from(runningSubagents.values()).find((r) => r.name === requestedName);
+        // Project-scoped: another project's same-named child is not this
+        // session's duplicate and must not swallow its steer.
+        const runningMatch = runningInScope(currentScopeKey()).find((r) => r.name === requestedName);
         if (runningMatch) {
           return handleSubagentSteer({ name: requestedName, message: params.message });
         }
