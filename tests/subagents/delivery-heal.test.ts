@@ -57,6 +57,16 @@ function noServerErr(cmd: string): Error {
   });
 }
 
+/** A pane-race failure as tmux's execFile error shape: the stderr text
+ *  (`can't find pane: %N`) is exactly the multiplexer noise that must never
+ *  reach a model-facing error wrap. */
+function paneGoneErr(cmd: string): Error {
+  return Object.assign(new Error(`Command failed: tmux ${cmd}\ncan't find pane: %0`), {
+    code: 1,
+    stderr: "can't find pane: %0\n",
+  });
+}
+
 function targetOf(args: string[]): string | null {
   const i = args.indexOf("-t");
   return i >= 0 ? args[i + 1] : null;
@@ -255,6 +265,43 @@ describe("subagent tool final-failure wrap", () => {
       /Failed to launch subagent "w2"/,
     );
   });
+
+  it("keeps pane-gone stderr out of the launch failure wrap", async () => {
+    const { agentDir, ctx } = freshRoot("worker");
+    savedEnv["PI_CODING_AGENT_DIR"] = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    const fake = fakeTmux({ failSplitFrom: 0, failSplitWith: paneGoneErr("split-window") });
+    __surfaceTest__.setTmuxRunner(fake.runner);
+
+    const tools: Record<string, unknown>[] = [];
+    subagentsExtension({
+      on: () => {},
+      registerCommand: () => {},
+      registerMessageRenderer: () => {},
+      registerShortcut: () => {},
+      sendUserMessage: () => {},
+      sendMessage: () => {},
+      getAllTools: () => [],
+      registerTool: (t: Record<string, unknown>) => {
+        tools.push(t);
+      },
+      getActiveTools: () => ["subagent"],
+      setActiveTools: () => {},
+    } as never);
+    const tool = tools.find((t) => t.name === "subagent") as { execute: Function };
+    assert.ok(tool, "subagent tool registered");
+
+    await assert.rejects(
+      tool.execute("tc1", { agent: "worker", task: "t", name: "w1" }, undefined, undefined, ctx),
+      (err: Error) => {
+        assert.match(err.message, /Failed to launch subagent "w1"/);
+        assert.doesNotMatch(err.message, /can't find pane/, "no multiplexer noise");
+        assert.doesNotMatch(err.message, /Command failed/, "no raw execFile text");
+        return true;
+      },
+    );
+  });
 });
 
 // ── resume flow: unexpected throws become actionable error results ──
@@ -299,6 +346,43 @@ describe("resume error containment", () => {
     assert.match(error, /again|retry/i, "tells the user what to do next");
     assert.doesNotMatch(error, /^Command failed/, "no raw tmux stderr");
     assert.match(result.content[0].text, /resumee/);
+  });
+
+  it("keeps pane-gone stderr out of the resume error result", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot("worker");
+    savedEnv["PI_CODING_AGENT_DIR"] = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    const sessionFile = writeSessionFixture(projectDir, "child.jsonl");
+    writeSubagentLoadout(sessionFile, {
+      agent: "worker",
+      toolAllowlist: "piread",
+      model: null,
+      thinking: null,
+      systemPromptMode: null,
+      identity: null,
+      spawnable: null,
+      autoExit: true,
+      cwd: projectDir,
+      agentDir: null,
+    });
+    registerName(join(projectDir, "artifacts", "parent-sid"), "resumee2", {
+      sessionFile,
+      sessionId: "child-sid",
+    });
+
+    const fake = fakeTmux({ failSplitFrom: 0, failSplitWith: paneGoneErr("split-window") });
+    __surfaceTest__.setTmuxRunner(fake.runner);
+
+    const result = (await __test__.resumeSubagentByName(
+      { name: "resumee2", message: "continue" },
+      ctx as never,
+    )) as { details: { error?: string } };
+
+    const error = result?.details?.error ?? "";
+    assert.ok(error, "returns an error result instead of throwing");
+    assert.doesNotMatch(error, /can't find pane/, "no multiplexer noise");
+    assert.doesNotMatch(error, /Command failed/, "no raw execFile text");
   });
 });
 

@@ -1620,13 +1620,13 @@ const STEER_HEAL_STEP_MS = 200;
 /** Describe a failed tmux call for model-facing error text without relaying
  *  its raw output: execFile errors read `Command failed: tmux <argv>…\n<stderr>`
  *  and embedding them verbatim leaks multiplexer noise (`can't find pane: %N`)
- *  into the conversation. Keep the subcommand and the target pane instead;
+ *  into the conversation. Keep the subcommand and name the target instead;
  *  errors that are not tmux-shaped pass through unchanged. */
-function describeTmuxFailure(error: unknown, surface: string): string {
-  if (isPaneNotFound(error)) return `pane ${surface} is gone`;
+function describeTmuxFailure(error: unknown, target: string): string {
+  if (isPaneNotFound(error)) return `${target} is gone`;
   const message = error instanceof Error ? error.message : String(error ?? "");
   const subcommand = message.match(/^Command failed:\s*tmux\s+(\S+)/);
-  if (subcommand) return `tmux ${subcommand[1]} failed on pane ${surface}`;
+  if (subcommand) return `tmux ${subcommand[1]} failed on ${target}`;
   return message.trim();
 }
 
@@ -1650,7 +1650,7 @@ async function steerSubagent(
         return {
           error:
             `Failed to deliver message to subagent "${running.name}" via tmux: ` +
-            `${describeTmuxFailure(error, surface)}`,
+            `${describeTmuxFailure(error, `pane ${surface}`)}`,
         };
       }
       // The watcher already delivered pane_lost and finalized this entry —
@@ -1672,7 +1672,7 @@ async function steerSubagent(
         return {
           error:
             `Failed to deliver message to subagent "${running.name}" via tmux: ` +
-            `${describeTmuxFailure(error, surface)} ` +
+            `${describeTmuxFailure(error, `pane ${surface}`)} ` +
             `(pane loss did not heal within ${Math.round(waitMs / 1000)}s — retry, or send ` +
             `the message again to resume the session).`,
         };
@@ -1983,7 +1983,9 @@ async function resumeSubagentByName(
       },
     };
   } catch (err) {
-    const failure = err instanceof Error ? err.message : String(err);
+    // describeTmuxFailure keeps multiplexer stderr (`can't find pane: %N`)
+    // out of the model-facing text; non-tmux errors pass through unchanged.
+    const failure = describeTmuxFailure(err, "the replacement pane");
     const text =
       `Could not resume subagent "${params.name}": ${failure} ` +
       `(pane loss recovery was attempted and failed). The session file is intact — ` +
@@ -2234,10 +2236,12 @@ async function launchReservedSpawn(
     // launch must give the lock back or it leaks forever.
     if (scopeInfo?.scopeId) releaseScope(scopeInfo.scopeId);
     // Wrap, never re-throw verbatim: a raw tmux failure here (pane lost
-    // mid-launch) reads as internal noise; the wrap names the subagent.
+    // mid-launch) reads as internal noise; the wrap names the subagent, and
+    // describeTmuxFailure keeps multiplexer stderr (`can't find pane: %N`)
+    // out of the model-facing text.
     throw new Error(
       `Failed to launch subagent "${params.name}": ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+        `${describeTmuxFailure(err, "the launch pane")}`,
     );
   } finally {
     if (reservedName) reservedNames.delete(reservedName);
