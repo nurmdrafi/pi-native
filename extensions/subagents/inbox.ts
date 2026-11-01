@@ -55,8 +55,9 @@ export interface InboxRecord {
   elapsed: number;
   /** Aggregate usage/model stats when available. */
   stats?: unknown;
-  /** Set when the result was synthesized rather than observed (pane reap, stall). */
-  synthesized?: "pane_lost" | "stalled";
+  /** Set when the result was synthesized rather than observed (pane reap,
+   *  stall, parent cancel). */
+  synthesized?: "pane_lost" | "stalled" | "cancelled_by_parent";
   /** Repo-relative paths added/removed/status-changed since the spawn-time git
    * baseline, sorted, capped at 200. Absent when no baseline existed or git
    * failed — the spawn itself must never depend on git. */

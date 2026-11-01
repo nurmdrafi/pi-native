@@ -2939,10 +2939,7 @@ function persistResultRecord(
       exitCode: result.exitCode,
       elapsed: result.elapsed,
       ...(result.stats ? { stats: result.stats } : {}),
-      // The inbox record's synthesized union predates cancelled_by_parent;
-      // the field is a transparent JSON marker, so widen at this boundary —
-      // the durable value keeps the real kind.
-      ...(synthesized ? { synthesized: synthesized as "pane_lost" | "stalled" } : {}),
+      ...(synthesized ? { synthesized } : {}),
       ...(result.files_changed ? { files_changed: result.files_changed } : {}),
       ...(result.files_changed_source ? { files_changed_source: result.files_changed_source } : {}),
     },
@@ -3445,10 +3442,46 @@ async function restartSubagent(
   const respawned = await restart(running, deps);
   if (!respawned) {
     return {
-      error: `the restart attempt for "${running.name}" failed; the watcher reports the loss`,
+      error: `the restart attempt for "${running.name}" failed; the watcher either reports the pane loss or its auto-restart recovers it`,
     };
   }
   return { ok: true };
+}
+
+/** Race a blocking poll against its abort signal. pollForExit observes the
+ *  signal only between its awaits; while it is parked inside a multiplexer
+ *  round-trip (which can take hundreds of ms on a loaded host) an abort
+ *  would otherwise not surface until that round-trip yields — delaying the
+ *  watcher's settle, its queue-slot release, and the queued-spawn drain that
+ *  release triggers. Loser rejections are swallowed so an abandoned poll
+ *  cannot surface as an unhandled rejection; the poll winds itself down on
+ *  its next signal check. */
+function raceAbortSignal<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let decided = false;
+    const onAbort = () => {
+      if (decided) return;
+      decided = true;
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    pending.then(
+      (value) => {
+        if (decided) return;
+        decided = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        if (decided) return;
+        decided = true;
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 async function watchSubagent(
@@ -3471,7 +3504,8 @@ async function watchSubagent(
       // Poll the entry's CURRENT pane: a sweep-initiated restart may have
       // moved the entry while an earlier poll still watched the dead pane.
       const surface = running.surface;
-      result = await poll(surface, AbortSignal.any([signal, getModuleAbortSignal()]), {
+      const pollSignal = AbortSignal.any([signal, getModuleAbortSignal()]);
+      const pollPromise = poll(surface, pollSignal, {
         interval: 1000,
         sessionFile,
         sentinelFile: running.sentinelFile,
@@ -3482,6 +3516,9 @@ async function watchSubagent(
           enforceBudget(running);
         },
       });
+      // Race the poll: an abort landing mid-round-trip must settle the
+      // watcher (and free its queue slot) immediately, not on the next tick.
+      result = await raceAbortSignal(pollPromise, pollSignal);
       if (result.reason !== "gone") break;
       // The polled pane is gone, but the entry may already sit on a
       // replacement pane (sweep-initiated restart): keep watching that one.
