@@ -61,6 +61,13 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 // PI_SUBAGENT_NAME inside the case itself.
 delete process.env.PI_SUBAGENT_NAME;
 
+// 16.2 followup (2026-11-02): the decision log resolves homedir() on every
+// write, so an inherited real HOME would append one hashed record per
+// confirm-path case to the user's real audit log on every run. Point HOME at
+// a per-process temp dir before the gate import; cases that need their own
+// home save this value and restore it.
+process.env.HOME = mkdtempSync(join(tmpdir(), "pgate-home-"));
+
 const gate = await import("../../../extensions/permission-gate/index.ts");
 const rc = await import("../../../extensions/permission-gate/rules/read-coverage.ts"); // S5: hash plumbing units
 

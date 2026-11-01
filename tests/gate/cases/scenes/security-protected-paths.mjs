@@ -16,6 +16,7 @@ export const cases = [
     "S4 protected path: write via symlink into HOME/.ssh confirms",
     "blocked",
     async (pi) => {
+      const prevHome = process.env.HOME; // harness fake HOME — restore, never drop
       const fakeHome = join(tmp, "fake-home-w");
       mkdirSync(join(fakeHome, ".ssh"), { recursive: true });
       rmSync(join(tmp, "ssh-link-w"), { force: true });
@@ -30,7 +31,7 @@ export const cases = [
         });
         return block ? { blocked: true, reason: block.reason } : { blocked: false };
       } finally {
-        delete process.env.HOME;
+        process.env.HOME = prevHome;
       }
     },
   ],
@@ -38,6 +39,7 @@ export const cases = [
     "S4 protected path: edit via symlink into HOME/.ssh confirms",
     "blocked",
     async (pi) => {
+      const prevHome = process.env.HOME; // harness fake HOME — restore, never drop
       const fakeHome = join(tmp, "fake-home-e");
       mkdirSync(join(fakeHome, ".ssh"), { recursive: true });
       writeFileSync(join(fakeHome, ".ssh", "authorized_keys"), "key\n");
@@ -56,7 +58,7 @@ export const cases = [
         });
         return block ? { blocked: true, reason: block.reason } : { blocked: false };
       } finally {
-        delete process.env.HOME;
+        process.env.HOME = prevHome;
       }
     },
   ],

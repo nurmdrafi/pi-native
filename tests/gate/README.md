@@ -56,6 +56,13 @@ greppable in one shot. Section files inside a single rule's directory are kebab-
 
 - The runner prints `N/N PASS`; a move or split must not change `N` (307 at the 2026-10-27
   split, including the R11 and PH1 cases added that day).
+- Decision log: every confirm-path verdict (destructiveConfirm ladder, all five lanes —
+  subagent fail-closed, prompt allow, remembered allow, UI allow, decline/no-UI block)
+  appends one NDJSON record — `{ts, verdict, rule, commandHash}` (sha256, 16 hex; never
+  raw command text) — to `<home>/logs/gate-decisions.ndjson`. The harness points
+  `HOME` at a per-process temp dir before importing the gate, so a run never touches
+  the real log; a case that needs its own home saves `process.env.HOME` and restores
+  it instead of deleting it (a delete leaks the real home to every later case).
 - Block reasons keep their family prefix and stay within the diet cap (220 chars; Anchor
   Guard 800).
 - Attribution is per section, not per assertion: a case that exercises a sibling rule may

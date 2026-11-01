@@ -34,8 +34,10 @@ git commit -m "fix: JSON parse" 2>&1 | tail -20
 git commit -m "fix: a\nb c" 2>&1 | tail -20
 # B20: git pull is a mutation, so the identical re-run must be allowed
 ?	npm test 2>&1 | tail -5 ## git pull ## npm test 2>&1 | tail -5
-# B16: heredoc bodies are data, not commands (\n unescaped to real newlines)
-?	cat > /tmp/heredoc-out <<'EOF'\nhead big.log\nEOF
+# B16 (fixed by gate 16.1, 2026-11-02): heredoc bodies are data, not commands (\n unescaped to real newlines)
+cat > /tmp/heredoc-out <<'EOF'\nhead big.log\nEOF
+# 16.1 (2026-11-02): heredoc body quoting interpreter-escape prose must not confirm
+cat > /tmp/heredoc-notes.md <<'EOF'\nDocs mention `node --eval` and `python3 -c` as escape routes.\nEOF
 # H1 (2026-10-08): viewing/dump rules replaced by the non-blocking output cap
 # (200 lines / 12 KB, spill pointer) — these used to block under R2/Reading
 cat big.log 2>&1

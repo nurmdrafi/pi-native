@@ -15,7 +15,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { freshGate, runBash, bashProbe, familyOfReason } from '../harness/stub.mjs';
 
 const HERE = import.meta.dirname;
 
@@ -38,11 +37,16 @@ writeFileSync(join(scratch, 'src', 'do.ts'), 'export const done = true;\n');
 
 // The fixtures exercise the BUILT-IN bash/read mechanics, so the native
 // P2/P1 first-rules must be opted out or every bash fixture would be blocked
-// by "Pibash-first" before its real family is measured (same reason
-// tests/permission-gate.test.mjs sets PI_NATIVE_BASH=0). The dedicated P2
-// coverage lives in that suite, which toggles the env per case.
-process.env.PI_NATIVE_BASH = '0';
-process.env.PI_NATIVE_READ = '0';
+// by "Pibash-first" before its real family is measured. The dedicated P2
+// coverage lives in tests/gate/cases/rules/nativeBashFirst.mjs, which toggles
+// the severity env per case (the old PI_NATIVE_* switches are retired —
+// 2026-11-02: this stale name is why every fixture read as Pibash-first).
+process.env.PGATE_NATIVE_BASH_FIRST = '0';
+process.env.PGATE_NATIVE_READ_FIRST = '0';
+// loader.ts snapshots severities once per process, so the opt-out must precede
+// the gate import — stub.mjs is therefore imported dynamically AFTER these
+// lines (a static import would hoist ahead of them and re-break the eval).
+const { freshGate, runBash, bashProbe, familyOfReason } = await import('../harness/stub.mjs');
 process.chdir(scratch); // fixture commands reference the scratch files by name
 
 // ---- fixture parsing ----

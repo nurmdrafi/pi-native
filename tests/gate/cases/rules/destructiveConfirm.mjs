@@ -3,6 +3,7 @@
 // so a new case belongs in the module of the rule it primarily asserts.
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -568,6 +569,232 @@ export const cases = [
       return r.blocked && r.reason?.includes("ask in chat")
         ? r
         : { blocked: false, reason: `wrong outcome: ${JSON.stringify(r)}` };
+    },
+  ],
+  // ---- 16.1 (2026-11-02): heredoc bodies are data, not commands —
+  // splitSegments tracks heredoc state, so only the opener segment is
+  // scanned. Live failure: three review children were blocked on /tmp
+  // durability writes solely because their markdown heredoc bodies quoted
+  // interpreter-escape prose from the agent docs they reviewed ----
+  [
+    "16.1 heredoc: body quoting interpreter-escape prose passes",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        "cat > /tmp/progress.md <<'EOF'\n## Review notes\nThe docs mention `node --eval` and `python3 -c` as escape routes.\nEOF",
+        { hasUI: false, mode: "print" },
+      ),
+  ],
+  [
+    "16.1 heredoc: opener redirect to /etc/passwd still confirms",
+    "blocked",
+    async (pi) =>
+      bash(
+        pi,
+        "cat >> /etc/passwd <<EOF\nroot2:x:0:0::/root:/bin/sh\nEOF",
+        denyUi(),
+      ),
+  ],
+  [
+    "16.1 heredoc: <<- delimiter strips leading tabs",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        "cat > /tmp/notes.md <<-EOF\n\t- example uses perl -e inline\n\tEOF",
+        { hasUI: false, mode: "print" },
+      ),
+  ],
+  [
+    "16.1 heredoc: quoted delimiter body with $ ; || is not split",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        "cat > /tmp/cost.txt <<'EOF'\ncost = \\$5 || none; rm -rf / is quoted prose\nEOF",
+        { hasUI: false, mode: "print" },
+      ),
+  ],
+  [
+    "16.1 heredoc: same-line continuation after the opener still scanned",
+    "blocked",
+    async (pi) =>
+      bash(
+        pi,
+        "cat > /tmp/h.md <<EOF && rm -rf /tmp/old\nbody quoting node --eval prose\nEOF",
+        denyUi(),
+      ),
+  ],
+  // ---- 16.1 wave-2 (review-16a): CRLF closing, quote-shape and verb-opener
+  // pins — F1 was a fail-open lane: the opener regex's \s*$ ate the opener
+  // line's \r but body lines kept theirs, so `TAG\r` never matched `TAG`,
+  // the heredoc never closed, and every later line was swallowed unscanned
+  // (real bash includes the \r in the delimiter word and closes on line 2) ----
+  [
+    "16.1 heredoc: CRLF delimiter closes; post-body line scanned",
+    "blocked",
+    async (pi) =>
+      bash(
+        pi,
+        "cat > /tmp/crlf.md <<EOF\r\nbody\r\nEOF\r\nrm -rf /tmp/old",
+        denyUi(),
+      ),
+  ],
+  [
+    "16.1 heredoc: unterminated quote swallows the opener — one segment, passes",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        'echo "prose; cat <<EOF\nrm -rf /tmp/old inside quotes\nEOF tail',
+        { hasUI: false, mode: "print" },
+      ),
+  ],
+  [
+    "16.1 heredoc: destructive verb before the opener still confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, "rm -rf /tmp/old <<EOF\nbody\nEOF", denyUi()),
+  ],
+  // ---- 16.2 (2026-11-02): symmetric decision log — one record per
+  // confirm-path verdict (allow AND block, both lanes); commands are hashed,
+  // never logged raw. Each case captures the file under a fake HOME (S4
+  // canary pattern) so records land in a temp home, not the real one. ----
+  [
+    "16.2 decision log: blocked destructive call writes one block record",
+    "blocked",
+    async (pi) => {
+      const home = mkdtempSync(join(tmpdir(), "pgate-decisions-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        const r = await bash(pi, "git reset --hard HEAD~1", {
+          hasUI: false,
+          mode: "print",
+        });
+        if (!r.blocked) return { blocked: false, reason: "call was not blocked" };
+        const f = join(home, ".pi", "agent", "logs", "gate-decisions.ndjson");
+        if (!existsSync(f))
+          return { blocked: false, reason: "no decision file under fake HOME" };
+        const text = readFileSync(f, "utf8");
+        const lines = text.split("\n").filter((l) => l.trim());
+        if (lines.length !== 1)
+          return { blocked: false, reason: `expected 1 record, got ${lines.length}` };
+        const rec = JSON.parse(lines[0]);
+        const wantHash = createHash("sha256")
+          .update("git reset --hard HEAD~1")
+          .digest("hex")
+          .slice(0, 16);
+        if (rec.verdict !== "block" || rec.rule !== "destructiveConfirm")
+          return { blocked: false, reason: `bad verdict/rule: ${lines[0].slice(0, 100)}` };
+        if (rec.commandHash !== wantHash || !/^[0-9a-f]{16}$/.test(rec.commandHash))
+          return { blocked: false, reason: `bad commandHash: ${rec.commandHash}` };
+        if (!/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(rec.ts))
+          return { blocked: false, reason: `bad ts: ${rec.ts}` };
+        if (text.includes("git reset"))
+          return { blocked: false, reason: "raw command text present in log" };
+        return { blocked: true };
+      } finally {
+        if (prevHome === undefined) delete process.env.HOME;
+        else process.env.HOME = prevHome;
+      }
+    },
+  ],
+  [
+    "16.2 decision log: subagent lane fail-closed writes a block record",
+    "blocked",
+    async (pi) => {
+      const home = mkdtempSync(join(tmpdir(), "pgate-decisions-"));
+      const prevHome = process.env.HOME;
+      const hadMarker = "PI_SUBAGENT_NAME" in process.env;
+      const prevMarker = process.env.PI_SUBAGENT_NAME;
+      process.env.HOME = home;
+      process.env.PI_SUBAGENT_NAME = "scout";
+      try {
+        // auto-approving UI: the subagent short-circuit must beat the ladder
+        const r = await bash(pi, "git reset --hard HEAD~1");
+        if (!r.blocked)
+          return { blocked: false, reason: "subagent lane did not fail closed" };
+        const f = join(home, ".pi", "agent", "logs", "gate-decisions.ndjson");
+        if (!existsSync(f))
+          return { blocked: false, reason: "no decision file under fake HOME" };
+        const lines = readFileSync(f, "utf8").split("\n").filter((l) => l.trim());
+        const rec = lines.length === 1 ? JSON.parse(lines[0]) : undefined;
+        if (
+          !rec ||
+          rec.verdict !== "block" ||
+          rec.rule !== "destructiveConfirm" ||
+          !/^[0-9a-f]{16}$/.test(rec.commandHash)
+        )
+          return {
+            blocked: false,
+            reason: `bad record: ${lines.join(" | ").slice(0, 120)}`,
+          };
+        return { blocked: true };
+      } finally {
+        if (prevHome === undefined) delete process.env.HOME;
+        else process.env.HOME = prevHome;
+        if (hadMarker) process.env.PI_SUBAGENT_NAME = prevMarker;
+        else delete process.env.PI_SUBAGENT_NAME;
+      }
+    },
+  ],
+  [
+    "16.2 decision log: allowed non-destructive call writes no record",
+    "pass",
+    async (pi) => {
+      const home = mkdtempSync(join(tmpdir(), "pgate-decisions-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        const r = await bash(pi, "ls -la src"); // benign: never reaches the confirm ladder
+        if (r.blocked) return r;
+        const f = join(home, ".pi", "agent", "logs", "gate-decisions.ndjson");
+        if (existsSync(f))
+          return { blocked: true, reason: "benign call wrote a decision record" };
+        return { blocked: false };
+      } finally {
+        if (prevHome === undefined) delete process.env.HOME;
+        else process.env.HOME = prevHome;
+      }
+    },
+  ],
+  [
+    "16.2 decision log: approved destructive call writes one allow record",
+    "pass",
+    async (pi) => {
+      const home = mkdtempSync(join(tmpdir(), "pgate-decisions-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        const r = await bash(pi, "git reset --hard HEAD~1"); // auto-approving UI
+        if (r.blocked) return r;
+        const f = join(home, ".pi", "agent", "logs", "gate-decisions.ndjson");
+        if (!existsSync(f))
+          return { blocked: true, reason: "approval left no structured record" };
+        const text = readFileSync(f, "utf8");
+        const lines = text.split("\n").filter((l) => l.trim());
+        if (lines.length !== 1)
+          return { blocked: true, reason: `expected 1 record, got ${lines.length}` };
+        const rec = JSON.parse(lines[0]);
+        const wantHash = createHash("sha256")
+          .update("git reset --hard HEAD~1")
+          .digest("hex")
+          .slice(0, 16);
+        if (
+          rec.verdict !== "allow" ||
+          rec.rule !== "destructiveConfirm" ||
+          rec.commandHash !== wantHash
+        )
+          return { blocked: true, reason: `bad record: ${lines[0].slice(0, 100)}` };
+        if (text.includes("git reset"))
+          return { blocked: true, reason: "raw command text present in log" };
+        return { blocked: false };
+      } finally {
+        if (prevHome === undefined) delete process.env.HOME;
+        else process.env.HOME = prevHome;
+      }
     },
   ],
 ];

@@ -13,6 +13,7 @@ export const cases = [
     "S5 policy: protected-path edit confirms through H2 before binding blocks",
     "blocked",
     async (pi) => {
+      const prevHome = process.env.HOME; // harness fake HOME — restore, never drop
       const fakeHome = join(tmp, "fake-home-s5a");
       mkdirSync(join(fakeHome, ".ssh"), { recursive: true });
       writeFileSync(join(fakeHome, ".ssh", "authorized_keys"), "key\n");
@@ -39,7 +40,7 @@ export const cases = [
           ? { blocked: true, reason: block.reason }
           : { blocked: false, reason: `order: ${block?.reason ?? "(pass)"}` };
       } finally {
-        delete process.env.HOME;
+        process.env.HOME = prevHome;
       }
     },
   ],
@@ -47,6 +48,7 @@ export const cases = [
     "S5 policy: binding warn on an approved protected path still fires",
     "pass",
     async (pi) => {
+      const prevHome = process.env.HOME; // harness fake HOME — restore, never drop
       const fakeHome = join(tmp, "fake-home-s5b");
       mkdirSync(join(fakeHome, ".ssh"), { recursive: true });
       writeFileSync(join(fakeHome, ".ssh", "authorized_keys"), "key\n");
@@ -80,7 +82,7 @@ export const cases = [
           ? { blocked: false }
           : { blocked: true, reason: `both layers: ${noteOf(res) || "(none)"}` };
       } finally {
-        delete process.env.HOME;
+        process.env.HOME = prevHome;
       }
     },
   ],
