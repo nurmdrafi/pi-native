@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   readdirSync,
@@ -75,6 +75,7 @@ import {
   type EnforcedBudget,
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
+import { scanToolManifests } from "./tool-manifest.ts";
 import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, subagentHistoryPath, usageTokens, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra, type SubagentHistoryRecord } from "./inbox.ts";
 import {
   getSubagentActivityFile,
@@ -253,13 +254,14 @@ function getAgentConfigDir(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 }
 
-// ── Runtime tool-extension registration ─────────────────────────────────────
-// `getToolExtensionPath` otherwise only knows a closed set of tool names. Other
-// pi extensions that bundle a tool for subagents (e.g. a project-local
-// extension exposing a bespoke tool) register its name → extension-file path
-// here at load/session_start time so a child process can be launched with
-// `--no-extensions` + an explicit `-e <path>` for it. Mirrors the legacy
-// `subagents` extension's `registerToolExtension` hook.
+// ── Tool-extension resolution ────────────────────────────────────────────────
+// Shipped tools resolve declaratively, with no load order involved: a
+// `pi-tools.json` manifest inside the extension directory (tool-manifest.ts),
+// then the directory-naming convention (`web_search` → `web-search/index.ts`).
+// This runtime registry is the last-resort layer for OTHER pi extensions that
+// bundle a bespoke tool (e.g. a project-local extension): they register name →
+// extension-file path here at load/session_start time so a child process can
+// be launched with `--no-extensions` + an explicit `-e <path>` for it.
 const EXTRA_TOOL_EXTENSIONS = new Map<string, string>();
 
 /** Register (or re-register) a custom tool's backing extension file. */
@@ -288,35 +290,35 @@ export function registerToolExtension(name: string, extensionPath: string): void
 };
 
 /**
- * Map a custom (non-built-in) tool name to the pi-extension file that
- * registers it. Used to build the child's `--extension` whitelist after
- * `--no-extensions` disables global discovery. Returns undefined for built-in
- * tools and for unknown names (which simply won't be granted).
+ * Map a non-built-in tool name to the pi-extension file that registers it.
+ * Used to build the child's `--extension` whitelist after `--no-extensions`
+ * disables global discovery. Resolution is declarative and load-order
+ * independent — nothing depends on an extension having already run:
+ *   1. a shipped `pi-tools.json` manifest (tool-manifest.ts) naming the tool;
+ *   2. the directory-naming convention: tool `web_search` →
+ *      `<extensions base>/web-search/index.ts` when that file exists;
+ *   3. a runtime-registered extension path (registerToolExtension).
+ * Returns undefined for built-in tools and for unknown names — the spawn-time
+ * guard in applySandboxToParts warns about those instead of dropping them
+ * silently.
  */
-function getToolExtensionPath(tool: string): string | undefined {
+function getToolExtensionPath(tool: string, manifestIndex?: Map<string, string>): string | undefined {
   if (BUILTIN_TOOLS.has(tool)) return undefined;
-  // The four spawning tools are registered by THIS extension.
+  // The spawning tools are registered by THIS extension.
   if ((SPAWNING_TOOLS as readonly string[]).includes(tool)) {
     return fileURLToPath(import.meta.url);
   }
+  // Tools bundled by THIS extension itself (a hardened shell for sandboxed
+  // children) resolve from its own directory, independent of any agent tree.
+  const bundled = join(SUBAGENTS_DIR, "tools", `${tool.replace(/_/g, "-")}.ts`);
+  if (existsSync(bundled)) return bundled;
   const extBase = join(getAgentConfigDir(), "extensions");
-  const map: Record<string, string> = {
-    web_search: join(extBase, "web-search", "index.ts"),
-    web_fetch: join(extBase, "web-fetch", "index.ts"),
-    video_extract: join(extBase, "video-extract", "index.ts"),
-    youtube_search: join(extBase, "youtube-search", "index.ts"),
-    google_image_search: join(extBase, "google-image-search", "index.ts"),
-    piread: join(extBase, "piread", "index.ts"),
-    piedit: join(extBase, "piedit", "index.ts"),
-    pibash: join(extBase, "pibash", "index.ts"),
-    pidx: join(extBase, "pidx", "index.ts"),
-    safe_bash: join(SUBAGENTS_DIR, "tools", "safe-bash.ts"),
-  };
-  // Prefer the built-in path, but fall back to a runtime-registered extension
-  // when that path no longer exists on disk (e.g. a built-in tool extension
-  // was disabled/removed but a project-local extension re-registered it).
-  const builtin = map[tool];
-  if (builtin && existsSync(builtin)) return builtin;
+  const manifestPath = (manifestIndex ?? scanToolManifests(extBase)).get(tool);
+  if (manifestPath && existsSync(manifestPath)) return manifestPath;
+  const conventional = join(extBase, tool.replace(/_/g, "-"), "index.ts");
+  if (existsSync(conventional)) return conventional;
+  // Fall back to a runtime-registered extension when nothing on disk
+  // resolves (e.g. a project-local extension exposing a bespoke tool).
   return EXTRA_TOOL_EXTENSIONS.get(tool);
 }
 
@@ -1488,16 +1490,34 @@ function applySandboxToParts(
     parts.push("--tools", shellEscape(loadout.toolAllowlist));
 
     const extPaths = new Set<string>();
+    // Scan the manifest tree once per spawn, not once per allowlisted tool.
+    const toolManifests = scanToolManifests(join(getAgentConfigDir(), "extensions"));
     for (const tool of loadout.toolAllowlist.split(",")) {
-      const extPath = getToolExtensionPath(tool);
-      if (extPath && existsSync(extPath)) extPaths.add(extPath);
+      if (!tool) continue;
+      const extPath = getToolExtensionPath(tool, toolManifests);
+      if (extPath && existsSync(extPath)) {
+        extPaths.add(extPath);
+        continue;
+      }
+      // Built-ins need no extension; anything else that resolves to nothing
+      // (typo, unregistered name, extension removed from disk) would silently
+      // strip the tool from the child — say so once at spawn time instead.
+      if (BUILTIN_TOOLS.has(tool)) continue;
+      console.error(
+        `[pi-subagents] allowlisted tool "${tool}" resolves to no extension path — the child will NOT receive it`,
+      );
     }
     // Local addition (not upstream): re-enable extra global extensions inside
     // the sandbox. PI_SUBAGENT_EXTRA_EXTENSIONS (colon-separated paths)
     // overrides; default re-enables the permission-gate extension when present
     // so sandboxed subagents keep the parent session's context-economy guards.
-    const extraExts = defaultExtraExtensions();
-    for (const extPath of extraExts) {
+    const { kept, dropped } = resolveExtraExtensions(defaultExtraExtensions());
+    // A sandboxed child without its permission gate is the condition to
+    // surface, never to skip silently — env entry or shipped default alike.
+    for (const miss of dropped) {
+      console.error(`[pi-subagents] PI_SUBAGENT_EXTRA_EXTENSIONS entry not found, dropping: ${miss}`);
+    }
+    for (const extPath of kept) {
       if (!extPaths.has(extPath) && existsSync(extPath)) parts.push("-e", shellEscape(extPath));
     }
     for (const extPath of extPaths) {
@@ -1520,6 +1540,36 @@ function defaultExtraExtensions(): string[] {
     .split(":")
     .map((p) => p.trim())
     .filter(Boolean);
+}
+
+/** Resolve extra-extension entries against disk at spawn-args build time:
+ *  existing paths pass through; an entry ending in .ts/.js/.mjs whose file
+ *  is absent but whose parent directory exists self-heals to that directory
+ *  (the extension loader resolves a directory to its index.ts — the footgun
+ *  documented above defaultExtraExtensions); anything else with no existing
+ *  target is returned as dropped, once per path, so the caller warns instead
+ *  of silently spawning children without the permission gate. Accepted
+ *  trade-off: parent-dir existence is not proof of a loadable extension — a
+ *  healed directory the extension loader rejects still leaves the child
+ *  gateless with no warning from here. */
+function resolveExtraExtensions(entries: string[]): { kept: string[]; dropped: string[] } {
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const entry of entries) {
+    const p = entry.trim();
+    if (!p) continue;
+    if (existsSync(p)) {
+      kept.push(p);
+      continue;
+    }
+    const ext = extname(p);
+    if ((ext === ".ts" || ext === ".js" || ext === ".mjs") && existsSync(dirname(p))) {
+      kept.push(dirname(p));
+      continue;
+    }
+    if (!dropped.includes(p)) dropped.push(p);
+  }
+  return { kept, dropped };
 }
 
 function buildPiPromptArgs(params: {
@@ -2194,6 +2244,7 @@ export const __test__ = {
   buildSubagentToolAllowlist,
   applySandboxToParts,
   defaultExtraExtensions,
+  resolveExtraExtensions,
   buildPiPromptArgs,
   formatWidgetRightLabel,
   observeRunningSubagent,
