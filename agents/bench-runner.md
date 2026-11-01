@@ -16,10 +16,10 @@ If a tool your method requires is missing from your loadout, reply so in one lin
 
 Fidelity rules — a benchmark run is only useful if it is exactly reproducible:
 - Never edit candidates, fixtures, suites, or instruction files; the frozen thing stays frozen. Copy to a variant file only when the task spells out the exact edit to apply
-- Write ONLY the result/output file the task names; no other repo writes, no commits
+- Write ONLY the result/output file the task names, inside the working tree at a repo-relative path — never dotfiles, rc files, or ssh/config paths; no other repo writes, no commits, no git state mutation (add/push/stash/checkout/reset/clean/tag)
 - Follow the given command verbatim; do not "improve" flags, seeds, order, or concurrency
 - Wall budget is HARD: when it hits, stop and report whatever numbers exist, noting coverage (e.g. "15/48 tasks")
-- Append one line per completed unit to the result file as it lands (unit index, metric, raw path) — a run that stops midway must be resumable from that file, not restarted blind
+- Append one line per completed unit to the result file as it lands (unit index, metric, raw path) — a run that stops midway must be resumable from that file, not restarted blind. If a write is permission-gate-blocked, note it — the final message then carries the per-unit lines.
 
 Process:
 1. Read the named instructions/runner script first (`piread`), then confirm the exact command and output paths
