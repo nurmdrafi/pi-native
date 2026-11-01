@@ -54,7 +54,7 @@ function isBashKind(event: { toolName: string }): boolean {
 }
 
 import type { ExtensionAPI, ExtensionHandler } from "@earendil-works/pi-coding-agent";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { homedir } from "os";
 import {
   appendFileSync,
@@ -164,6 +164,32 @@ const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"];
 const RERUN_WINDOW_MS = 10 * 60_000;
 /** Re-block window: shorter than R10 — the verbatim re-send pattern is immediate (2026-10-08 audit: 3s and 2.5s gaps) */
 const REBLOCK_WINDOW_MS = 2 * 60_000;
+/**
+ * 16.2 (2026-11-02) symmetric decision log: declines surface as isError
+ * tool results but approvals left no structured record, so a post-hoc audit
+ * could not reconstruct what was allowed. One append-only NDJSON record per
+ * confirm-path verdict, both lanes (user approval and subagent fail-closed).
+ * Commands are hashed, never logged raw — they can carry secrets and prose.
+ * homedir() resolves and mkdir runs on every write (nothing cached at import),
+ * so a fake HOME set later in the same process still captures the file.
+ */
+const logDecision = (verdict: "allow" | "block", raw: string): void => {
+  try {
+    const file = join(homedir(), ".pi", "agent", "logs", "gate-decisions.ndjson");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(
+      file,
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        verdict,
+        rule: "destructiveConfirm",
+        commandHash: createHash("sha256").update(raw).digest("hex").slice(0, 16),
+      })}\n`,
+    );
+  } catch {
+    // best-effort audit: a logging failure must never change a verdict or break the tool call
+  }
+};
 export default function (pi: ExtensionAPI) {
   /**
    * In-context coverage (2026-10-05 audit): per absolute path, the union of
@@ -399,15 +425,21 @@ export default function (pi: ExtensionAPI) {
     // read at call time, not import time — the marker can differ per
     // invocation in the same process
     if (process.env.PI_SUBAGENT_NAME) {
+      logDecision("block", key); // subagent lane: the fail-closed auto-no is a verdict too
       return `Permission Gate (Destructive): ${subject} is not permitted for subagents — continue without it and note it in your report.`;
     }
-    if (promptApproves) return undefined;
+    if (promptApproves) {
+      logDecision("allow", key);
+      return undefined;
+    }
     if (
       lastApprovedDestructive &&
       lastApprovedDestructive.cmd === key &&
       Date.now() - lastApprovedDestructive.ts < APPROVED_WINDOW_MS
-    )
+    ) {
+      logDecision("allow", key); // remembered approval: still this call's verdict
       return undefined;
+    }
     let approved = false;
     if (ctx?.hasUI && typeof ctx.ui?.confirm === "function") {
       const t = Number(process.env.PGATE_CONFIRM_TIMEOUT_MS);
@@ -427,8 +459,10 @@ export default function (pi: ExtensionAPI) {
     }
     if (approved) {
       lastApprovedDestructive = { cmd: key, ts: Date.now() };
+      logDecision("allow", key); // at the moment the verdict is decided, not on a later state change
       return undefined;
     }
+    logDecision("block", key);
     return (
       `Permission Gate (Destructive): ${subject} needs the user's approval ` +
       `first — ${ctx?.hasUI ? "the user declined" : "no chat approval, no confirm dialog"}; ask in chat and wait. Never run it unprompted.`
