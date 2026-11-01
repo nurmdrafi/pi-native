@@ -3,7 +3,8 @@
 # Invoked by .husky/post-merge and .husky/post-rewrite on macOS + Linux.
 #
 # Always runs the pidoc health check. Safe, non-privileged fixes apply
-# automatically (npm deps + host links, pidoc shim, pidx rebuild). Missing
+# automatically (npm deps + host links, dashboard UI build, pidoc shim,
+# pidx rebuild). Missing
 # toolchains (cargo/rg/gh/jq/fd) are reported with their fix command — installs
 # are never run from here (ask-first rule). Always exits 0.
 set -u
@@ -18,9 +19,10 @@ echo "== after-pull: syncing setup ($(uname -s))"
 . "$ROOT/scripts/lib/install-native.sh"
 . "$ROOT/scripts/lib/progress.sh"
 
-# 5 counted steps: deps, piread, piedit, pibash, auto-heal. The pidoc health
-# check stays un-wrapped — its FAIL/WARN rows are the deliverable, not noise.
-ui_total 5
+# 6 counted steps: deps, dashboard, piread, piedit, pibash, auto-heal. The
+# pidoc health check stays un-wrapped — its FAIL/WARN rows are the deliverable,
+# not noise.
+ui_total 6
 
 # 1. Node deps + host pi package links. Fresh install only when the manifest
 #    moved in this pull or node_modules is missing; link-pi self-validates.
@@ -39,6 +41,30 @@ if command -v npm >/dev/null 2>&1; then
   fi
 else
   ui_step "npm deps — npm not found (install Node, then: sh scripts/bootstrap.sh)"
+fi
+
+# 1b. dashboard UI (dashboard/dist is gitignored; the dashboard server serves
+#     it, so a fresh checkout has source but no UI until this builds it).
+#     Rebuild when dist is missing or this pull touched dashboard sources.
+if [ -d dashboard ] && [ -f dashboard/package.json ]; then
+  if command -v npm >/dev/null 2>&1; then
+    dash_changed=0
+    [ -f dashboard/dist/index.html ] || dash_changed=1
+    if git rev-parse --verify -q ORIG_HEAD >/dev/null 2>&1 &&
+       ! git diff --quiet ORIG_HEAD HEAD -- dashboard/package.json \
+         dashboard/package-lock.json dashboard/src dashboard/index.html \
+         dashboard/vite.config.ts dashboard/scripts 2>/dev/null; then
+      dash_changed=1
+    fi
+    if [ "$dash_changed" = 1 ]; then
+      ui_run "dashboard UI (dist missing or sources changed): deps + build" \
+        sh -c 'cd dashboard && npm install --no-audit --no-fund && npm run build'
+    else
+      ui_step "dashboard UI up to date (dist present, sources unchanged)"
+    fi
+  else
+    ui_step "dashboard UI — npm not found (install Node, then: cd dashboard && npm install && npm run build)"
+  fi
 fi
 
 # 2. pidoc shim (bin/ is gitignored, so git never delivers it)

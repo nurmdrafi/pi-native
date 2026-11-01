@@ -3,9 +3,10 @@
 #
 # Usage: sh scripts/bootstrap.sh          (from repo root or anywhere)
 #
-# Does:  npm deps + pi package links, pidoc shim into bin/, pidx + piread
-#        builds when cargo exists. Never installs anything itself — prints the exact
-#        commands and exits when a toolchain is missing (ask-first rule).
+# Does:  npm deps + pi package links, pidoc shim into bin/, dashboard UI
+#        build, pidx + piread builds when cargo exists. Never installs anything
+#        itself — prints the exact commands and exits when a toolchain is
+#        missing (ask-first rule).
 # After this, `git pull` re-syncs via .husky/post-merge → scripts/after-pull.sh.
 set -eu
 
@@ -88,6 +89,11 @@ if [ -n "$CARGO" ]; then
   echo "== outline: built + installed to bin/outline"
 fi
 
-# 7. health check
+# 7. dashboard UI (dashboard/dist is gitignored; the dashboard server serves
+#    it, so a fresh clone has source but no UI until this builds it)
+(cd dashboard && npm install --no-audit --no-fund && npm run build)
+echo "== dashboard: deps + dist built"
+
+# 8. health check
 node skills/pidoc/scripts/pidoc.mjs || true
 echo "== done. Put $ROOT/bin on PATH for pidoc/pidx."
