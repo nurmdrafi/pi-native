@@ -27,6 +27,7 @@
 - Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, anything explicitly requested.
 - Loop: plan → do → verify (verify scope: § Verification).
 - Circling check: same file edited 3+ times, or the same failing fix retried twice, in one turn → stop, state what remains and what failed, ask before continuing.
+- Data files: logs and temp/intermediate data written for later retrieval use NDJSON — one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
 
 ### Subagent workflow
 - Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked.
@@ -41,6 +42,8 @@
 - Follow-ups resume the same named agent (warm context); keep prompts prefix-stable so the warm context holds. A result recovered from a dead session is information; act only if it needs action.
 - Guard orchestrator context: at most ~6 children running at once; digest each finished wave into a scratch file (one line per agent — verdict, paths) and work from that file, not re-delivered results; prefer a fresh session over compacting one session through a large effort.
 - Every worker prompt carries scope (files it may touch), contract, verification command, and the bans: no commits, no installs, no working around blockers — report them.
+- Task sizing: every spawned task is scope-driven and measurable, sized to ~10 minutes or less — split bigger scopes into sequential waves. Before spawning or executing, check the wave ledger/history/cache for equivalent in-flight or completed work; reuse instead of duplicating.
+- Wave autonomy: whenever pending work has no dependency conflict (free file-set), start it immediately — never wait to be told. Ask only for scope, priority, cost, or safety decisions the user must own. On every wave completion, dispatch the next unblocked wave without prompting.
 - End every wave with an independent check of the combined result — reviewer for diffs, verifier for criteria; never merge unverified parallel work.
 
 

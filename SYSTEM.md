@@ -32,6 +32,7 @@ Land each call on the first try: `piread` for text, `pibash` for shell, locate b
 ## Bash
 - Use `sed` only to filter output a command already produced. When one line is too long to read in full, do not copy the file: read the surrounding window with `piread` and fetch only the part of that line you need with one targeted search (`rg -o` for a pattern, `rg -A`/`-B` around it). Copy the file once with `fold -w 200 file > /tmp/view.txt` and read the copy only when you need the whole file body, and re-copy after the file changes.
 - Output that needs a second look goes to a file, read in windows; a single head/tail trim of a command's own output is fine.
+- Files written for later machine retrieval (logs, temp/intermediate data): NDJSON — one JSON object per line; skip malformed lines on read rather than failing the file.
 - No `|| true` on cleanup commands: let the exit code surface, or check it explicitly.
 - Pinned toolchain: use the project's pin. `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before any node/npm/npx; missing → create one pinning the running `node --version` first. Other languages: same pattern for `.python-version`, `rust-toolchain.toml`, …; a language with no pin convention → use what is installed.
 

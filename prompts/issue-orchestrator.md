@@ -30,10 +30,11 @@ PRIME DIRECTIVE: complete the batch as fast as possible — use subagents for AL
 - Args on resume may extend the note; never shrink executed scope.
 
 ## 3. Group + order
-- Group by file/module ownership, 3-8 issues per group; file overlap between groups → merge or sequence.
+- Group by file/module ownership, 3-8 issues per group, one branch/PR per group; file overlap between groups no longer forces merge-or-sequence for safety — overlapping declared write scopes auto-queue at the runtime layer (FIFO; disjoint work keeps parallel lanes). Locks resolve absolute paths per spawn `cwd`, so queueing bites only within one working tree; cross-worktree overlap still rests on isolation + PR review — sequence or merge those groups explicitly.
 - Order: shared types/schema/config first → core → UI/integrations → docs/tests last; high risk early.
 - Branches: `feat/|fix/|chore/<module>-<short-goal>`, one per group. Max 3 concurrent subagents total (workers + reviewers combined); one worktree per group, never two agents in one worktree. Intra-group parallelism: temp branches in separate worktrees, folded into the group branch once free.
-- Pre-spawn check: one clear outcome per group · no two LIVE groups share files · every seed issue in exactly one group · acceptance criteria present · cascade-prone issues (typing/refactor sweeps) get split into explicit sequential sub-tasks with scope caps at planning time — never let one worker discover its own cascade.
+- Declared write scope: every spawn that will edit files carries `files: ["<repo-relative paths or dirs>"]` on the subagent call — repo-relative to the spawn's `cwd` (set `cwd` explicitly); deliverables that do not exist yet are fine. Read-only spawns (scout/reviewer/verifier) declare nothing and never queue — keep waves of them parallel.
+- Pre-spawn check: one clear outcome per group · every editing spawn declares files[]; overlaps are runtime-queued — declare scopes so the queue can order them · every seed issue in exactly one group · acceptance criteria present · cascade-prone issues (typing/refactor sweeps) get split into explicit sequential sub-tasks with scope caps at planning time — never let one worker discover its own cascade.
 - Write the plan into `docs/issue-orchestrator-state.md` (fixed name; never commit or stage it). No approval stop — proceed.
 - State schema: run header (base, note, seed chain) · per group: name, order, branch, PR URL · per issue: status ∈ `pending|fixing|in-review|pr-open|blocked-waiting-merge|blocked|skipped|done` + reason. Edits: one surgical replacement per target line, never oldText spanning section headers, verify each batch landed.
 

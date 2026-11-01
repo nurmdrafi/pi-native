@@ -35,7 +35,7 @@ Edits take effect on the next session start (or via `/reload-runtime` if adopted
 | Var | Purpose |
 | --- | --- |
 | `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_BASH_BIN` / `PI_PIDX_BIN` | Override the native binary path (`bin/<tool>` by default). Used by the parity suites to point an extension at a throwaway binary and exercise the one-shot rung; also non-standard installs. |
-| `PI_SUBAGENT_EXTRA_EXTENSIONS` | Colon-separated extension paths re-enabled inside sandboxed subagent spawns (default re-enables `permission-gate.ts`). Set by the orchestrator, not the user. |
+| `PI_SUBAGENT_EXTRA_EXTENSIONS` | Colon-separated extension paths re-enabled inside sandboxed subagent spawns (default re-enables the `permission-gate` extension directory; a `.ts` suffix silently drops the gate). Set by the orchestrator, not the user. |
 | `PI_SESSION_ID` / `PI_SESSION_FILE` / `PI_PROVIDER` / `PI_MODEL` / `PI_REASONING_LEVEL` | Session context keys injected by pi and forwarded to native-tool child processes so commands see the same `PI_*` context (see `extensions/pibash/index.ts`). |
 | `PI_CODING_AGENT_DIR` | Overrides the agent config directory (`~/.pi/agent` by default). |
 | `PI_PIDX_MAX_INLINE` | Inline extract cap for `pidx` output (default 2000 chars; larger output is written to a file and referenced by pointer). |

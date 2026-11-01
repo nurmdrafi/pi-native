@@ -1,8 +1,8 @@
 # Subagents extension
 
 Interactive tmux-backed subagents for pi: the `subagent` (spawn),
-`subagent_message` (steer/resume), and `subagents_list` tools plus the
-`/subagents` command. Vendored from
+`subagent_message` (steer/resume), `subagents_list`, and `subagent_control`
+(cancel/restart) tools plus the `/subagents` command. Vendored from
 `amosblomqvist/pi-interactive-subagents@c3e8b53c0754ae5ccc19fdab5a7481ec039bc2f7`
 with local patches folded in.
 
@@ -33,7 +33,8 @@ with local patches folded in.
 
 ## Activation
 
-Spawning tools are registered but gated (zero prompt tokens) until a trigger:
+Spawning and control tools are registered but gated (zero prompt tokens) until a
+trigger:
 `PI_SUBAGENTS=1` at process start, `/subagents on`, or any
 `/subagents <agent> [task]` spawn. Subagent sessions always register active.
 
@@ -42,8 +43,42 @@ Spawning tools are registered but gated (zero prompt tokens) until a trigger:
 Parallel spawns share one provider quota; several simultaneous children
 429-storm it and every run slows to retry backoff. Spawns are therefore
 capped: extra ones queue FIFO and launch as slots free. `PI_SUBAGENT_MAX_CONCURRENT`
-sets the cap (default 3; values < 1 mean unlimited). A slot is held from launch
-until the child's watcher settles.
+sets the cap (default 5; values < 1 mean unlimited). A slot is held from launch
+until the child's watcher settles. Declaring overlapping write scopes parks a
+spawn on a second, finer queue — see File-scope locks.
+
+## File-scope locks
+
+The `subagent` spawn tool's `files` param (optional string array,
+repo-relative to the child `cwd`, at most 100 entries) declares a child's
+WRITE scope. It is not existence-checked — name deliverables that do not
+exist yet, so a create-task output locks before the file does. Pair it with
+an explicit `cwd`: the git baseline behind `files_changed` attribution is
+captured there. Paths parsed from the task text are context-only and never
+lock — they feed prior-work injection (Result records and history).
+
+Only declared write scopes lock, and only within one working tree:
+conflicts compare absolute paths resolved against each child's `cwd`, so
+the same repo-relative path in two worktrees never conflicts. Two scopes
+conflict on segment-prefix overlap: an exact file match, or one side a
+directory owning the other's
+subtree. A colliding spawn queues FIFO behind its owner — the ack names the
+owner; launch and result still arrive automatically — and a queued
+reservation already owns its paths, so a third colliding spawn queues behind
+it too. The queue drains as a skip-scan: parked entries keep their place in
+line while non-conflicting spawns keep launching. Unscoped and read-only
+spawns never wait on a lock — only on the concurrency cap.
+
+`PI_SUBAGENTS_SCOPE_MODE` selects behavior: `queue` (default) parks
+colliding spawns, `warn` launches them with a warning, `off` disables scope
+tracking (prior-work injection still runs). In `warn` mode the overlapping
+spawn still reserves its declared scope, so a later `queue`-mode spawn parks
+behind it. A lock releases when the owner's
+result is delivered — every finalization path funnels there — and a
+pane-loss restart keeps the reservation until the restarted child delivers.
+`subagents_list` lists running and queued owners under "Declared file
+scopes (write locks)" with their state; the widget marks them `▣` plus a
+count, paths repo-relative and capped.
 
 ## Detached subagents
 
@@ -69,6 +104,41 @@ delivered; dead ones finalize as `pane_lost`.
    in the parent polls for it (or a `.exit` sidecar on error) and delivers the
    child's final assistant message back to the parent as a steer message.
 
+Sandboxed children (spawned with a tool allowlist) start with global extension
+discovery off; the permission-gate extension is re-enabled by default (its
+`extensions/permission-gate` directory under the agent home), and
+`PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated paths) overrides that default.
+
+## Result records and history
+
+A delivered result carries `files_changed` — repo-relative paths added,
+removed, or status-changed since a spawn-time `git status` baseline, sorted
+and capped at 200 — plus `files_changed_source: git_status_delta` as
+provenance. The fields are omitted when the baseline or git is unavailable:
+spawning never depends on git. A declared `files` scope trims the delta to
+itself — sibling edits outside the scope are not attributed to the child; a
+parsed scope does not trim.
+
+Every result appends a line to `<repo-root>/.pi/subagent-history.jsonl`
+shaped `{id, ts, name, files_changed, files_read, diff, summary, turns,
+tokens, costUsd, durationMs}` (zero-change reads included). Both the child's
+self-report and the parent's delivery append; the parent's line is the rich
+one (`files_read` — paths the child read — capped at 50, `diff` at 1500
+chars, `summary` at 300 chars). The file is append-only and survives
+result-inbox drain and compaction; past 1000 lines it keeps the most recent
+500 before the next append.
+
+The `subagent_result` renderer shows at most 20 changed paths, then
+`… +N more`; the full list stays in the message details.
+
+History feeds back into spawns as prior-work injection: when a child's scope
+(declared `files`, else task-text paths that exist on disk) overlaps a recent
+record's `files_changed` or `files_read`, the spawn appends a "Prior work
+touching your scope" block to the task text — at most 2 of the last 20
+records, 1200 chars total (changed paths capped at 10, diff excerpt 800,
+summary 300) — telling the child not to re-read those files to reconstruct
+context. It runs in every `PI_SUBAGENTS_SCOPE_MODE`.
+
 ## Steering and resume
 
 `subagent_message({ name, message })` steers a running child — delivered at
@@ -79,6 +149,36 @@ relaunching unrestricted, and a name still running is steered instead of
 resumed (two processes on one session file would corrupt it). Both paths are
 fire-and-forget: the result arrives later as a steer message. Resumed and
 auto-restarted runs are not re-budgeted.
+
+## Control verbs and live metrics
+
+`subagent_control({ action, name })` acts on a live child by display name
+(`index.ts` `cancelRunningSubagent`, `cancelQueuedSpawn`, `restartSubagent`).
+Like spawn it is fire-and-forget — the outcome arrives later as a steer
+message, so do not poll.
+
+- `cancel`, running child — cancel intent is recorded first (it blocks the
+  pane-loss auto-restart gates), then the pane is stopped through the
+  budget-stop sequence: interrupt, grace window, kill. Finalization goes
+  through the standard delivery funnel, which releases the declared scope
+  lock, aborts the watcher (its settle frees the slot), and delivers exactly
+  one result — synthesized `cancelled_by_parent`; a real delivery racing the
+  grace window wins and the synthesis becomes a no-op.
+- `cancel`, queued spawn — detached from the FIFO, its scope and name
+  reservations released, unparking spawns queued behind it; a queued entry
+  holds no concurrency slot, so the holder count is untouched.
+- `restart` — the live pane is stopped (the restart machinery expects a dead
+  pane) and the child re-dispatched through the pane-loss restart path: same
+  name, same registry entry, the watcher keeps watching. Refused unless the
+  child is a pi-CLI auto-exit run with assistant progress that has not been
+  restarted, delivered, or budget-stopped.
+- Unknown or inactive names return a single error line.
+
+`subagents_list` renders one live-metrics line per child under
+"Live children:" — name, elapsed, phase, turns, tokens, cost, e.g.
+`worker-1 · 842s · active · 12t · 84k tok · $0.42`. Unmetered children trim
+the usage fields rather than zero-filling; queued entries show
+`name · queued`.
 
 ## Pane recovery
 
