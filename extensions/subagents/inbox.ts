@@ -465,6 +465,7 @@ export function readRecentResults(
 
 /** Record shape buildPriorWorkBlock renders. */
 export interface PriorWorkRecord {
+  id?: string;
   name: string;
   ts: number;
   files_changed: string[];
@@ -486,11 +487,15 @@ function anyOverlap(paths: string[], scope: string[]): boolean {
  * recent history records — overlap on files_changed OR files_read counts.
  * At most 2 (most recent) records, 1200 chars total: changed paths are
  * capped at 10, the diff excerpt at 800, the summary at 300, shrinking
- * further until the block fits. Null when nothing overlaps. */
+ * further until the block fits. Each kept row's header carries a greppable
+ * artifact reference — `[id <id> @ <historyPath>]` — so the child can pull
+ * the full record from the history file on demand; the reference is part
+ * of the rendered row, so the char cap stays enforced after it is added.
+ * Null when nothing overlaps. */
 export function buildPriorWorkBlock(
   records: PriorWorkRecord[],
   scopePaths: string[],
-  opts: { now?: number; maxRecords?: number; maxChars?: number } = {},
+  opts: { now?: number; maxRecords?: number; maxChars?: number; historyPath?: string } = {},
 ): string | null {
   const scope = scopePaths.filter((p) => typeof p === "string" && p.trim());
   if (scope.length === 0) return null;
@@ -507,7 +512,10 @@ export function buildPriorWorkBlock(
   const render = (rec: PriorWorkRecord, diffBudget: number, summaryBudget: number): string => {
     const lines: string[] = [];
     const mins = Math.max(0, Math.round((now - rec.ts) / 60000));
-    lines.push(`Prior work touching your scope (from ${rec.name}, finished ${mins} min ago):`);
+    const ref = rec.id
+      ? ` [id ${rec.id}${opts.historyPath ? ` @ ${opts.historyPath}` : ""}]`
+      : "";
+    lines.push(`Prior work touching your scope (from ${rec.name}, finished ${mins} min ago)${ref}:`);
     for (const p of rec.files_changed.slice(0, 10)) lines.push(`- ${p}`);
     if (rec.files_changed.length > 10) {
       lines.push(`… +${rec.files_changed.length - 10} more changed files`);

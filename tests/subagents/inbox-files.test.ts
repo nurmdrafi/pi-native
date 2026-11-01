@@ -635,6 +635,37 @@ describe("buildPriorWorkBlock", () => {
       /Do not re-read these files to reconstruct this context; verify only what your task requires\./,
     );
   });
+
+  it("appends each injected row's history id and artifact path as a greppable reference", () => {
+    const historyPath = "tmp/repo/.pi/agent/subagents/subagent-history.jsonl";
+    const records = [1, 2, 3].map((n) =>
+      rec({ id: `row-${n}`, name: `w${n}`, ts: now - n * 60_000, files_changed: ["src"] }),
+    );
+    const block = buildPriorWorkBlock(records, ["src"], { now, historyPath });
+    assert.ok(block);
+    assert.ok(
+      block.includes(`[id row-3 @ ${historyPath}]`),
+      "newest kept row carries its id plus the artifact path it came from",
+    );
+    assert.ok(block.includes(`[id row-2 @ ${historyPath}]`), "second kept row carries the same ref");
+    assert.ok(!block.includes("row-1"), "dropped rows are not referenced");
+    const noPath = buildPriorWorkBlock([rec({ id: "solo" })], ["src"], { now });
+    assert.ok(noPath?.includes("[id solo]"), "row id still referenced when no path is given");
+  });
+
+  it("keeps the 1200-char cap enforced AFTER the artifact references are added", () => {
+    const big = rec({
+      id: "big-row",
+      summary: "y".repeat(5000),
+      diff: "z".repeat(4000),
+      files_changed: Array.from({ length: 60 }, (_, i) => `src/f${i}.ts`),
+    });
+    const historyPath = "tmp/repo/.pi/agent/subagents/subagent-history.jsonl";
+    const block = buildPriorWorkBlock([big, big], ["src"], { now, historyPath });
+    assert.ok(block);
+    assert.ok(block.length <= 1200, `block was ${block.length} chars with refs included`);
+    assert.ok(block.includes(`[id big-row @ ${historyPath}]`), "the ref survives the shrink loop");
+  });
 });
 
 describe("subagent_result renderer files_changed cap", () => {
