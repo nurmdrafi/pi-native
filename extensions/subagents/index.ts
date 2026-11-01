@@ -879,6 +879,23 @@ function formatWidgetRightLabel(snapshot: StatusSnapshot, usage?: { turns: numbe
   return ` stalled${detail}${duration}${formatUsageTail(usage)} `;
 }
 
+/** Cap on the child's final message embedded in the delivered result. The
+ * full text stays in the child's session; the parent sees at most this many
+ * characters, so a wave of verbose children cannot flood orchestrator
+ * context through result delivery. */
+const RESULT_SUMMARY_CHAR_LIMIT = 2000;
+
+/** Cut an oversized child summary to a line boundary near the limit, ending
+ * with a marker naming the shown and total sizes. Short summaries pass
+ * through untouched. */
+function capResultSummary(summary: string): string {
+  if (summary.length <= RESULT_SUMMARY_CHAR_LIMIT) return summary;
+  const cut = summary.slice(0, RESULT_SUMMARY_CHAR_LIMIT);
+  const lastBreak = cut.lastIndexOf("\n");
+  const head = lastBreak > RESULT_SUMMARY_CHAR_LIMIT / 2 ? cut.slice(0, lastBreak) : cut;
+  return `${head}\n\n… [summary truncated: first ${head.length} of ${summary.length} chars — resume the child by name for the full text]`;
+}
+
 function resolveResultPresentation(
   result: Pick<
     SubagentResult,
@@ -895,7 +912,7 @@ function resolveResultPresentation(
     // kill). The session file survives; resume or inspect it directly.
     return (
       `Sub-agent "${name}" was lost before it could report — its pane vanished (reaped or killed).\n\n` +
-      `${result.summary}${sessionRef}`
+      `${capResultSummary(result.summary)}${sessionRef}`
     );
   }
 
@@ -918,7 +935,7 @@ function resolveResultPresentation(
     // survives; resume the child if the work still matters.
     return (
       `Sub-agent "${name}" was cancelled by its parent after ${formatElapsed(result.elapsed)}.\n\n` +
-      `${result.summary}${sessionRef}`
+      `${capResultSummary(result.summary)}${sessionRef}`
     );
   }
 
@@ -937,8 +954,8 @@ function resolveResultPresentation(
   }
 
   return result.exitCode !== 0
-    ? `Sub-agent "${name}" failed (exit code ${result.exitCode}).\n\n${result.summary}${sessionRef}`
-    : `Sub-agent "${name}" completed (${formatElapsed(result.elapsed)}).\n\n${result.summary}${sessionRef}`;
+    ? `Sub-agent "${name}" failed (exit code ${result.exitCode}).\n\n${capResultSummary(result.summary)}${sessionRef}`
+    : `Sub-agent "${name}" completed (${formatElapsed(result.elapsed)}).\n\n${capResultSummary(result.summary)}${sessionRef}`;
 }
 
 /**
@@ -2274,6 +2291,7 @@ export const __test__ = {
   launchSubagent,
   handleSubagentSteer,
   resolveResultPresentation,
+  capResultSummary,
   resolveResumeLaunchBehavior,
   runningSubagents,
   runningInScope,
@@ -3813,9 +3831,9 @@ function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
           customType: "subagent_result",
           content: own
             ? `Sub-agent "${record.name}" finished — recovered from the durable inbox (original parent gone):\n\n` +
-              `${record.summary}`
+              `${capResultSummary(record.summary)}`
             : `Sub-agent "${record.name}", started by an earlier session, finished — result recovered from the durable inbox. Informational for this session; no action required:\n\n` +
-              `${record.summary}`,
+              `${capResultSummary(record.summary)}`,
           display: true,
           details: {
             name: record.name,
