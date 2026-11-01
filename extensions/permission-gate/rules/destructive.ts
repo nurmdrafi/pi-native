@@ -168,8 +168,22 @@ const DESTRUCTIVE_ANYWHERE = new RegExp(DESTRUCTIVE_CORE_SRC, "i");
 
 /** S4 fix 9 (2026-10-18): bypass tripwires — inline-code interpreters, encoded
  * eval, alias indirection. Unscannable or obfuscated payloads confirm (H2). */
-const INTERP_INLINE =
-  /\b(?:perl|ruby|php|node|deno|bun)\b[^|;&]*\s(?:-e|--eval)\b|\bpython3?\b[^|;&]*\s-[cm]\b|\bawk\b[^|;&]*\bsystem\s*\(/i;
+/** S4 fix 9 (2026-10-18): bypass tripwires — inline-code interpreters, encoded
+ * eval, alias indirection. Unscannable or obfuscated payloads confirm (H2).
+ * 16.3 (2026-11-02 audit): the interpreter token now has to sit at execution
+ * position — segment start (after env assignments and known wrappers) or right
+ * after a command-substitution opener. Unanchored matching confirmed a quoted
+ * mention (`rg -n "node -e" docs`) as destructive although nothing ran, which
+ * blocked read-only review children probing their own docs. */
+const INTERP_INLINE = new RegExp(
+  "(?:^|`|\\$\\(\\s*)" +
+    "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*" +
+    "(?:(?:sudo|env|command|nohup|time|nice|xargs)\\s+(?:-\\S+\\s+)*)*" +
+    "(?:\\b(?:perl|ruby|php|node|deno|bun)\\b[^|;&]*\\s(?:-e|--eval)\\b" +
+    "|\\bpython3?\\b[^|;&]*\\s-[cm]\\b" +
+    "|\\bawk\\b[^|;&]*\\bsystem\\s*\\()",
+  "i",
+);
 const EVAL_ENCODED = /\beval\b[^|;&]*(?:\$\(|`)/;
 
 /** S4 fixes 7+8 (2026-10-15, spec §6.7–8): the single protected-prefix

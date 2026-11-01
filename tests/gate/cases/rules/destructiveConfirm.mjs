@@ -797,4 +797,52 @@ export const cases = [
       }
     },
   ],
+  // ---- 16.3 (2026-11-02): the inline-interpreter tripwire fires on execution,
+  // not on a quoted mention. Audit lesson: `rg -n "node -e" docs` confirmed as
+  // destructive although nothing runs; the token now has to sit at command
+  // position (segment start, after env assignments and wrappers, or inside a
+  // command substitution), so prose and search patterns stay allowed while
+  // every real inline interpreter call still confirms ----
+  [
+    "16.3 interp inline: mention inside an rg pattern passes",
+    "pass",
+    async (pi) =>
+      bash(pi, 'rg -n "node -e|python3 -c" docs', { hasUI: false, mode: "print" }),
+  ],
+  [
+    "16.3 interp inline: mention as a bare log argument passes",
+    "pass",
+    async (pi) =>
+      bash(pi, "git log --grep python3 -c", { hasUI: false, mode: "print" }),
+  ],
+  [
+    "16.3 interp inline: node -e at segment start confirms",
+    "blocked",
+    async (pi) => bash(pi, 'node -e "console.log(1)"', denyUi()),
+  ],
+  [
+    "16.3 interp inline: after a separator confirms",
+    "blocked",
+    async (pi) => bash(pi, "ls; node -e x", denyUi()),
+  ],
+  [
+    "16.3 interp inline: inside a command substitution confirms",
+    "blocked",
+    async (pi) => bash(pi, "echo $(node -e x)", denyUi()),
+  ],
+  [
+    "16.3 interp inline: backtick substitution confirms",
+    "blocked",
+    async (pi) => bash(pi, "echo `perl -e x`", denyUi()),
+  ],
+  [
+    "16.3 interp inline: env-prefixed python -c confirms",
+    "blocked",
+    async (pi) => bash(pi, "FOO=1 python3 -c 'print(1)'", denyUi()),
+  ],
+  [
+    "16.3 interp inline: sudo-wrapped node -e confirms",
+    "blocked",
+    async (pi) => bash(pi, "sudo node -e x", denyUi()),
+  ],
 ];
