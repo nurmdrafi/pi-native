@@ -120,6 +120,21 @@ Every rung byte-matches the one below it (parity-pinned by tests); `details.via`
 
 Tools, env keys, benchmarks, and context-shaping tables: [docs/native-tools.md](docs/native-tools.md).
 
+## Subagent orchestration
+
+A subagent orchestration runtime built into the harness: parallel throughput without merge conflicts, tokens spent once, children that finish or say why — [docs/subagents.md](docs/subagents.md).
+
+*   **Runtime-owned file-conflict safety:** a spawn declares its write scope; an overlapping spawn queues FIFO behind the owner while non-conflicting work keeps launching (skip-scan queue), so disjoint file-sets stay fully parallel and orchestrators stop hand-planning around collisions.
+*   **Cross-agent memory:** every result appends to an append-only per-repo history; a child whose scope overlaps recent work receives an injected prior-work digest (changed paths, diff excerpt, summary), so followers skip re-reading files a teammate just changed.
+*   **Duplicate-spawn detection:** a near-identical same-agent re-spawn draws a warn-only note before you pay for it — steer the running child or re-check the prior result.
+*   **Measured time-sense:** spawn acks carry per-agent baselines from your own history (``typical for `worker`: median 5m · p90 15m · $0.34``); a child running past its agent's p90 is flagged live.
+*   **Full control plane:** `cancel` walks interrupt → grace → kill through one delivery funnel (exactly one result), `restart` re-dispatches, steer/resume verbs reach running or finished children, and per-child budgets (wall-clock, turns, USD) are enforced with stops.
+*   **Failure recovery:** pane loss self-heals with one auto-restart, the next session adopts orphans, and budget kills plus crash residue still deliver — a dead child's work arrives.
+*   **Token discipline:** work happens in isolated child contexts and only summaries return to the orchestrator; inspection is pull-based (zero parent tokens until asked), and a delegation gate keeps small tasks linear so parallelism is spent only where it pays.
+*   **Live dashboard:** per-child health and metric cards with deep links — [dashboard/](dashboard/).
+
+Verbs, scope locks, agent table, triage: [extensions/subagents/README.md](extensions/subagents/README.md).
+
 ## Skills & subagents
 
 All skills are manual (`/skill:<name>`) and validator-enforced; bodies enter context only when invoked — [docs/skills.md](docs/skills.md). Subagents run on tmux, are gated off by default, and spawn sandboxed with the permission-gate re-enabled inside — [docs/subagents.md](docs/subagents.md).
