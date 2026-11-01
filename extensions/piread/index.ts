@@ -523,15 +523,7 @@ export default function pireadExtension(pi: ExtensionAPI): void {
       v === null ? undefined : v;
     const offset = absent(rawOffset);
     const limit = absent(rawLimit);
-    const rawNeedle = absent(rawHits);
-    // A client that serializes JSON null into this string parameter sends the
-    // literal "null" (or "undefined") — an absent selector, not a needle.
-    // Reading it as a selector rejected every paged read as a fused+offset
-    // misuse and searched for the word "null" when sent alone.
-    const hits =
-      typeof rawNeedle === "string" && /^(?:null|undefined)$/i.test(rawNeedle.trim())
-        ? undefined
-        : rawNeedle;
+    const hits = hitsSelector(rawHits);
     // Fused-mode screening mirrors the CLI contract: a nonsense needle is a
     // usage error, and combining `hits` with paging would silently turn a
     // locate into a paged read — reject both up front instead of dispatching.
@@ -605,6 +597,19 @@ export default function pireadExtension(pi: ExtensionAPI): void {
   // the parity suite); the cast bridges the loose structural type to the
   // definition's precise one (its d.ts lives in the nested pi-agent-core
   // identity, which does not unify under skipLibCheck).
+  /** A client that serializes JSON null into this string parameter sends the
+   *  literal "null" (or "undefined") — an absent selector, not a needle.
+   *  Reading it as a selector rejected every paged read as a fused+offset
+   *  misuse and searched for the word "null" when sent alone. Shared by
+   *  execute (screening) and renderCall (the label must show the window
+   * range, never `hits:'null'`). */
+  function hitsSelector(raw: unknown): unknown {
+    if (raw === null) return undefined;
+    return typeof raw === "string" && /^(?:null|undefined)$/i.test(raw.trim())
+      ? undefined
+      : raw;
+  }
+
   // renderCall (lineage: retired read-label.ts): displays the piread label
   // with the requested path:offset[-end] window. Display layer only.
   // Individual registration (2026-10-18): name/label identify piread on its
@@ -656,7 +661,8 @@ export default function pireadExtension(pi: ExtensionAPI): void {
       const start = args.offset ?? 1;
       let range = `:${start}`;
       if (args.limit) range = `:${start}-${start + args.limit - 1}`;
-      const suffix = args.hits !== undefined ? ` hits:'${args.hits}'` : range;
+      const needle = hitsSelector(args.hits);
+      const suffix = needle !== undefined ? ` hits:'${needle}'` : range;
       let text = theme.fg("success", theme.bold("piread "));
       text += theme.fg("text", `${args.path}${suffix}`);
       return new Text(text, 0, 0);
