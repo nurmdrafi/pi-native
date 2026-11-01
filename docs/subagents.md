@@ -15,7 +15,7 @@ Sandboxed spawns re-enable the permission-gate extension inside the child by
 default (its `extensions/permission-gate` directory under the agent home);
 `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated paths) overrides.
 
-**Budgets** — ceilings per dimension: wall-clock seconds, assistant turns, and cumulative provider-reported USD cost. Resolution per dimension: role frontmatter `budget:` block → `budgetDefaults` in `extensions/subagents/config.json` (absent file → the shipped `config.json.example`: 1800 s / 60 turns / $3) → unenforced. Role `budget: none` exempts the agent entirely — every shipped role agent declares it, so ceilings bind fork clones and any definition without the exemption. A spawn `budget` override may only lower a ceiling, never raise it. On breach the child is interrupted (Ctrl-C), killed after a 30 s grace, and the result reports `budget_exceeded`; the session file is preserved for resume, and resumed or auto-restarted runs are not re-budgeted. Detached subagents are not budgeted once the parent session ends.
+**Budgets** — ceilings per dimension: wall-clock seconds, assistant turns, and cumulative provider-reported USD cost. Resolution per dimension: role frontmatter `budget:` block → `budgetDefaults` in `extensions/subagents/config.json` (absent file → the shipped `config.json.example`: 1800 s / 60 turns / $3) → unenforced. Role `budget: none` exempts the agent entirely — every shipped role agent declares it, so ceilings bind fork clones and any definition without the exemption. A spawn `budget` override may only lower a ceiling, never raise it. On breach the child is interrupted (Ctrl-C), killed after a 10 s grace, and the result reports `budget_exceeded`; the session file is preserved for resume, and resumed or auto-restarted runs are not re-budgeted. Detached subagents are not budgeted once the parent session ends.
 
 **Result records** — finished results carry `files_changed`: repo-relative
 paths changed since a spawn-time git baseline, sorted, capped at 200,
@@ -56,8 +56,15 @@ pane-loss restart machinery under the same name and entry — refused unless
 the child is an auto-exit run with assistant progress that was not already
 restarted, delivered, or budget-stopped. Recorded cancel intent blocks
 pane-loss auto-restart. `subagents_list` prints one live line per child —
-name, phase, elapsed, turns, tokens, cost — with unmetered fields trimmed
-and queued entries shown as `name · queued`.
+name, phase, elapsed, turns, tokens, cost — with unmetered fields trimmed,
+queued entries shown as `name · queued`, and a running child past its
+agent's p90 history baseline (≥3 usable rows required) flagged
+`past p90 (Nm)` — N is the baseline's p90 in minutes. Spawn acks (launched
+or queued) add a per-agent time-sense line — ``typical for `agent`: median
+Xm · p90 Ym · $Z`` (median cost, omitted when no row carried one) — and a
+warn-only duplicate note when a near-identical same-agent task is already
+running or a history summary matches: steer that child or re-check the
+prior result before respawning.
 
 Setup, control verbs, pane recovery, headless/print-mode behavior, scope
 locks, result records, and triage: [`extensions/subagents/README.md`](../extensions/subagents/README.md).

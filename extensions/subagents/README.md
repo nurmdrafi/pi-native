@@ -176,9 +176,22 @@ message, so do not poll.
 
 `subagents_list` renders one live-metrics line per child under
 "Live children:" — name, elapsed, phase, turns, tokens, cost, e.g.
-`worker-1 · 842s · active · 12t · 84k tok · $0.42`. Unmetered children trim
+`worker-1 · 842s · active · 12t · 84k tok · $0.42 · past p90 (14m)`. Unmetered children trim
 the usage fields rather than zero-filling; queued entries show
-`name · queued`.
+`name · queued`. A running child whose elapsed exceeds its agent's p90
+history baseline is flagged `past p90 (Nm)`, N being the baseline's p90 in
+minutes — baselines need at least three usable history rows, so rarely-run
+agents are never flagged.
+
+The spawn ack (launched or queued) carries two history-derived notes. A
+time-sense line — ``typical for `worker`: median 5m · p90 15m · $0.34`` —
+gives the agent's median and p90 duration plus median cost from recent
+history (cost omitted when no row carried one; sub-minute figures clamp up
+to 1m; also gated on three usable rows). A warn-only duplicate note fires
+when a near-identical same-agent task is already running — steer that child
+instead of respawning — or a near-identical task ran before — re-check that
+result before respawning. Both are hints, not blocks; the orchestrator
+decides whether the re-run is legitimate.
 
 ## Pane recovery
 

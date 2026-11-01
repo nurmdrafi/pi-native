@@ -1,6 +1,6 @@
 # Pending review — subagent improvement stretch
 
-Status: **PENDING** review (marked at commit time; reviewer may still be in flight on the originating device).
+Status: **RESOLVED** — stretch reviewed APPROVED (`review-final-2`); follow-ups applied (`fix-drain`, `worker-followups`); final uncommitted delta re-reviewed APPROVED (`/tmp/review-main.md`). Resolution record at the bottom.
 
 Gate state at marker: `test:subagents` 3319/3319, fail 0; typecheck clean; no `build` script exists in this repo (leg skipped, not failed).
 
@@ -17,4 +17,23 @@ Re-run from any device — spawn a read-only reviewer with this focus list:
 
 Accepted, do not flag: 3 pre-existing file-level test marks (fake-tmux isolation hang predating this stretch); live metrics intentionally lack files-touched / last-write-age (descoped).
 
-In-flight at marker time: reviewer wave `review-final` (its incremental draft: `/tmp/review-final.md` on the originating device only). Local wave ledger: `.cache/waves.ndjson`.
+Resolution record (2026-11-01):
+
+1. Gate regression found post-marker: `tests/subagents/scope-locks.test.ts:354` failed
+   deterministically on re-run devices — `watchSubagent` awaited `pollForExit` bare,
+   so an abort mid-tmux-round-trip settled only on the next ~1s poll tick, past
+   the 700ms window (green on the fast originating host). Fixed via
+   `raceAbortSignal()` in `index.ts`.
+2. Item 5 applied: `InboxRecord.synthesized` widened to `cancelled_by_parent`;
+   boundary cast dropped at `index.ts`.
+3. Item 6 applied: `past p90 (Nm)` flag, spawn-ack `typical for` baseline line,
+   duplicate warn note documented in `extensions/subagents/README.md` and
+   `docs/subagents.md`; stale "30 s grace" corrected to 10 s (budget.ts:35).
+4. Adjacent device-drift fix (user-reported): dashboard UI is a gitignored
+   `dashboard/dist` build — `scripts/bootstrap.sh` and `scripts/after-pull.sh`
+   now build it; `dashboard/package-lock.json` committed for pin parity.
+
+Final gate: `test:subagents` 3319/3319, fail 0; typecheck clean; no `build`
+script exists in this repo (leg skipped, not failed). Review archive on the
+resolving device: `/tmp/review-final-2.md` (stretch), `/tmp/review-main.md`.
+Local wave ledger: `.cache/waves.ndjson`.
