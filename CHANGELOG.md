@@ -7,6 +7,59 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.70.0] - 01-11-2026
+
+### Added
+
+- **Subagent control verbs.** `subagent_control` stops, cancels, and re-dispatches live children by
+  name; cancel finalizes through the standard delivery funnel so exactly one result lands and the
+  scope lock releases.
+- **Stalled-child recovery and atomic panes.** Stalled children are detected and recovered; panes
+  launch atomically, dead multiplexers heal, completion signals travel over a wait-for channel with
+  an exit sidecar.
+- **Queueing past the cap.** Spawns beyond the concurrency cap queue without blocking the turn.
+- **Declared file-scope locks.** A spawn's declared `files:` scope queues conflicting spawns FIFO
+  behind the owner; read-only and unscoped spawns never queue; locks release at result delivery and
+  survive pane-loss restart.
+- **Result records and prior-work injection.** Results carry `files_changed` from a spawn-time git
+  baseline; append-only subagent history (rotated to the last 500 lines) survives result-inbox
+  drain; a scope overlapping recent history injects capped prior-work context into the task.
+- **Live metrics and baselines.** Per-child live metrics with p90 history baselines and
+  duplicate-spawn warnings; dashboard subagent health cards, deep links, and a drill-in session
+  modal; a wave-metrics extractor script; the dashboard UI is built in bootstrap and after-pull.
+- **Fail-closed gate for children.** Destructive confirms fail closed inside subagents (no dialog
+  can be answered there), and the permission gate is re-enabled in every sandboxed child.
+- **Roster at 14 specialists.** Six new profiles — architecture review, security review, frontend,
+  Rust, product briefs, session audit; fixer absorbed into worker; every profile hardened against
+  logged failure modes.
+- **Issue-orchestrator facts-file handoff.** One facts file per issue group, written once; workers
+  re-read only the files it names; routing splits Rust, browser-UI, and general work onto matching
+  agents.
+
+### Changed
+
+- **Doctrine lives in `docs/subagents.md`.** Orchestration rules moved out of `AGENTS.md`; the
+  roster table plus `agents/` frontmatter are the sync surface; `AGENTS.md` keeps only the opt-in
+  gate and a pointer, shrinking every session's always-on context.
+- **Faster delivery paths.** Single-parse result delivery, deduped session reads with cached agent
+  discovery, byte-offset budget reads.
+- **Docs ground the workflow.** README subagent-orchestration section; scope locks, control verbs,
+  and executor doctrine documented; token-aware delegation gate enforced in the agents docs;
+  prompts forbid touching the default branch.
+- **Default thinking level lowered to high; repo-local `.pi/` runtime state ignored.**
+
+### Fixed
+
+- **Subagent state isolated per project.** History and inbox no longer leak across projects; stale
+  inbox records reach unrelated sessions as context-only.
+- **Delivery hardening.** Watcher aborts mid-poll settled; multiplexer stderr kept out of failure
+  wraps; history crash residue tolerated on append; suite type errors repaired; test suites
+  isolated from the real durable inbox.
+- **`piread` null handling.** Call labels screen serialized null hits; explicit null accepted for
+  optional params.
+- **Issue orchestrator correctness.** Refined base sanity check and issue processing; merge order is
+  canonical everywhere — PR creation order, oldest first.
+
 ## [1.69.0] - 31-10-2026
 
 ### Added
