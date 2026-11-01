@@ -172,6 +172,19 @@ const SubagentParams = Type.Object({
   ),
 });
 
+/** subagent_control parameters: a verb plus the target's display name. */
+const SubagentControlParams = Type.Object({
+  action: Type.Union([Type.Literal("cancel"), Type.Literal("restart")], {
+    description:
+      "`cancel` stops a running sub-agent (interrupt, then kill after a grace period) or removes a queued one before it launches; " +
+      "`restart` re-dispatches a running sub-agent into a fresh pane resuming its session.",
+  }),
+  name: Type.String({
+    description:
+      "Exact display name of the sub-agent — the spawn acknowledgement's name or the live-children lines of subagents_list.",
+  }),
+});
+
 type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
 interface AgentDefaults {
@@ -731,6 +744,15 @@ function resolveResultPresentation(
     );
   }
 
+  if (result.error === "cancelled_by_parent") {
+    // Parent-initiated stop (subagent_control cancel). The session file
+    // survives; resume the child if the work still matters.
+    return (
+      `Sub-agent "${name}" was cancelled by its parent after ${formatElapsed(result.elapsed)}.\n\n` +
+      `${result.summary}${sessionRef}`
+    );
+  }
+
   if (result.errorMessage) {
     // Auto-retry exhausted or other agent-loop error. The subagent did not
     // produce a usable result — surface the underlying provider/network
@@ -841,6 +863,10 @@ interface RunningSubagent {
   /** Pane-loss restart bookkeeping: set when the single restart attempt
    *  began; `respawnedAt` added once a replacement pane is actually running. */
   restart?: { attemptedAt: number; respawnedAt?: number };
+  /** Cancel intent (subagent_control cancel), set BEFORE the stop so the
+   *  pane-loss restart gates refuse the child and any racing loss
+   *  synthesis reports cancelled_by_parent instead of pane_lost. */
+  cancelledAt?: number;
   /** Stalled-child recovery bookkeeping (owned by the stall recovery path):
    *  `nudgedAt` when the health-check nudge was sent; `exhaustedAt` once the
    *  grace window lapsed without resumed activity. Survives recovery — a
@@ -1960,6 +1986,10 @@ export const __test__ = {
   canRestartLostPane,
   restartLostPane,
   finalizeLostSubagent,
+  cancelRunningSubagent,
+  cancelQueuedSpawn,
+  restartSubagent,
+  synthesizeCancelledResult,
   handleStallTransition,
   enforceStallRecovery,
   buildStallHealthCheckCommand,
@@ -2552,6 +2582,9 @@ function synthesizeLostResult(
   running: RunningSubagent,
   kind: "pane_lost" | "stalled",
 ): SubagentResult {
+  // Cancel intent wins over the loss kind: the stop below was parent-driven,
+  // so the delivery must not misreport it as a pane loss.
+  if (running.cancelledAt) return synthesizeCancelledResult(running);
   const { name, task, sessionFile, startTime } = running;
   // Single read: parse once, derive summary + stats + id from the same
   // entries — the loss path used to re-read the whole file three times.
@@ -2589,6 +2622,34 @@ function synthesizeLostResult(
     ...(breach
       ? { error: "budget_exceeded", errorMessage: budgetBreachSummary(breach) }
       : { error: "pane_lost" }),
+    ...(stats ? { stats } : {}),
+  };
+}
+
+/** Synthesize a result for a child stopped by its parent (subagent_control
+ *  cancel): the same durable-session derivation as the loss path, minus the
+ *  budget-breach upgrade — a cancelled child was not budget-killed. */
+function synthesizeCancelledResult(running: RunningSubagent): SubagentResult {
+  const { name, task, sessionFile, startTime } = running;
+  const fileExists = existsSync(sessionFile);
+  const entries = fileExists ? getNewEntries(sessionFile, 0) : [];
+  running.parsedEntries = entries;
+  const lastText = fileExists ? findLastAssistantMessage(entries) : null;
+  const stats = fileExists ? summarizeStatsFromEntries(entries) : null;
+  const sessionId = fileExists ? getSessionIdFromEntries(entries) : null;
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const summary =
+    `Cancelled by parent after ${formatElapsed(elapsed)}.` +
+    (lastText ? `\n\nLast output:\n${lastText}` : "");
+  return {
+    name,
+    task,
+    summary,
+    sessionFile,
+    ...(sessionId ? { sessionId } : {}),
+    exitCode: -1,
+    elapsed,
+    error: "cancelled_by_parent",
     ...(stats ? { stats } : {}),
   };
 }
@@ -2683,7 +2744,7 @@ function findChildSelfReport(
 function persistResultRecord(
   running: RunningSubagent,
   result: SubagentResult,
-  synthesized?: "pane_lost" | "stalled",
+  synthesized?: "pane_lost" | "stalled" | "cancelled_by_parent",
   historyExtra?: SubagentHistoryExtra,
 ): void {
   appendSubagentResult(
@@ -2704,7 +2765,10 @@ function persistResultRecord(
       exitCode: result.exitCode,
       elapsed: result.elapsed,
       ...(result.stats ? { stats: result.stats } : {}),
-      ...(synthesized ? { synthesized } : {}),
+      // The inbox record's synthesized union predates cancelled_by_parent;
+      // the field is a transparent JSON marker, so widen at this boundary —
+      // the durable value keeps the real kind.
+      ...(synthesized ? { synthesized: synthesized as "pane_lost" | "stalled" } : {}),
       ...(result.files_changed ? { files_changed: result.files_changed } : {}),
       ...(result.files_changed_source ? { files_changed_source: result.files_changed_source } : {}),
     },
@@ -2720,7 +2784,7 @@ function deliverSubagentResult(
   pi: ExtensionAPI,
   running: RunningSubagent,
   result: SubagentResult,
-  synthesized?: "pane_lost" | "stalled",
+  synthesized?: "pane_lost" | "stalled" | "cancelled_by_parent",
 ): void {
   if (running.delivered) return; // sweep or watcher already finalized this entry
   running.delivered = true;
@@ -2850,6 +2914,7 @@ interface StallRecoveryDeps extends RestartDeps {
 function canRestartLostPane(running: RunningSubagent): boolean {
   if (running.delivered) return false;
   if (running.restart) return false; // exactly one attempt per child
+  if (running.cancelledAt) return false; // parent cancelled it — never resurrect
   if (running.interactive || !running.autoExit) return false;
   if (running.cli === "claude") return false;
   if (running.budgetStopper?.breached()) return false;
@@ -3104,6 +3169,112 @@ function finalizeLostSubagent(
     return;
   }
   deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);
+}
+
+// ── subagent_control verbs (cancel / restart) ──
+
+/** Injectable seams for the control verbs: the interrupt/kill channels and
+ *  grace window of the budget-stop path, plus the restart machinery's
+ *  pane/script seams and executor. */
+interface ControlDeps extends RestartDeps {
+  /** Interrupt channel (tmux C-c in production). */
+  interrupt?: (surface: string) => void;
+  /** Kill channel (kill-pane in production). */
+  kill?: (surface: string) => void;
+  /** Grace window override; defaults to the budget stopper's. */
+  graceMs?: number;
+  /** Sleep seam for the grace wait; real default is a plain setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const controlSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The budget-stop stop sequence, factored: interrupt the child, give it the
+ *  grace window to exit cleanly (its session file flushes), then kill the
+ *  pane. Fail-soft on both channels — a dead pane must not fail the verb. */
+async function stopChildSurface(running: RunningSubagent, deps: ControlDeps = {}): Promise<void> {
+  const interrupt = deps.interrupt ?? sendInterrupt;
+  const kill = deps.kill ?? closeSurface;
+  const graceMs = deps.graceMs ?? BUDGET_GRACE_MS;
+  const sleep = deps.sleep ?? controlSleep;
+  try {
+    interrupt(running.surface);
+  } catch {}
+  await sleep(graceMs);
+  try {
+    kill(running.surface);
+  } catch {}
+}
+
+/** Cancel a running child: record cancel intent FIRST (it blocks the
+ *  pane-loss restart gates and upgrades any racing loss synthesis to
+ *  cancelled_by_parent), stop it through the budget-stop sequence, then
+ *  finalize through the standard delivery funnel — the funnel releases the
+ *  declared scope, aborts the watcher (whose settle frees the slot), and
+ *  delivers exactly one result. If the watcher delivered during the grace
+ *  window (the child exited on the interrupt), the funnel's delivered flag
+ *  makes this a no-op instead of a second result. */
+async function cancelRunningSubagent(
+  pi: ExtensionAPI,
+  running: RunningSubagent,
+  deps: ControlDeps = {},
+): Promise<void> {
+  running.cancelledAt = Date.now();
+  await stopChildSurface(running, deps);
+  if (!running.delivered) {
+    deliverSubagentResult(pi, running, synthesizeCancelledResult(running), "cancelled_by_parent");
+  }
+}
+
+/** Cancel a queued spawn: detach it from the FIFO, release its declared-
+ *  scope reservation (unparking spawns queued behind it), and drop its name
+ *  reservation. Slot parity is inherent — a queued entry holds no slot (the
+ *  drain acquires one only at launch), so there is nothing to release and
+ *  the holder count is untouched. Returns the removed entry, or null when
+ *  no queued spawn carries the name. */
+function cancelQueuedSpawn(name: string): PendingSpawn | null {
+  const wanted = name.trim();
+  const index = pendingSpawns.findIndex(
+    (entry) => (entry.params.name ?? entry.reservedName ?? entry.params.agent) === wanted,
+  );
+  if (index === -1) return null;
+  const [entry] = pendingSpawns.splice(index, 1);
+  if (entry.scopeId) releaseScope(entry.scopeId);
+  if (entry.reservedName) reservedNames.delete(entry.reservedName);
+  return entry;
+}
+
+/** Restart a running child on demand: gate first (an ineligible child is
+ *  never stopped), then stop the live pane through the budget-stop sequence
+ *  — the restart machinery expects a dead pane, and two panes sharing one
+ *  session file would interleave writes — then re-dispatch through the
+ *  pane-loss restart path, which mutates the entry in place onto the new
+ *  pane (same name, same registry entry, the watcher keeps watching). */
+async function restartSubagent(
+  running: RunningSubagent,
+  deps: ControlDeps = {},
+): Promise<{ ok: true } | { error: string }> {
+  if (!canRestartLostPane(running)) {
+    return {
+      error:
+        `"${running.name}" is not restartable: restart needs a pi auto-exit child with assistant ` +
+        "progress that has neither been restarted, delivered, or budget-stopped",
+    };
+  }
+  await stopChildSurface(running, deps);
+  if (running.delivered) {
+    return {
+      error: `"${running.name}" finished while it was being stopped; its result was already delivered`,
+    };
+  }
+  const restart = deps.restart ?? restartLostPane;
+  const respawned = await restart(running, deps);
+  if (!respawned) {
+    return {
+      error: `the restart attempt for "${running.name}" failed; the watcher reports the loss`,
+    };
+  }
+  return { ok: true };
 }
 
 async function watchSubagent(
@@ -3944,6 +4115,97 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     });
 
 
+
+  // ── subagent_control tool ──
+  pi.registerTool({
+      name: "subagent_control",
+      label: "Control Subagent",
+      defaultActive: !SPAWN_TOOLS_GATED,
+      description:
+        "Control a live sub-agent by display name. `cancel` stops a running sub-agent (interrupt, then kill after a grace period) or removes a queued one before it launches; " +
+        "a cancelled run reports cancelled_by_parent as a steer message, its scope lock and slot free automatically. " +
+        "`restart` re-dispatches a running sub-agent into a fresh pane resuming its session (same name, same entry) — refused when it has no resumable progress. " +
+        "Unknown or inactive names return an error line. Do not poll after calling; outcomes arrive as steer messages.",
+      promptSnippet:
+        "Cancel or restart a sub-agent by name; cancelled/restarted outcomes arrive later as steer messages. " +
+        "Do not poll; end turn or do other work after.",
+      parameters: SubagentControlParams,
+
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const name = params.name.trim();
+        const single = (text: string, error?: string) => ({
+          content: [{ type: "text" as const, text }],
+          details: { action: params.action, name, ...(error ? { error } : {}) },
+        });
+        if (!name) {
+          return single(
+            "Provide the exact display name of a sub-agent (see subagents_list or the spawn acknowledgement).",
+            "name required",
+          );
+        }
+
+        if (params.action === "cancel") {
+          const resolved = resolveRunningByName(name);
+          if ("running" in resolved) {
+            // Fire-and-forget like spawn: the stop waits out the grace
+            // window and the cancelled result arrives as a steer.
+            void cancelRunningSubagent(pi, resolved.running).catch((err: unknown) => {
+              console.error(
+                `[pi-subagents] cancel of "${name}" failed: ` +
+                  `${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+            return single(
+              `Cancel initiated for sub-agent "${name}" — interrupted, then killed after the grace period. ` +
+                `Its cancelled result arrives as a steer message; the scope lock and slot free automatically. ` +
+                `Do not poll or re-cancel.`,
+            );
+          }
+          const queued = cancelQueuedSpawn(name);
+          if (queued) {
+            return single(
+              `Removed queued sub-agent "${name}" — it never launched. ` +
+                `Its scope reservation is released and its name is free again.`,
+            );
+          }
+          return single(
+            `No running or queued sub-agent named "${name}". ` +
+              `Live children and queued names are listed by subagents_list.`,
+            "unknown name",
+          );
+        }
+
+        // restart
+        const resolved = resolveRunningByName(name);
+        if ("running" in resolved) {
+          if (!canRestartLostPane(resolved.running)) {
+            return single(
+              `Sub-agent "${name}" is not restartable: restart needs a pi auto-exit child with assistant ` +
+                `progress that has neither been restarted, delivered, or budget-stopped.`,
+              "not restartable",
+            );
+          }
+          void restartSubagent(resolved.running)
+            .then((outcome) => {
+              if ("error" in outcome) {
+                console.error(`[pi-subagents] restart of "${name}": ${outcome.error}`);
+              }
+            })
+            .catch((err: unknown) => {
+              console.error(
+                `[pi-subagents] restart of "${name}" failed: ` +
+                  `${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+          return single(
+            `Restart initiated for sub-agent "${name}" — its live pane is stopped and the task re-dispatched ` +
+              `into a fresh pane resuming the same session. The entry and name are unchanged; the result arrives ` +
+              `as a steer message. If the attempt is refused, a loss result arrives instead.`,
+          );
+        }
+        return single(resolved.error, "unknown name");
+      },
+    });
 
   // ── subagent_message tool ──
   pi.registerTool({
