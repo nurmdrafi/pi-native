@@ -24,13 +24,15 @@ test('progress lib renders plain lines when piped (no TTY)', () => {
   const r = runPiped(HARNESS_PIPED);
   assert.equal(r.status, 0, r.stderr);
   const out = r.stdout;
-  assert.match(out, /\[1\/3\] npm deps — ok \(0\.\d+s\)/);
-  assert.match(out, /\[3\/3\] cargo build — FAILED \(0\.\d+s\)/);
+  // Elapsed time is wall-clock: a loaded machine renders 1.0s+ for the same
+  // work, so pin the shape (digits.fraction s) instead of a sub-second range.
+  assert.match(out, /\[1\/3\] npm deps — ok \(\d+\.\d+s\)/);
+  assert.match(out, /\[3\/3\] cargo build — FAILED \(\d+\.\d+s\)/);
   assert.match(out, /boom/);
   assert.match(out, /RC1=0/);
   assert.match(out, /RC2=3/);
   assert.match(out, /quick note/);
-  assert.match(out, /!! after-pull: 1\/3 failed — 0\.\d+s total/);
+  assert.match(out, /!! after-pull: 1\/3 failed — \d+\.\d+s total/);
   assert.ok(!out.includes('\r'), 'piped mode must not emit CR redraws');
 });
 

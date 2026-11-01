@@ -15,6 +15,14 @@ Sandboxed spawns re-enable the permission-gate extension inside the child by
 default (its `extensions/permission-gate` directory under the agent home);
 `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated paths) overrides.
 
+**Gate in children** — a child's destructive confirm never asks: it answers
+"not permitted for subagents" and the denial is final. The gate's tripwires
+fire on execution, not on text: a quoted mention of an inline interpreter
+(`rg -n "node -e" docs`) passes, running one does not, and heredoc bodies are
+data. A write-less child (reviewer, scout, verifier) that must probe with code
+writes the probe to a scratch file with a redirect and runs it by path; it
+cannot keep a ledger, so its final message is the only durable copy.
+
 **Budgets** — ceilings per dimension: wall-clock seconds, assistant turns, and cumulative provider-reported USD cost. Resolution per dimension: role frontmatter `budget:` block → `budgetDefaults` in `extensions/subagents/config.json` (absent file → the shipped `config.json.example`: 1800 s / 60 turns / $3) → unenforced. Role `budget: none` exempts the agent entirely — every shipped role agent declares it, so ceilings bind fork clones and any definition without the exemption. A spawn `budget` override may only lower a ceiling, never raise it. On breach the child is interrupted (Ctrl-C), killed after a 10 s grace, and the result reports `budget_exceeded`; the session file is preserved for resume, and resumed or auto-restarted runs are not re-budgeted. Detached subagents are not budgeted once the parent session ends.
 
 **Result records** — finished results carry `files_changed`: repo-relative
