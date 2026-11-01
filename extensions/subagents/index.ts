@@ -74,7 +74,7 @@ import {
   type EnforcedBudget,
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
-import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, usageTokens, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra } from "./inbox.ts";
+import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, subagentHistoryPath, usageTokens, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra, type SubagentHistoryRecord } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -643,25 +643,29 @@ const statusConfig = loadStatusConfig();
 /** Per-child live metrics: elapsed, the live status phase, and — only when
  *  a budget meter is attached — its live usage. Unmetered children omit
  *  turns/tokens/costUsd rather than faking zeros; queued children carry
- *  just name+phase (no start time exists yet). */
+ *  just name+agent+phase (no start time exists yet). `pastP90Min` is set by
+ *  annotatePastP90 when the child outran its agent's history baseline. */
 export interface ChildMetrics {
   name: string;
+  agent?: string;
   phase: string;
   elapsedSec?: number;
   turns?: number;
   tokens?: number;
   costUsd?: number;
+  pastP90Min?: number;
 }
 
 function runningChildMetrics(running: RunningSubagent): ChildMetrics {
   const elapsedSec = Math.max(0, Math.floor((Date.now() - running.startTime) / 1000));
   const phase = classifyStatus(running.statusState, Date.now()).kind;
-  if (!running.budgetMeter) return { name: running.name, phase, elapsedSec };
+  if (!running.budgetMeter) return { name: running.name, agent: running.agent, phase, elapsedSec };
   // O(delta) incremental read — the same meter the poll loop enforces with.
   const usage = running.budgetMeter.update();
   const stats = summarizeSessionStats(running.sessionFile);
   return {
     name: running.name,
+    agent: running.agent,
     phase,
     elapsedSec,
     turns: usage.turns,
@@ -671,10 +675,14 @@ function runningChildMetrics(running: RunningSubagent): ChildMetrics {
 }
 
 function queuedChildMetrics(pending: PendingSpawn): ChildMetrics {
-  return { name: pending.params.name ?? pending.reservedName ?? pending.params.agent, phase: "queued" };
+  return {
+    name: pending.params.name ?? pending.reservedName ?? pending.params.agent,
+    agent: pending.params.agent,
+    phase: "queued",
+  };
 }
 
-/** Compact line: `worker-1 · 842s · active · 12t · 84k tok · $0.42` —
+/** Compact line: `worker-1 · 842s · active · 12t · 84k tok · $0.42 · past p90 (14m)` —
  *  absent fields are trimmed, never zero-filled. */
 function formatChildMetricsLine(m: ChildMetrics): string {
   if (m.phase === "queued") return `${m.name} · queued`;
@@ -682,7 +690,165 @@ function formatChildMetricsLine(m: ChildMetrics): string {
   if (m.turns !== undefined) parts.push(`${m.turns}t`);
   if (m.tokens !== undefined) parts.push(`${formatTokens(m.tokens)} tok`);
   if (m.costUsd !== undefined) parts.push(`$${m.costUsd.toFixed(2)}`);
+  if (m.pastP90Min !== undefined) parts.push(`past p90 (${m.pastP90Min}m)`);
   return parts.join(" · ");
+}
+
+// ── history baselines and duplicate-spawn detection (spawn ack + list) ──
+
+/** Recover the agent role from a history row's child name: defaulted names
+ *  are `agent` or `agent-N` (uniqueRunningName), so exactly one trailing
+ *  `-<digits>` suffix is stripped. Custom spawn names may not encode the
+ *  agent — those rows simply never match, which only silences a warn-only
+ *  hint. */
+function agentOfHistoryName(name: string): string {
+  return name.replace(/-\d+$/, "");
+}
+
+/** Nearest-rank quantile over an ascending-sorted list. */
+function quantile(sorted: number[], q: number): number {
+  return sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
+}
+
+/** Per-agent baseline over history rows carrying a usable duration: count,
+ *  median/p90 elapsed (nearest-rank), and median cost when any row carried
+ *  one. Agents with fewer than MIN_BASELINE_ROWS usable rows get none —
+ *  three points is the floor below which "typical" is noise. */
+export interface AgentBaseline {
+  count: number;
+  medianMs: number;
+  p90Ms: number;
+  medianCostUsd?: number;
+}
+
+const MIN_BASELINE_ROWS = 3;
+
+function agentBaselines(records: SubagentHistoryRecord[]): Map<string, AgentBaseline> {
+  const byAgent = new Map<string, { durations: number[]; costs: number[] }>();
+  for (const r of records) {
+    if (typeof r.durationMs !== "number" || !Number.isFinite(r.durationMs) || r.durationMs <= 0) continue;
+    const bucket = byAgent.get(agentOfHistoryName(r.name)) ?? { durations: [], costs: [] };
+    bucket.durations.push(r.durationMs);
+    if (typeof r.costUsd === "number" && Number.isFinite(r.costUsd)) bucket.costs.push(r.costUsd);
+    byAgent.set(agentOfHistoryName(r.name), bucket);
+  }
+  const out = new Map<string, AgentBaseline>();
+  for (const [agent, b] of byAgent) {
+    if (b.durations.length < MIN_BASELINE_ROWS) continue;
+    const d = [...b.durations].sort((x, y) => x - y);
+    const n = d.length;
+    const medianMs = n % 2 === 1 ? d[(n - 1) / 2] : (d[n / 2 - 1] + d[n / 2]) / 2;
+    const c = [...b.costs].sort((x, y) => x - y);
+    const medianCostUsd =
+      c.length === 0
+        ? undefined
+        : c.length % 2 === 1
+          ? c[(c.length - 1) / 2]
+          : (c[c.length / 2 - 1] + c[c.length / 2]) / 2;
+    out.set(agent, {
+      count: n,
+      medianMs,
+      p90Ms: quantile(d, 0.9),
+      ...(medianCostUsd !== undefined ? { medianCostUsd } : {}),
+    });
+  }
+  return out;
+}
+
+function agentBaselineFor(records: SubagentHistoryRecord[], agent: string): AgentBaseline | null {
+  return agentBaselines(records).get(agent) ?? null;
+}
+
+function formatBaselineMinutes(ms: number): string {
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
+/** Spawn-ack time-sense line: `typical for `worker`: median 5m · p90 15m · $0.34`.
+ *  The cost figure is the median; it is omitted when no history row carried
+ *  one. Sub-minute figures clamp up to 1m so the line never reads "0m". */
+function formatBaselineLine(agent: string, b: AgentBaseline): string {
+  const cost = b.medianCostUsd !== undefined ? ` · $${b.medianCostUsd.toFixed(2)}` : "";
+  return `typical for \`${agent}\`: median ${formatBaselineMinutes(b.medianMs)} · p90 ${formatBaselineMinutes(b.p90Ms)}${cost}`;
+}
+
+function normalizeTaskText(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/** Warn-only duplicate heuristic: true when two texts are equal after
+ *  normalization, near-equal by token overlap (Jaccard ≥ 0.8), or one
+ *  contains the other (≥ 40 normalized chars). Used task-vs-task against
+ *  running children and task-vs-summary against history rows — history
+ *  stores no task text, and completed summaries restate their task. */
+const NEAR_IDENTICAL_JACCARD = 0.8;
+const MIN_CONTAINMENT_CHARS = 40;
+
+function tasksNearIdentical(a: string, b: string): boolean {
+  const na = normalizeTaskText(a);
+  const nb = normalizeTaskText(b);
+  if (na === nb) return true;
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  if (short.length >= MIN_CONTAINMENT_CHARS && long.includes(short)) return true;
+  const ta = new Set(na.split(" ").filter(Boolean));
+  const tb = new Set(nb.split(" ").filter(Boolean));
+  if (ta.size === 0 || tb.size === 0) return false;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared / (ta.size + tb.size - shared) >= NEAR_IDENTICAL_JACCARD;
+}
+
+function formatAgo(ts: number, now: number): string {
+  const sec = Math.max(0, Math.floor((now - ts) / 1000));
+  if (sec < 60) return "just now";
+  if (sec < 3_600) return `${Math.floor(sec / 60)} min ago`;
+  if (sec < 86_400) return `${Math.floor(sec / 3_600)} h ago`;
+  return `${Math.floor(sec / 86_400)} d ago`;
+}
+
+const DUPLICATE_SUMMARY_HEAD = 120;
+
+/** Warn-only duplicate-spawn note for the ack: a same-agent child already
+ *  running a near-identical task (steerable, so it wins), or the newest
+ *  same-agent history row whose summary matches the task — citing how long
+ *  ago it ran and its result's head. Null when nothing matches; the
+ *  orchestrator always decides whether the re-run is legitimate. */
+function findDuplicateSpawn(
+  params: { agent: string; task: string },
+  running: Iterable<Pick<RunningSubagent, "name" | "agent" | "task" | "startTime">>,
+  history: SubagentHistoryRecord[],
+  now: number = Date.now(),
+): string | null {
+  for (const r of running) {
+    if (r.agent !== params.agent || !tasksNearIdentical(r.task, params.task)) continue;
+    return (
+      `NOTE: this looks like a duplicate — a near-identical task is already running as "${r.name}" ` +
+      `(started ${formatAgo(r.startTime, now)}). Steer that child instead of respawning, unless this run is intentional. `
+    );
+  }
+  let match: SubagentHistoryRecord | null = null;
+  for (const r of history) {
+    if (agentOfHistoryName(r.name) !== params.agent || !tasksNearIdentical(params.task, r.summary)) continue;
+    if (!match || r.ts > match.ts) match = r;
+  }
+  if (!match) return null;
+  const head = normalizeTaskText(match.summary).slice(0, DUPLICATE_SUMMARY_HEAD);
+  return (
+    `NOTE: this looks like a duplicate — an identical task ran ${formatAgo(match.ts, now)} — ` +
+    `result: ${head}. Re-check that result before respawning. `
+  );
+}
+
+/** Flag running children whose elapsed time exceeds their agent's p90
+ *  baseline (from history) with `pastP90Min`. Queued children and agents
+ *  without a baseline are returned untouched. */
+function annotatePastP90(metrics: ChildMetrics[], history: SubagentHistoryRecord[]): ChildMetrics[] {
+  const baselines = agentBaselines(history);
+  return metrics.map((m) => {
+    if (m.phase === "queued" || m.elapsedSec === undefined) return m;
+    const b = baselines.get(m.agent ?? agentOfHistoryName(m.name));
+    if (!b || m.elapsedSec * 1_000 <= b.p90Ms) return m;
+    return { ...m, pastP90Min: Math.max(1, Math.round(b.p90Ms / 60_000)) };
+  });
 }
 
 /** Widget usage tail: ` · 12t · $0.42`, empty when unmetered. */
@@ -2021,6 +2187,13 @@ export const __test__ = {
   scopedChildren,
   resetScopeRegistry,
   resolveScopeMode,
+  agentOfHistoryName,
+  agentBaselineFor,
+  formatBaselineLine,
+  tasksNearIdentical,
+  findDuplicateSpawn,
+  annotatePastP90,
+  formatChildMetricsLine,
 };
 
 function startWidgetRefresh() {
@@ -2194,6 +2367,7 @@ async function launchSubagent(
           scopeInfo.scope.paths
             .map((p) => relative(scopeRepoRoot, p))
             .filter((p) => p !== "" && !p.startsWith("..")),
+          { historyPath: subagentHistoryPath(scopeRepoRoot) },
         )
       : null;
   const fullTask =
@@ -3800,6 +3974,29 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
         const scopeInfo = scopeInfoOf({ scopeId, scope });
 
+        // History-derived time-sense and duplicate guard for the ack: the
+        // baseline line gives the orchestrator a typical elapsed/cost figure
+        // at spawn, and a near-identical same-agent task (running child or
+        // history summary) warns before a duplicate spawn. Warn-only — the
+        // stat-cached history read is the sole data source, no new loops.
+        const spawnHistory = readRecentResults(
+          repoRootFor(
+            resolveSubagentPaths(params, params.agent ? loadAgentDefaults(params.agent) : null)
+              .effectiveCwd ?? ctx.cwd,
+          ),
+          20,
+        );
+        const baselineLine = (() => {
+          const b = agentBaselineFor(spawnHistory, params.agent);
+          return b ? `${formatBaselineLine(params.agent, b)} ` : "";
+        })();
+        const dupNote =
+          findDuplicateSpawn(
+            { agent: params.agent, task: params.task },
+            runningSubagents.values(),
+            spawnHistory,
+          ) ?? "";
+
         // Launch the subagent (creates pane, runs the launch script). Release
         // the name reservation once it registers in runningSubagents (or the
         // launch fails) — from then on uniqueRunningName tracks it via the
@@ -3821,6 +4018,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
                 text:
                   `Sub-agent "${params.name}" queued behind "${scopeConflicts[0].name}" — it declares write scope that ` +
                   `${describeScopeConflicts(scopeConflicts)}, so it launches once that owner finishes. ` +
+                  `${baselineLine}${dupNote}` +
                   `The launch and its result both arrive automatically: a steer message wakes you when it finishes. ` +
                   `Do NOT poll, sleep, or check status; do NOT assume results. Move on to other work or end your turn.`,
               },
@@ -3851,7 +4049,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
                 type: "text" as const,
                 text:
                   `Sub-agent "${params.name}" queued — the concurrency cap is reached, so it launches ` +
-                  `when a running sub-agent finishes. The launch and its result both arrive automatically: ` +
+                  `when a running sub-agent finishes. ${baselineLine}${dupNote}The launch and its result both arrive automatically: ` +
                   `a steer message wakes you when it finishes. Do NOT poll, sleep, or check status; do NOT assume results. ` +
                   `Move on to other work or end your turn.`,
               },
@@ -3877,7 +4075,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
               type: "text",
               text:
                 `Sub-agent "${params.name}" launched and is now running in the background. ` +
-                `${scopeWarn}` +
+                `${baselineLine}${dupNote}${scopeWarn}` +
                 `Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
                 `The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
                 `Until then, move on to other work or tell the user you're waiting.`,
@@ -4011,11 +4209,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           });
 
         // Live per-child metrics — queued first (they have no start time),
-        // then running children with elapsed, phase, and metered usage.
-        const metrics: ChildMetrics[] = [
-          ...pendingSpawns.map(queuedChildMetrics),
-          ...[...runningSubagents.values()].map(runningChildMetrics),
-        ];
+        // then running children with elapsed, phase, metered usage, and a
+        // past-p90 flag from this repo's history baselines.
+        const metrics: ChildMetrics[] = annotatePastP90(
+          [
+            ...pendingSpawns.map(queuedChildMetrics),
+            ...[...runningSubagents.values()].map(runningChildMetrics),
+          ],
+          readRecentResults(exposureRoot, 20),
+        );
 
         if (list.length === 0 && registered.length === 0 && scoped.length === 0 && metrics.length === 0) {
           return {
