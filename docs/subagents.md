@@ -75,12 +75,34 @@ A spawn runs with `--no-extensions` plus one `-e` per tool-backing extension, so
 
 | Agent         | Tools | Role |
 | ------------- | ----- | ---- |
+| architect-reviewer | ls, piread, pibash | read-only architecture review — dependency direction, pattern adherence, coupling, boundaries |
 | bench-runner  | write, piread, pibash | runs frozen benchmark/eval arms under hard wall budgets; writes only its result file |
 | docs-optimizer | write, piread, piedit, pibash (auto-loads `documentation-writer`) | optimizes rule/instruction Markdown; drafts README/CHANGELOG proposals |
-| fixer         | write, piread, piedit, pibash (auto-loads `systematic-debugging`) | fixes exactly one assigned issue in a worktree; no commit/push unless ordered |
+| frontend-worker | write, piread, piedit, pibash (auto-loads `playwright-tester`) | component/UI implementation with component tests |
+| product-manager | write, piread, pibash (auto-loads `brainstorming`) | drafts structured product briefs with numbered acceptance criteria |
 | researcher    | write, piread, pibash (auto-loads `web-search`) | web research via the `tvly` CLI |
+| rust-engineer | write, piread, piedit, pibash (auto-loads `rust-skills`) | Rust workspace implementation; cargo fmt/clippy/test discipline |
+| security-reviewer | ls, piread, pibash | read-only security pass over trust-boundary diffs (auth, secrets, injection, data loss, guard logic) |
+| session-auditor | ls, piread, pibash, pidx (auto-loads `session-audit`) | session-history analysis; appends lessons, never edits history |
 | reviewer      | ls, piread, pibash (auto-loads `code-reviewer`) | pre-commit diff review; never commits/pushes |
 | scout         | ls, piread, pibash | read-only recon |
 | ui-verifier   | ls, piread, pibash (auto-loads `browser-tools`) | drives the running app via headless Chromium + CDP; verifies rendered behavior |
 | verifier      | ls, piread, pibash | runs the change; reports per-criterion PASS/FAIL, never fixes |
-| worker        | write, piread, piedit, pibash (auto-loads `systematic-debugging`, `ponytail`; may spawn scout, researcher) | general implementer |
+| worker        | write, piread, piedit, pibash (auto-loads `systematic-debugging`, `ponytail`; may spawn scout, researcher) | general implementer; scoped issue-fixing in worktrees |
+
+**Orchestration rules** — doctrine for the session that spawns agents:
+
+- Gate each delegation: it must beat working inline on speed, accuracy, or quality — a complete deliverable, a well-scoped file-set, facts already known; otherwise work inline. A child costs a fresh-context reload at many times linear chat cost: tasks under the sizing bar, single-file edits, or steps whose files collide with running children stay linear; parallelize only independent, multi-step work with a declared scope.
+- Route by contract against the roster table above; read-only work never goes to worker. Only worker spawns children (scout, researcher) — no deeper nesting. Keep the table and `agents/` frontmatter in sync on every roster change.
+- One task = one agent = one file-set: disjoint file-sets spawn in the same turn; any shared file forces the next wave. Start a downstream agent early only when its input contract is fixed — steer the correction if it changes.
+- Bake facts into every task prompt: paths, line numbers, shapes, contracts, verification command, report format (state one only to deviate). A worker that must explore is a linear worker plus overhead: scrape the facts yourself, or send a scout and spawn the worker on its report.
+- Spawn with `agent` (the profile) plus a stable task-specific `name` (label and resume handle) and `cwd` at the target package so the child loads its local rules. After spawning, end the turn — never poll, sleep, tail logs, or fabricate results; finished work arrives on its own.
+- Children run unattended — no user is watching. A blocked command is a closed door: skip it, note it in the result; never ask permission for one. ask_question carries only task decisions or confusion.
+- Budgets never end work: spawn unbudgeted by default; where cost control demands a ceiling, size it far above the estimate. A cutoff is a signal, not a failure — resume by name and continue.
+- Transient failure (provider 5xx, rate limit): resume the same named agent with a retry nudge — fresh spawn only for new work. A blocked worker asks one question and waits — answer it via steer. A run looping or repairing >5 cycles: steer it to stop and report.
+- Follow-ups resume the same named agent (warm context); keep prompts prefix-stable so the warm context holds. A result recovered from a dead session is information — act only if it needs action.
+- Guard orchestrator context: at most 6 children at once; digest each finished wave into a scratch file (one line per agent — verdict, paths) and work from that file, not re-delivered results; prefer a fresh session over compacting one session through a large effort.
+- Every worker prompt carries scope (files it may touch), contract, verification command, and the bans: no commits, no installs, no working around blockers — report them.
+- Task sizing: every task scope-driven and measurable, ~10 minutes or less — split bigger scopes into sequential waves. Before spawning, check the wave ledger/history/cache for equivalent in-flight or completed work; reuse instead of duplicating.
+- Wave autonomy: pending work with a free file-set starts immediately — never wait to be told; ask only for scope, priority, cost, or safety decisions the user must own. On every wave completion, dispatch the next unblocked wave without prompting.
+- End every wave with an independent check of the combined result — reviewer for diffs, verifier for criteria; never merge unverified parallel work.
