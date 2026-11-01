@@ -251,12 +251,53 @@ export const isMutatingCommand = (cmd: string): boolean =>
 
 
 
+/** 16.1 (2026-11-02): heredoc opener at a segment's end — `<<TAG`, `<<-TAG`,
+ * `<<'TAG'`, `<<"TAG"` (optional whitespace). `<<` is bounded on both sides so
+ * `<<<` here-strings never arm a body; quotes are stripped from the tag as
+ * written. Known simplification: multiple openers on one line arm only the
+ * last tag — earlier bodies are swallowed by its body, still never scanned. */
+const HEREDOC_OPENER =
+  /(?<!<)<<(?!<)(-?)\s*(?:"([^"\s]+)"|'([^'\s]+)'|([^\s'";&|<>]+))\s*$/;
+const heredocOf = (seg: string) => {
+  const m = HEREDOC_OPENER.exec(seg);
+  if (!m) return undefined;
+  const tag = m[2] ?? m[3] ?? m[4];
+  return tag ? { tag, stripTabs: m[1] === "-" } : undefined;
+};
+
 export function splitSegments(cmd: string): string[] {
   const out: string[] = [];
   let cur = "";
   let quote: string | undefined;
+  // 16.1: a segment ending in an opener ARMS a heredoc — the body starts at
+  // the NEXT newline, so `; && ||` continuations on the opener line
+  // (`cat <<EOF && rm x`) keep scanning normally until it arrives. Body lines
+  // are data, not commands (markdown bodies quoting interpreter-escape prose
+  // blocked three review children on /tmp durability writes); only the opener
+  // segment is emitted and scanned. Delimiter match: raw body line, leading
+  // tabs stripped first for `<<-`, exact equality with the (unquoted) tag.
+  let armed: { tag: string; stripTabs: boolean } | undefined;
+  let heredoc: { tag: string; stripTabs: boolean } | undefined;
+  let line = "";
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i];
+    if (heredoc) {
+      if (ch === "\n") {
+        // CRLF (review-16a F1): the opener regex's \s*$ eats the opener line's
+        // \r, so the delimiter word is bare `TAG` — strip this line's \r too,
+        // else `TAG\r` never closes the heredoc and every later line is
+        // swallowed unscanned (bash keeps \r inside the word and closes).
+        const raw = (heredoc.stripTabs ? line.replace(/^\t+/, "") : line).replace(
+          /\r$/,
+          "",
+        );
+        if (raw === heredoc.tag) heredoc = undefined;
+        line = "";
+      } else {
+        line += ch;
+      }
+      continue; // body chars are prose — never split, never quote-tracked
+    }
     if (quote) {
       if (ch === "\\") {
         cur += ch + (cmd[i + 1] ?? "");
@@ -280,7 +321,13 @@ export function splitSegments(cmd: string): string[] {
     const two = cmd.slice(i, i + 2);
     if (ch === "\n" || ch === ";" || two === "&&" || two === "||") {
       out.push(cur);
+      const opener = heredocOf(cur);
+      if (opener) armed = opener;
       cur = "";
+      if (ch === "\n") {
+        heredoc = armed;
+        armed = undefined;
+      }
       if (two === "&&" || two === "||") i++;
       continue;
     }
