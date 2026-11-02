@@ -322,6 +322,39 @@ function getToolExtensionPath(tool: string, manifestIndex?: Map<string, string>)
   return EXTRA_TOOL_EXTENSIONS.get(tool);
 }
 
+/** Closest known tool name (edit distance ≤ 2) for a warning that has to name
+ * the fix, not only the typo. Known names come from the manifest scan plus the
+ * builtin, spawning and control tool sets. */
+export function closestToolName(
+  tool: string,
+  known: Iterable<string>,
+): string | undefined {
+  const dist = (a: string, b: string): number => {
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let diag = row[0];
+      row[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const above = row[j];
+        row[j] = Math.min(
+          row[j] + 1,
+          row[j - 1] + 1,
+          diag + (a[i - 1] === b[j - 1] ? 0 : 1),
+        );
+        diag = above;
+      }
+    }
+    return row[b.length];
+  };
+  let best: { name: string; d: number } | undefined;
+  for (const name of known) {
+    if (name === tool) continue;
+    const d = dist(tool, name);
+    if (d <= 2 && (!best || d < best.d)) best = { name, d };
+  }
+  return best?.name;
+}
+
 /**
  * When this process was spawned as a restricted subagent, the parent pins the
  * set of agents it may itself spawn via PI_SUBAGENT_ALLOWED. `null` means no
@@ -1167,7 +1200,15 @@ let channelDead = false;
  *  (identically on mac and Linux). Route every diagnostic through the host
  *  UI notify channel, which the TUI renders without touching the input line;
  *  fall back to stderr only when no UI exists (headless, print mode, tests). */
+/** Every diagnostic text already emitted by this module instance. A repeated
+ * condition (a persistent typo, a dead extension) otherwise repaints the TUI
+ * input line on every spawn and resume; one notice per distinct text is enough
+ * for the user to act on. Reload resets the set. */
+const reportedDiagnostics = new Set<string>();
+
 function reportDiagnostic(message: string): void {
+  if (reportedDiagnostics.has(message)) return;
+  reportedDiagnostics.add(message);
   const ui = latestCtx?.ui as { notify?: (text: string, severity?: string) => void } | undefined;
   if (latestCtx?.hasUI && typeof ui?.notify === "function") {
     try {
@@ -1604,8 +1645,15 @@ function applySandboxToParts(
       // (typo, unregistered name, extension removed from disk) would silently
       // strip the tool from the child — say so once at spawn time instead.
       if (BUILTIN_TOOLS.has(tool)) continue;
+      const near = closestToolName(tool, [
+        ...toolManifests.keys(),
+        ...BUILTIN_TOOLS,
+        ...SUBAGENT_CONTROL_TOOLS,
+        ...SPAWNING_TOOLS,
+      ]);
       reportDiagnostic(
-        `[pi-subagents] allowlisted tool "${tool}" resolves to no extension path — the child will NOT receive it`,
+        `[pi-subagents] allowlisted tool "${tool}" resolves to no extension path — the child will NOT receive it` +
+          (near ? ` (did you mean "${near}"?)` : ""),
       );
     }
     // Local addition (not upstream): re-enable extra global extensions inside
@@ -3558,7 +3606,7 @@ function finalizeLostSubagent(
       })
       .catch((reportErr) => {
         reportDiagnostic(
-          `[pi-subagents] restart attempt failed (${reportErr instanceof Error ? reportErr.message : String(reportErr)}); synthesizing loss`,
+          `[pi-subagents] restart attempt failed (${describeTmuxFailure(reportErr, `the pane of "${running.name}"`)}); synthesizing loss`,
         );
         if (!running.delivered) {
           deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);
@@ -4676,13 +4724,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           void restartSubagent(resolved.running)
             .then((outcome) => {
               if ("error" in outcome) {
-                reportDiagnostic(`[pi-subagents] restart of "${name}": ${outcome.error}`);
+                reportDiagnostic(
+                  `[pi-subagents] restart of "${name}": ${describeTmuxFailure(outcome.error, `the pane of "${name}"`)}`,
+                );
               }
             })
             .catch((err: unknown) => {
               reportDiagnostic(
                 `[pi-subagents] restart of "${name}" failed: ` +
-                  `${err instanceof Error ? err.message : String(err)}`,
+                  `${describeTmuxFailure(err, `the pane of "${name}"`)}`,
               );
             });
           return single(
