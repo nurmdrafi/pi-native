@@ -30,7 +30,7 @@
 - Data files: logs and temp/intermediate data written for later retrieval use NDJSON — one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
 
 ### Subagents
-- Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked. Doctrine is canonical in `docs/subagents.md` — read it before the first spawn in a session; keep its roster table and `agents/` frontmatter in sync on every roster change.
+- Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked. Doctrine is canonical in `docs/subagent-orchestration.md` — read it before the first spawn in a session; child-facing conduct is `docs/subagents.md` (it reaches child sessions — keep it lean); keep the roster table and `agents/` frontmatter in sync on every roster change.
 
 
 ## Verification

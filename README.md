@@ -91,7 +91,7 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 | Node.js      | ≥ 22.19 (`.nvmrc` pins 24, the current LTS)           |
 | OS           | macOS or Linux                                        |
 | Rust (cargo) | Builds the native tools                               |
-| tmux         | Only for subagents — [docs/subagents.md](docs/subagents.md) |
+| tmux         | Only for subagents — [docs/subagent-orchestration.md](docs/subagent-orchestration.md) |
 | Git          | For sync; `~/.pi/agent` is itself a repo              |
 
 Native tools register unconditionally and always execute the Rust binary; no env switch turns one off or hands the work to a built-in. Choosing pi's built-in `read`/`bash`/`edit` is configuration: do not load that extension, or flip the permission-gate rule that steers calls to it (`nativeReadFirst` / `nativeBashFirst` in `extensions/permission-gate/config.json`, or `PGATE_CONFIG`).
@@ -164,7 +164,7 @@ Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`,
 
 - [Native tools](docs/native-tools.md) — tools, env keys, performance, context shaping
 - [Skills](docs/skills.md) — roster and validator-enforced layout
-- [Subagents](docs/subagents.md) — gating, sandboxing, agent table
+- [Subagents](docs/subagent-orchestration.md) — gating, sandboxing, agent table
 - [Design rules](docs/design-rules.md) — context layers, token budget, portability
 - [Development](docs/development.md) — repo layout, scripts, sync, providers
 - [extensions/README.md](extensions/README.md) — extension and permission-gate rule catalog
