@@ -216,6 +216,91 @@ export function resolveNameInRegistry(
   return entry && typeof entry.sessionFile === "string" ? entry : null;
 }
 
+// ── Append-only launch index ─────────────────────────────────────────────────
+// The registry above is rewritten wholesale on every spawn (temp file +
+// rename). A crash mid-write, a cleanup, or a recreated artifact dir takes
+// every entry with it, and resume-by-name then answers "No subagent named X"
+// while `<name>-*.jsonl` still sits on disk. This index is append-only — one
+// line per launch, never rewritten — so a name survives a lost registry.
+
+/** Path of the append-only name → session index for a spawner session. */
+export function sessionIndexPath(artifactDir: string): string {
+  return join(artifactDir, "subagent-sessions.ndjson");
+}
+
+/** Append one launch to the index. Best-effort: a failed append only costs the
+ *  registry-less fallback, never the spawn. */
+export function appendSessionIndex(
+  artifactDir: string,
+  entry: { name: string; sessionFile: string; sessionId?: string | null },
+): void {
+  try {
+    mkdirSync(artifactDir, { recursive: true });
+    appendFileSync(
+      sessionIndexPath(artifactDir),
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        name: entry.name,
+        sessionFile: entry.sessionFile,
+        sessionId: entry.sessionId ?? null,
+      })}\n`,
+      "utf8",
+    );
+  } catch {
+    // Best-effort, same contract as registerName.
+  }
+}
+
+/** Every well-formed line of the index, oldest first. Malformed lines are
+ *  skipped: an interrupted append must not poison later lookups. */
+function readSessionIndex(
+  artifactDir: string,
+): Array<{ name: string; sessionFile: string; sessionId: string | null }> {
+  const p = sessionIndexPath(artifactDir);
+  if (!existsSync(p)) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(p, "utf8");
+  } catch {
+    return [];
+  }
+  const out: Array<{ name: string; sessionFile: string; sessionId: string | null }> = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (typeof parsed?.name !== "string" || typeof parsed?.sessionFile !== "string") continue;
+      out.push({
+        name: parsed.name,
+        sessionFile: parsed.sessionFile,
+        sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
+      });
+    } catch {
+      // Skip the damaged line.
+    }
+  }
+  return out;
+}
+
+/** Resolve a name through the launch index, newest line winning (a name is
+ *  reclaimed across resumes, so the last launch is the live one). */
+export function resolveNameInIndex(
+  artifactDir: string,
+  name: string,
+): NameRegistryEntry | null {
+  const lines = readSessionIndex(artifactDir).filter((line) => line.name === name);
+  const last = lines.at(-1);
+  return last ? { sessionFile: last.sessionFile, sessionId: last.sessionId } : null;
+}
+
+/** Every subagent name known to this spawner session: the registry plus the
+ *  launch index, sorted. Used to suggest alternatives when a resume misses. */
+export function knownSubagentNames(artifactDir: string): string[] {
+  const names = new Set(Object.keys(readNameRegistry(artifactDir)));
+  for (const line of readSessionIndex(artifactDir)) names.add(line.name);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 /** A registered subagent session as seen by a (re)started spawner. */
 export interface RegisteredSubagent {
   name: string;

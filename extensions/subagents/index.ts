@@ -33,14 +33,17 @@ import {
 
 import {
   type SessionEntry,
+  appendSessionIndex,
   countSessionEntryLines,
   findLastAssistantMessage,
   getNewEntries,
   getSessionId,
+  knownSubagentNames,
   listRegisteredSubagents,
   readNameRegistry,
   readSubagentLoadout,
   registerName,
+  resolveNameInIndex,
   resolveNameInRegistry,
   seedSubagentSessionFile,
   summarizeSessionStats,
@@ -2050,9 +2053,11 @@ async function resumeSubagentByName(
       ctx.sessionManager.getSessionDir(),
       ctx.sessionManager.getSessionId(),
     );
-    const entry = resolveNameInRegistry(parentArtifactDir, requestedName);
+    const entry =
+      resolveNameInRegistry(parentArtifactDir, requestedName) ??
+      resolveNameInIndex(parentArtifactDir, requestedName);
     if (!entry) {
-      const known = Object.keys(readNameRegistry(parentArtifactDir));
+      const known = knownSubagentNames(parentArtifactDir);
       const err =
         `No subagent named "${requestedName}" in this session. ` +
         (known.length > 0
@@ -2573,6 +2578,14 @@ async function launchReservedSpawn(
   // subagent after it finishes (and after a pi restart). Done at launch,
   // not completion, so the handle exists even if the parent dies mid-run.
   registerName(parentArtifactDir, running.name, {
+    sessionFile: running.sessionFile,
+    sessionId: getSessionId(running.sessionFile),
+  });
+  // Append-only companion to the registry: the registry file is rewritten on
+  // every spawn, so a lost/rewritten registry would strand resume-by-name.
+  // This line is never rewritten, and resume falls back to it.
+  appendSessionIndex(parentArtifactDir, {
+    name: running.name,
     sessionFile: running.sessionFile,
     sessionId: getSessionId(running.sessionFile),
   });
