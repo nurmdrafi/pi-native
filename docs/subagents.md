@@ -52,9 +52,11 @@ Tool names in `tools:` resolve from extension manifests and the naming conventio
 | Agent         | Tools | Role |
 | ------------- | ----- | ---- |
 | architect-reviewer | ls, piread, pibash | architecture review — dependency direction, pattern adherence, coupling, boundaries |
+| auth-worker | write, piread, piedit, pibash (auto-loads `auth`) | auth/session implementation — login flows, token refresh, route guards, permission access control |
 | bench-runner  | write, piread, pibash | runs frozen benchmark/eval arms under hard wall budgets; writes only its result file |
 | docs-optimizer | write, piread, piedit, pibash (auto-loads `documentation-writer`) | optimizes rule/instruction Markdown; drafts README/CHANGELOG proposals |
-| frontend-worker | write, piread, piedit, pibash (auto-loads `playwright-tester`) | component/UI implementation with component tests |
+| frontend-engineer | write, piread, piedit, pibash (auto-loads `playwright-tester`) | component/UI implementation with component tests |
+| map-engineer | write, piread, piedit, pibash (auto-loads `map-integration`) | map rendering implementation — overlays, composite-layer performance, camera/viewport work |
 | product-manager | write, piread, pibash (auto-loads `brainstorming`) | drafts structured product briefs with numbered acceptance criteria |
 | researcher    | write, piread, pibash (auto-loads `web-search`) | web research via the `tvly` CLI |
 | reviewer      | ls, piread, pibash (auto-loads `code-reviewer`) | pre-commit diff review; never commits/pushes |
