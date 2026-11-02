@@ -1,6 +1,6 @@
 ---
 name: auth
-description: "Implements or migrates to NextAuth v4 credentials auth for Next.js App Router apps against an external REST IdP issuing bearer tokens: authorize() with server-side backend calls, session-token plumbing for RTK Query/fetch layers, middleware route guards, 401 retry and sign-out ladder, OTP registration and password-reset flows, social-login token exchange, deterministic post-login redirects. Use for 'nextauth', 'auth migration', 'login not redirecting', 'stuck on login page', 'refresh fixes login', 'protect routes', 'middleware auth', 'session token', 'signIn credentials', '401 handling', 'session outlives backend token', 'jwt sliding session', 'signOut on every 401', 'random sign-outs', 'signed out while browsing', 'otp login', 'social login', 'new auth integration'. NOT for OAuth-first setups, Auth.js v5, Firebase auth, or non-Next.js apps."
+description: "Implements or migrates to NextAuth v4 credentials auth for Next.js App Router apps against an external REST IdP issuing bearer tokens: authorize() with server-side backend calls, session-token plumbing for RTK Query/fetch layers, middleware route guards, 401 retry and sign-out ladder, OTP registration and password-reset flows, social-login token exchange, deterministic post-login redirects. Use for 'nextauth', 'auth migration', 'login not redirecting', 'stuck on login page', 'refresh fixes login', 'protect routes', 'middleware auth', 'session token', 'signIn credentials', '401 handling', 'session outlives backend token', 'jwt sliding session', 'signOut on every 401', 'random sign-outs', 'signed out while browsing', 'sso account switch', 'third-party 401 logs the user out', 'blank protected page after refresh', 'otp login', 'social login', 'new auth integration'. NOT for OAuth-first setups, Auth.js v5, Firebase auth, or non-Next.js apps."
 disable-model-invocation: true
 ---
 
@@ -51,7 +51,7 @@ File map (every piece exists for a reason; skip none):
 
 1. NextAuth setup — `lib/auth/options.ts` + route handler + env (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`). `references/nextauth-setup.md`
 2. Route protection — `lib/auth/routes.ts` + `proxy.ts`. `references/route-protection.md`
-3. Token plumbing — `lib/auth/session.ts`, `SessionTokenSync`, `AuthProvider`, base query. `references/token-plumbing.md`
+3. Token plumbing — `lib/auth/session.ts`, `SessionTokenSync`, `AuthProvider`, base query. `references/token-plumbing.md`; expiry, guards and identity switch: `references/session-boundaries.md`
 4. Flows — login client, register auto-signIn, logout helper: `references/login-flows.md`
 5. Optional — OTP registration/forgot-password: `references/otp-flows.md`; Google/Facebook exchange: `references/social-login.md`
 
@@ -63,7 +63,12 @@ File map (every piece exists for a reason; skip none):
 - All backend auth calls inside `authorize()`, server-side. Client-side post-login fetch chains (profile fetch → set-cookie → redirect) = root cause of no-redirect bug. One `signIn()` = one response = one cookie.
 - `await hydrateSessionToken()` after every successful `signIn` (login, register auto-login, any programmatic sign-in) before any authorized request or redirect. `signIn({redirect:false})` resolves *before* `useSession` cache updates; stale empty token → anonymous requests → 401 → logout loop.
 - Redirect = awaited `router.push(callbackUrl)` in the component — never `window.location.href` in an API layer, never conditional on profile fetch. Sanitize `callbackUrl` to same-origin relative path first — query param, user-controllable; `router.push("https://evil.com")` = open redirect.
-- Session cookie maxAge = backend token `exp` (decode with `jose`) — always, no fallback. `authorize()` rejects tokens without usable expiry (`'Login token has no expiry'`); guessed lifetime (fixed 24h etc.) kills live sessions early or leaves expired ones minted. Custom `jwt.encode` override, not default.
+- Session cookie maxAge = backend token `exp` (decode with `jose`) — always, no fallback. `authorize()` rejects tokens without usable expiry (`'Login token has no expiry'`); guessed lifetime (fixed 24h etc.) kills live sessions early or leaves expired ones minted. Custom `jwt.encode` override, not default. Derive it per encode (`backendExp - now`): next-auth re-encodes on every session read, so a login-time duration slides expiry — and set `session.expires` from `backendExp` so the client sees the same end. `references/session-boundaries.md`
+- API guard: `getToken()` + strict `backendExp <= now`. The middleware 120s buffer is a navigation fail-safe only — never copied into the API layer.
+- 401 with no bearer attached = session not hydrated, not dead — do not sign out.
+- A proxy for a second service never forwards that service's 401/403 (map to `502` + one generic message from one shared constant); other statuses pass through so the toast keeps the real reason. A third-party auth failure is a third-party problem: toast it and alert ops — never `signOut`, never a permission error on the app account.
+- SSO landing: a valid blob applies even over an active session when that is the business rule, then hard-navigate; one link = one sign-in POST; an identity change in another tab reloads so no data of the previous user survives.
+- `callbackUrl` sanitizer: a same-origin check alone passes `//host` and `/\host`; require exactly one leading slash on the resolved pathname.
 - 401 ladder in base query: retry only if something can rotate the token between attempts (refresh endpoint, session re-fetch). Static module-holder token → retry byte-identical — skip, go straight to `signOut({redirect:false})` + `location.replace('/login?callbackUrl=...')` gated by `isProtectedRoute()` so public pages don't bounce. Sign-out single-flight: only base-query ladder owns it — `signOut` from per-request listeners = one expired token → N parallel 401s → N sign-outs → users logged out mid-action.
 - **No token in localStorage, ever.** Only client-visible token copy = NextAuth session; API layers read via module holder.
 - Social logins exchange provider token for backend token inside `jwt` callback — provider token never stored as app token.
@@ -89,6 +94,12 @@ File map (every piece exists for a reason; skip none):
 - [ ] `hydrateSessionToken()` after signIn and register-auto-login; sets token + user holders
 - [ ] Redirect chain: `callbackUrl` (same-origin validated) → same-origin referrer (≠ auth page) → default
 - [ ] Route guard uses `getToken()` (signature-verified), not cookie presence
+- [ ] Expiry derived per encode from the IdP token; `session.expires` matches it; no static fallback lifetime
+- [ ] API routes reject past `backendExp`; page buffer 120s; buffer absent from the API layer
+- [ ] Second-service proxy maps upstream 401/403 to 502; upstream text never reaches the browser
+- [ ] 401 without an attached bearer does not sign out
+- [ ] SSO/account switch: blob scrubbed from history, one sign-in POST, hard navigation, cross-tab reload; rejected blob keeps the session
+- [ ] Callback param requires exactly one leading slash
 - [ ] Unauthenticated on protected → `/login?callbackUrl=<path>`
 - [ ] Base query: Bearer per request, 401 ladder (retry only with real token rotation), single-flight signOut fallback
 - [ ] Session user typed from backend profile; components read domain/user fields via one accessor, not ad-hoc `session?.user?.x` chains

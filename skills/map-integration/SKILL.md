@@ -59,6 +59,7 @@ const DeckGLOverlay = (props: MapboxOverlayProps) => {
 - Performance: never `setState` inside `onHover`/view-state callbacks — fire per frame, rerender tree; throttle (dashboards use `useThrottle(popupData, 250)`).
 - Recreating layer instances per render fine (deck diffs props); appending live data must not rebuild whole buffer — append into stable structure or one layer per chunk.
 - Reuse existing layers (marker/trace/boundary) before writing new — search repo's layer components first.
+- Composite-layer performance patterns — stable accessors, `updateState` caches, boolean updateTriggers: `references/composite-layer-perf.md`.
 - Dashboards share one template: `components/Map/DeckGLMap.jsx` (Map shell, `MAP.STYLES[0]`, throttled tooltip) + `OverLayers.jsx` (DeckGLOverlay above — `useControl` from `react-bkoi-gl`) + `Map/Layers/` composite layer classes (`TraceLayer`, `RouteLayer`…), all fed from Redux slice. Before writing new: diff sibling dashboard — forks of same shape.
 
 ## 5. Known map bugs / pitfalls (fixed before — keep guards)
