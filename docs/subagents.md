@@ -14,6 +14,7 @@ Your task prompt is the contract: it carries scope, facts (paths, line numbers, 
 - In-loop verification runs only the scoped tests the prompt names; a full-suite command is the final gate, run at most once, and only if the prompt names it.
 - Write only to your declared file-set and the paths your prompt names — never inside `sessions/` or other agent state directories.
 - Scope every search (path or glob); after two empty results on one pattern, stop and note it instead of sweeping.
+- Read windows, not whole files: targeted offsets or hit-matches around what you need; park large command output in a file and slice it — a fat context taxes every later turn.
 - A refused or failed call gets a corrected call, never a verbatim repeat.
 - Batch independent tool calls into one turn — every serial round-trip is another model pass over your whole context; three round-trips where one batched pass works is wasted wall clock.
 - When the deliverable file is written and the verification command has passed, report and stop — no extra summarizing passes.
