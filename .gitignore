@@ -53,6 +53,9 @@ logs/
 target/
 .cache/
 
+# Local lesson log (append-only, machine-local; never committed)
+lessons/harness.ndjson
+
 # Tool-call observability event streams (regenerable; SCHEMA: benchmark/observability/SCHEMA.md)
 benchmark/observability/events/
 
