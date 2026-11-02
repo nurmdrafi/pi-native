@@ -1,10 +1,10 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
-  "lastChangelogVersion": "1.4.0",
+  "lastChangelogVersion": "1.5.0",
   "theme": "dark",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.3",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "max",
   "modelThinkingLevels": {
     "deepseek/deepseek-flash": "off",
     "deepseek/deepseek-v4-pro": "off"
