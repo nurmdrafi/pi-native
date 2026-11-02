@@ -30,8 +30,7 @@
 - Data files: logs and temp/intermediate data written for later retrieval use NDJSON — one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
 
 ### Subagents
-- Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked.
-- Subagent doctrine is canonical in `docs/subagents.md` — read it before the first spawn in a session; keep its roster table and `agents/` frontmatter in sync on every roster change.
+- Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked. Doctrine is canonical in `docs/subagents.md` — read it before the first spawn in a session; keep its roster table and `agents/` frontmatter in sync on every roster change.
 
 
 ## Verification
@@ -39,11 +38,12 @@
 - Build once at task end: implement phase by phase, each phase runs only its own scoped tests as it lands, and the build command runs after the final phase.
 - Never claim works without running it; cannot run → state why.
 - Verify literals before typing. Route paths, permission strings, API endpoints, env names, props/config keys → `rg -n` definition first, copy from hit. Config filenames take any extension (`.ts`, `.js`, `.mjs`, `.cjs`, `.json` …) — locate the basename (`fd commitlint.config`) and copy the hit, never guess the suffix. No definition exists yet (new symbol)? Define it once first, then reference it — never free-type the same literal twice. Gates certify spans not correctness; invented route passes all checks, still 404s. Same rule for shapes: `rg` the producer before calling its methods.
+- Claims about behavior: check at the consumption site, never at the helper that derives the value — read the line that acts on it before writing a sentence about it. A doc built from an intermediate function's lines asserts a guarantee nothing downstream enforces.
 
 ## Docs
 - Shell or path work: apply the harness portability rules (`docs/portability.md`) before writing the command — macOS+Linux subset, dynamic paths.
 - Rule writing style: brief yet self-contained — enough context that any LLM decodes it without tribal knowledge; no jargon — plain words that need no prior context; agnostic by default — concepts, not tool names (OS/framework/language/platform/project/LLM); name tools only in rules explicitly scoped to this repo; no project/session/artifact references in any file (docs, comments, tests, fixtures, research notes, changelog) — describe the shape, keep dates, neutralize identities as `<project-a>`, `<vendor>`, `<org>`, `<project-root>`; fixture names describe the shape, never the incident's source files; exception: a skill whose subject is a named stack names it; minimal grammar, no duplicates — one rule, one home; cross-reference, never restate.
 
 ## Harness tool discipline
-- Any lesson or incident from any session — tool-call error, gate/permission block, guard misfire, rule conflict, vague instruction, workflow or extension misbehaviour — appends real-time as one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` (fields: ts, source, lesson); read the tail before planning calls; never commit or push it.
+- Any lesson or incident from any session — tool-call error, gate/permission block, guard misfire, rule conflict, vague instruction, workflow or extension misbehaviour — appends real-time as one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` (fields: ts, source, lesson); read the tail before planning calls; never commit or push it. A tool-defect lesson carries what a replay needs — path, file size, and the exact payload (anchor text or its hash) — so a later session can reproduce it instead of only reading a suspicion. A tool that writes its output or state to a path of your choosing keeps that path inside the agent home — an outside path is refused, so pick the in-home cache location or take the tool's default.
 
