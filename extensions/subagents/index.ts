@@ -1511,6 +1511,11 @@ function applySandboxToParts(
     const toolManifests = scanToolManifests(join(getAgentConfigDir(), "extensions"));
     for (const tool of loadout.toolAllowlist.split(",")) {
       if (!tool) continue;
+      // Control tools resolve from no manifest by design: the sandbox builder
+      // force-adds them, and every launch/resume path delivers them via its
+      // own dedicated `-e subagent-done.ts` push alongside this replay — they
+      // are known-delivered, not unknown names. Skip before the guard.
+      if ((SUBAGENT_CONTROL_TOOLS as readonly string[]).includes(tool)) continue;
       const extPath = getToolExtensionPath(tool, toolManifests);
       if (extPath && existsSync(extPath)) {
         extPaths.add(extPath);

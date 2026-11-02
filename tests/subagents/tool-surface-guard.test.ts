@@ -18,7 +18,11 @@
  *   subdirectory, with an `entry` override) wins, then the directory-naming
  *   convention (`web_search` -> `web-search/index.ts`), then the runtime
  *   registry;
- * - a malformed manifest is skipped loudly without aborting the scan.
+ * - a malformed manifest is skipped loudly without aborting the scan;
+ * - control tools force-added by the sandbox builder (ask_question) never
+ *   trigger that warning: they resolve from no manifest by design, and every
+ *   launch/resume path delivers them via a dedicated `-e subagent-done.ts`
+ *   push alongside the sandbox replay.
  */
 // Scrub inherited child-identity env and redirect the durable inbox BEFORE any
 // extension import loads — every invocation style must get the same isolation.
@@ -99,6 +103,29 @@ describe("applySandboxToParts unresolvable-tool guard", () => {
         }),
       );
       assert.deepEqual(lines.filter((l) => /resolves to no extension/.test(l)), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never warns about control tools — ask_question rides the dedicated -e subagent-done.ts push", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tool-surface-"));
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const parts: string[] = [];
+      const lines = captureStderr(() =>
+        __test__.applySandboxToParts(parts, baseLoadout("read,ask_question"), {
+          artifactDir: dir,
+          name: "w1",
+        }),
+      );
+      assert.deepEqual(lines.filter((l) => /resolves to no extension/.test(l)), []);
+      const toolsIdx = parts.indexOf("--tools");
+      assert.ok(toolsIdx >= 0, "--tools flag present");
+      assert.ok(
+        (parts[toolsIdx + 1] ?? "").includes("ask_question"),
+        "control tool stays on the allowlist",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
