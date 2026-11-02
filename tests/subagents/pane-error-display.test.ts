@@ -1,22 +1,27 @@
 /**
  * Pane-failure error row.
  *
- * Defect: when a subagent restart ended in a tmux pane-not-found failure,
- * the raw multiplexer error ("can't find pane: %N") was sanitized out of
- * every user-visible surface — the diagnostic toast and the model-facing
- * text both describe the loss without the multiplexer's own words — so the
- * transcript never showed the failure the way provider errors (a red
- * "Error: ..." row) are shown.
+ * Defect history: when a subagent restart ended in a tmux pane-not-found
+ * failure, the raw multiplexer error ("can't find pane: %N") was sanitized
+ * out of every surface, so nothing recorded the multiplexer's own words.
+ * The first fix showed the raw text as a TUI error row; the current
+ * requirement suppresses that row — raw multiplexer wording is
+ * user-facing noise in the TUI (the model-facing loss result already
+ * describes the failure), so the entry is stored for the log only.
  *
  * Contract under test:
  * - a pane-not-found restart failure emits a custom message typed
- *   subagent_pane_error, display:true, triggerTurn falsy, whose content
- *   carries the [pi-subagents] tag and the RAW "can't find pane: %N" text
- *   (from the error's stderr when present);
+ *   subagent_pane_error, display:false — persisted in the session log
+ *   for model/debug value but hidden from the TUI (pi's documented
+ *   display semantics: false = "hidden entirely") — with triggerTurn
+ *   falsy, and content that carries the [pi-subagents] tag and the RAW
+ *   "can't find pane: %N" text (from the error's stderr when present);
  * - finalizeLostSubagent emits that row on its restart-failure catch while
  *   keeping the existing loss-result delivery;
- * - the subagent_pane_error renderer draws an error-colored row prefixed
- *   "Error: " — the same shape as the provider error row.
+ * - the subagent_pane_error renderer stays registered so history sessions
+ *   whose rows were written display:true still render; it draws an
+ *   error-colored row prefixed "Error: " — the same shape as the provider
+ *   error row.
  */
 import "./test-env.ts";
 
@@ -105,14 +110,14 @@ describe("pane-failure error row", () => {
     mock.restoreAll();
   });
 
-  it("reportPaneErrorRow sends a display-only custom message with the raw pane error", () => {
+  it("reportPaneErrorRow stores the raw pane error in the log, hidden from the TUI", () => {
     const pi = recordingPi();
     __test__.reportPaneErrorRow(pi as never, paneNotFoundErr(), `restart of "mapmaker" failed`);
 
     assert.equal(pi.sent.length, 1, "one message sent");
     const { msg, opts } = pi.sent[0];
     assert.equal(msg.customType, "subagent_pane_error");
-    assert.equal(msg.display, true);
+    assert.equal(msg.display, false, "stored in the log, not rendered in the TUI");
     assert.match(String(msg.content), /^\[pi-subagents\] restart of "mapmaker" failed: /);
     assert.match(String(msg.content), /can't find pane: %424242/);
     assert.equal((opts as Record<string, unknown> | undefined)?.triggerTurn ?? false, false);

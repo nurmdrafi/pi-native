@@ -29,6 +29,7 @@ import {
   readScreen,
   isPaneNotFound,
   listLiveSurfaces,
+  reapDeadAgentPanes,
 } from "./tmux.ts";
 
 import {
@@ -1929,31 +1930,43 @@ const STEER_HEAL_STEP_MS = 200;
 function describeTmuxFailure(error: unknown, target: string): string {
   if (isPaneNotFound(error)) return `${target} is gone`;
   const message = error instanceof Error ? error.message : String(error ?? "");
+  const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr : "";
+  // A client/server version mismatch keeps failing every call until the
+  // server restarts — say so instead of a generic subcommand failure.
+  if (/server version is too old for client|protocol version mismatch/i.test(`${message}\n${stderr}`)) {
+    return `tmux client/server version mismatch on ${target}: restart the tmux server (tmux kill-server) — panes reopen on demand`;
+  }
   const subcommand = message.match(/^Command failed:\s*tmux\s+(\S+)/);
   if (subcommand) return `tmux ${subcommand[1]} failed on ${target}`;
   return message.trim();
 }
 
-/** Raw pane-failure text for the user-facing error row. Unlike
+/** Raw pane-failure text for the pane-error log entry. Unlike
  *  describeTmuxFailure this keeps the multiplexer's own words (`can't find
- *  pane: %N`) — the row exists to show the raw failure in the transcript,
- *  in the same position provider errors render. */
+ *  pane: %N`) — the entry exists to preserve the raw failure in the
+ *  session log; the TUI never shows it (raw multiplexer wording is
+ *  user-facing noise). */
 function rawPaneErrorText(error: unknown): string {
   const stderr = (error as { stderr?: unknown } | null | undefined)?.stderr;
   if (typeof stderr === "string" && stderr.trim()) return stderr.trim();
   return error instanceof Error ? error.message.trim() : String(error ?? "").trim();
 }
 
-/** Emit a pane failure as a transcript error row (custom message typed
- *  subagent_pane_error). Display-only: never triggers a turn — the loss
- *  result already does that through its own delivery. */
+/** Record a pane failure as a custom message typed subagent_pane_error,
+ *  stored in the session log but hidden from the TUI: pi's documented
+ *  display semantics make display:false "hidden entirely" while the entry
+ *  still lands in the log and model context. Raw multiplexer wording is
+ *  user-facing noise — the loss result already describes the failure.
+ *  Never triggers a turn; the loss result owns delivery through its own
+ *  path. The renderer below stays registered so history sessions whose
+ *  rows were written display:true still render. */
 function reportPaneErrorRow(pi: ExtensionAPI, error: unknown, context: string): void {
   sendMessageContained(
     pi,
     {
       customType: "subagent_pane_error",
       content: `[pi-subagents] ${context}: ${rawPaneErrorText(error)}`,
-      display: true,
+      display: false,
     },
     { triggerTurn: false },
   );
@@ -4213,6 +4226,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     // Drain the repo's durable subagent-result inbox: entries whose spawning
     // parent is gone wait there until some session in this repo wakes up.
     drainResultInbox(pi, ctx);
+    // Reap dead-but-remained panes left by a crashed earlier session —
+    // hygiene for the agents sessions only, never the user's own windows.
+    reapDeadAgentPanes();
     // pi runs multiple sessions in one process. A prior session's shutdown
     // aborts the shared module poll-abort controller; install a fresh one so
     // subagents spawned in this session aren't watched against a dead signal.
