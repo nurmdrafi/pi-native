@@ -7,6 +7,7 @@
  * determined rewrite escapes it. AGENTS.md discipline and the user's eyes are
  * the actual boundary. */
 import { homedir } from "os";
+import { join } from "path";
 import { realpathSync } from "fs";
 import { config } from "../loader.ts";
 
@@ -234,6 +235,29 @@ const expandWrittenTarget = (t: string) =>
 const REDIRECT_TARGET = /(?<![=>!\-\d])(?:>>?)\s+([^\s&>]+)/g;
 const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
 
+/**
+ * 2026-11-02: scratch writes — an inline-interpreter payload whose every
+ * redirect/tee target lands under the agent home's `.cache/` (absolute, or a
+ * repo-relative `.cache/...`) writes throwaway data only. Log forensics and
+ * replay dumps run there, and the interpreter tripwire used to confirm every
+ * one of them. At least one target is required: a payload with no redirect can
+ * still mutate the tree, so it keeps the confirm.
+ */
+const scratchWriteOnly = (seg: string): boolean => {
+  const targets = [
+    ...[...seg.matchAll(REDIRECT_TARGET)].map((m) => m[1]),
+    ...[...seg.matchAll(TEE_TARGET)].map((m) => m[1]),
+  ].map(expandWrittenTarget);
+  if (targets.length === 0) return false;
+  const agentCache = join(homedir(), ".pi", "agent", ".cache");
+  return targets.every(
+    (t) =>
+      t.startsWith(agentCache + "/") ||
+      t.startsWith(join(homedir(), ".cache") + "/") ||
+      /^\.{0,2}\/?\.cache\//.test(t),
+  );
+};
+
 export const segmentDestructive = (seg: string): boolean => {
   // S4 fix 9 (2026-10-18): NFKC fold first — homoglyph command words (ｒｍ) match
   const s = seg.normalize("NFKC");
@@ -250,7 +274,7 @@ export const segmentDestructive = (seg: string): boolean => {
     ) ||
     (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
     // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
-    INTERP_INLINE.test(s) ||
+    (INTERP_INLINE.test(s) && !scratchWriteOnly(s)) ||
     EVAL_ENCODED.test(s) ||
     (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s))
   );

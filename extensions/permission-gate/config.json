@@ -43,7 +43,14 @@
   },
 
   "destructive": {
-    "remove": [],
+    "remove": [
+      "db-migrators",
+      "artisan-migrate",
+      "managepy-migrate",
+      "rake-db-migrate",
+      "dotnet-ef-update",
+      "js-migrate-deploy"
+    ],
     "extra": []
   }
 }
