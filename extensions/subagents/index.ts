@@ -1934,6 +1934,49 @@ function describeTmuxFailure(error: unknown, target: string): string {
   return message.trim();
 }
 
+/** Raw pane-failure text for the user-facing error row. Unlike
+ *  describeTmuxFailure this keeps the multiplexer's own words (`can't find
+ *  pane: %N`) — the row exists to show the raw failure in the transcript,
+ *  in the same position provider errors render. */
+function rawPaneErrorText(error: unknown): string {
+  const stderr = (error as { stderr?: unknown } | null | undefined)?.stderr;
+  if (typeof stderr === "string" && stderr.trim()) return stderr.trim();
+  return error instanceof Error ? error.message.trim() : String(error ?? "").trim();
+}
+
+/** Emit a pane failure as a transcript error row (custom message typed
+ *  subagent_pane_error). Display-only: never triggers a turn — the loss
+ *  result already does that through its own delivery. */
+function reportPaneErrorRow(pi: ExtensionAPI, error: unknown, context: string): void {
+  sendMessageContained(
+    pi,
+    {
+      customType: "subagent_pane_error",
+      content: `[pi-subagents] ${context}: ${rawPaneErrorText(error)}`,
+      display: true,
+    },
+    { triggerTurn: false },
+  );
+}
+
+/** Renderer for the pane-failure error row: one error-colored line prefixed
+ *  "Error: " — the same shape the provider error row uses, so a tmux
+ *  pane failure reads like any other harness error. */
+function renderSubagentPaneError(
+  message: { content?: unknown },
+  _options: unknown,
+  theme: { fg: (color: string, text: string) => string },
+) {
+  const text = typeof message.content === "string" ? message.content : String(message.content ?? "");
+  if (!text) return undefined;
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      return [theme.fg("error", truncateToWidth(`Error: ${text}`, width))];
+    },
+  };
+}
+
 async function steerSubagent(
   running: RunningSubagent,
   message: string,
@@ -2472,6 +2515,8 @@ export const __test__ = {
   canRestartLostPane,
   restartLostPane,
   finalizeLostSubagent,
+  reportPaneErrorRow,
+  renderSubagentPaneError,
   cancelRunningSubagent,
   cancelQueuedSpawn,
   restartSubagent,
@@ -3708,6 +3753,7 @@ function finalizeLostSubagent(
         reportDiagnostic(
           `[pi-subagents] restart attempt failed (${describeTmuxFailure(reportErr, `the pane of "${running.name}"`)}); synthesizing loss`,
         );
+        reportPaneErrorRow(pi, reportErr, `restart of "${running.name}" failed`);
         if (!running.delivered) {
           deliverSubagentResult(pi, running, synthesizeLostResult(running, kind), kind);
         }
@@ -4834,6 +4880,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
                 `[pi-subagents] restart of "${name}" failed: ` +
                   `${describeTmuxFailure(err, `the pane of "${name}"`)}`,
               );
+              reportPaneErrorRow(pi, err, `restart of "${name}" failed`);
             });
           return single(
             `Restart initiated for sub-agent "${name}" — its live pane is stopped and the task re-dispatched ` +
@@ -5169,6 +5216,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       },
     };
   });
+
+  // ── subagent_pane_error message renderer ──
+  pi.registerMessageRenderer("subagent_pane_error", renderSubagentPaneError as never);
 
   // ── subagent_question message renderer ──
   pi.registerMessageRenderer("subagent_question", (message, options, theme) => {
