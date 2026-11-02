@@ -31,7 +31,7 @@ import {
   summarizeSessionStats,
 } from "../../extensions/subagents/session.ts";
 
-import { shellEscape } from "../../extensions/subagents/tmux.ts";
+import { isMuxRecoverableError, shellEscape } from "../../extensions/subagents/tmux.ts";
 import {
   advanceStatusState,
   capStatusLines,
@@ -3041,6 +3041,44 @@ describe("tmux.ts", () => {
       assert.ok(escaped.endsWith("'"));
       // Inside single quotes, everything is literal
       assert.ok(escaped.includes("$world"));
+    });
+  });
+
+  describe("isMuxRecoverableError", () => {
+    it("classifies the legacy no-server message as recoverable", () => {
+      assert.equal(isMuxRecoverableError("no server running on /tmp/tmux-1000/default"), true);
+    });
+
+    it("classifies the modern error-connecting message as recoverable (macOS path)", () => {
+      assert.equal(
+        isMuxRecoverableError("error connecting to /private/tmp/tmux-501/default (No such file or directory)"),
+        true,
+      );
+    });
+
+    it("classifies the modern error-connecting message as recoverable (Linux path)", () => {
+      assert.equal(
+        isMuxRecoverableError("error connecting to /tmp/tmux-1000/default (No such file or directory)"),
+        true,
+      );
+    });
+
+    it("classifies a stale-socket connection refusal as recoverable", () => {
+      assert.equal(
+        isMuxRecoverableError("error connecting to /tmp/tmux-1000/default (Connection refused)"),
+        true,
+      );
+    });
+
+    it("reads the modern message from an execFileSync error's stderr", () => {
+      const err = Object.assign(new Error("Command failed: tmux list-panes"), {
+        stderr: "error connecting to /private/tmp/tmux-501/default (No such file or directory)\n",
+      });
+      assert.equal(isMuxRecoverableError(err), true);
+    });
+
+    it("leaves unrelated errors unrecoverable", () => {
+      assert.equal(isMuxRecoverableError(new Error("out of memory")), false);
     });
   });
 });

@@ -118,19 +118,23 @@ export function isPaneNotFound(err: unknown): boolean {
 }
 
 /** Whether an error means the multiplexer layer itself is gone or racing —
- *  server killed or never started (`no server running on <socket>`), the
- *  on-demand session reaped (`no such session` / `can't find session`), or
- *  two parallel first-spawns both creating that session (`duplicate
- *  session`). All are recoverable by re-deriving state from the live server
- *  (recreating it when needed) instead of failing every spawn until process
- *  restart. The matched strings are tmux's own and identical on macOS and
- *  Linux; only the socket path varies between machines, so it is matched by
- *  prefix and never parsed. */
+ *  server killed or never started, the on-demand session reaped (`no such
+ *  session` / `can't find session`), or two parallel first-spawns both
+ *  creating that session (`duplicate session`). A missing or dead server is
+ *  reported by tmux 3.4+ as `error connecting to <socket> (<reason>)` — the
+ *  reason varies (`No such file or directory`, `Connection refused`) — and
+ *  by older tmux as `no server running on <socket>`; both wordings are
+ *  matched so the heal works across tmux generations. All are recoverable
+ *  by re-deriving state from the live server (recreating it when needed)
+ *  instead of failing every spawn until process restart. The matched
+ *  strings are tmux's own and identical on macOS and Linux; only the socket
+ *  path varies between machines, so it is matched by prefix and never
+ *  parsed. */
 export function isMuxRecoverableError(err: unknown): boolean {
   if (isPaneNotFound(err)) return true;
   const stderr2 = typeof (err as { stderr?: unknown })?.stderr === "string" ? (err as { stderr: string }).stderr : "";
   const message2 = err instanceof Error ? err.message : String(err ?? "");
-  return /no server running|no such session|can't find session|duplicate session/i.test(
+  return /no server running|error connecting to|no such session|can't find session|duplicate session/i.test(
     `${stderr2}\n${message2}`,
   );
 }

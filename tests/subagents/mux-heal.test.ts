@@ -99,6 +99,17 @@ describe("multiplexer-death heal", () => {
     assert.ok(fake.calls.includes("new-session"), "detached session recreated on demand");
   });
 
+  it("recovers when the server is gone (tmux 3.4+ error-connecting wording)", () => {
+    const fake = fakeTmux({
+      firstSplitFailure: "error connecting to /private/tmp/tmux-501/default (No such file or directory)",
+    });
+    __surfaceTest__.setTmuxRunner(fake.runner);
+
+    const pane = createSurface("worker");
+    assert.equal(pane, "%42", "split heals past a dead server");
+    assert.ok(fake.calls.includes("new-session"), "detached session recreated on demand");
+  });
+
   it("recovers when the agents session is gone (no such session)", () => {
     const fake = fakeTmux({ firstSplitFailure: "can't find session: pi-agents" });
     __surfaceTest__.setTmuxRunner(fake.runner);
