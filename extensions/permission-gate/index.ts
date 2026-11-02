@@ -190,6 +190,27 @@ const logDecision = (verdict: "allow" | "block", raw: string): void => {
     // best-effort audit: a logging failure must never change a verdict or break the tool call
   }
 };
+/**
+ * Opt-in coverage trace (2026-11-02): a block that refuses an anchor the
+ * session had just read cannot be explained from the block text alone. With
+ * the flag file `<agent-home>/.cache/gate-trace.on` present, every coverage
+ * certify/drop and every anchor decision appends one NDJSON line to
+ * `logs/gate-trace.ndjson`, so the turn can be replayed step by step. Flag
+ * absent → one existsSync per event, nothing written.
+ */
+export const traceGate = (record: Record<string, unknown>): void => {
+  try {
+    const home = join(homedir(), ".pi", "agent");
+    if (!existsSync(join(home, ".cache", "gate-trace.on"))) return;
+    const file = join(home, "logs", "gate-trace.ndjson");
+    appendFileSync(
+      file,
+      `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`,
+    );
+  } catch {
+    // diagnostics only: a trace failure must never change a verdict
+  }
+};
 export default function (pi: ExtensionAPI) {
   /**
    * In-context coverage (2026-10-05 audit): per absolute path, the union of
@@ -561,6 +582,14 @@ export default function (pi: ExtensionAPI) {
         // S5 M3: the hash disproved the certified spans/stat — drop them, or
         // R1 would block the corrective re-read as a dup-read (deadlock)
         if (checked.stale) coverage.delete(path);
+        traceGate({
+          ev: "anchor-block",
+          rule: checked.rule ?? "editAnchorGuard",
+          path,
+          reason: checked.reason.slice(0, 200),
+          coveredSpans: coverage.get(path)?.spans.length ?? 0,
+          callId: event.toolCallId,
+        });
         // AG blocks; AG2 is relaxable, so its configured severity decides
         // (2026-10-27: "anchor outside the read window" was 42% of all anchor
         // blocks in live sessions, and the exact-match check still stands).
@@ -1306,6 +1335,15 @@ export default function (pi: ExtensionAPI) {
               "read",
               snap,
             );
+            traceGate({
+              ev: "certify-read",
+              path: read.path,
+              span: { start: read.win.start, end: read.win.start + lines - 1 },
+              lines,
+              truncated,
+              elided,
+              callId: event.toolCallId,
+            });
           }
         }
       }
@@ -1424,6 +1462,7 @@ export default function (pi: ExtensionAPI) {
     if (event.isError) {
       // failed edit/write: content may have drifted — a re-read is legitimate
       coverage.delete(entry.path);
+      traceGate({ ev: "drop-edit-error", path: entry.path, callId: event.toolCallId });
       lg1Note = lg1RecordResult(turn, true);
     } else {
       // R10: a successful edit/write mutates the tree — verify re-runs become legitimate
