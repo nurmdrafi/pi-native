@@ -41,7 +41,6 @@ import {
   knownSubagentNames,
   listRegisteredSubagents,
   readNameRegistry,
-  readSubagentLoadout,
   registerName,
   resolveNameInIndex,
   resolveNameInRegistry,
@@ -53,6 +52,7 @@ import {
   type SessionStats,
   type SubagentLoadout,
 } from "./session.ts";
+import { resolveResumeLoadout } from "./launch-artifacts.ts";
 import {
   type StatusSnapshot,
   type SubagentStatusState,
@@ -2083,18 +2083,22 @@ async function resumeSubagentByName(
       }
     }
 
-    // Reconstruct the sandbox from the snapshot written at spawn time.
-    // Without it we cannot safely resume: relaunching bare would load every
-    // global extension + the full toolset. Refuse rather than escalate.
-    const loadout = readSubagentLoadout(sessionPath);
-    if (!loadout) {
+    // Reconstruct the sandbox a resume must replay. Without one the child
+    // would relaunch with all global extensions and the full toolset, so a
+    // missing sandbox is refused — but the spawn-time sidecar is not the
+    // only record: the launch script plus its system-prompt file still
+    // describe the same sandbox, so a lost sidecar no longer blocks resume.
+    const resolvedLoadout = resolveResumeLoadout(parentArtifactDir, requestedName, sessionPath);
+    if (!resolvedLoadout) {
       const err =
         `Cannot safely resume "${requestedName}": no sandbox snapshot found for this session ` +
-        `(it predates sandboxed resume, or its .loadout.json sidecar was removed). ` +
+        `(no .loadout.json sidecar beside the session file, and no launch script under ` +
+        `subagent-scripts/ to rebuild it from). ` +
         `Resuming would relaunch with all global extensions and the full toolset, so this is refused. ` +
         `Re-run the task as a fresh subagent instead.`;
       return { content: [{ type: "text" as const, text: err }], details: { error: err } };
     }
+    const loadout = resolvedLoadout.loadout;
 
     const resumedSessionId = entry.sessionId ?? getSessionId(sessionPath) ?? requestedName;
 
@@ -3483,16 +3487,17 @@ async function restartLostPane(
   if (!canRestartLostPane(running)) return false;
   running.restart = { attemptedAt: Date.now() };
 
-  // Without the spawn-time sandbox snapshot a resume would launch with all
-  // global extensions and the full toolset — refuse rather than escalate.
-  const loadout = readSubagentLoadout(running.sessionFile);
-  if (!loadout) return false;
-
   const spawnRunning = deps.createSurfaceRunning ?? createSurfaceRunning;
   const writeScript = deps.writeScript ?? writeLaunchScript;
   const waitChannel = running.waitChannel ?? `pi-subagent-${running.id}`;
 
   const artifactDir = running.parentArtifactDir ?? dirname(running.sessionFile);
+  // Without a replayable sandbox the restart would launch with all global
+  // extensions and the full toolset — refuse rather than escalate. The
+  // sidecar is preferred; when it is gone the launch script rebuilds it.
+  const resolvedLoadout = resolveResumeLoadout(artifactDir, running.name, running.sessionFile);
+  if (!resolvedLoadout) return false;
+  const loadout = resolvedLoadout.loadout;
   const safeName =
     running.name
       .toLowerCase()
