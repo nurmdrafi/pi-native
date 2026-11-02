@@ -7,6 +7,27 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Queue-wait instrumentation.** Spawns parked behind a file-scope lock or the concurrency cap
+  stamp `queuedAt` at park and `queueWaitMs` at launch; the wait reaches delivered result details,
+  subagent history rows, and `subagents_list` wait-so-far; the stamp survives in-place restarts.
+
+### Changed
+
+- **Child conduct card split from orchestration doctrine.** `docs/subagents.md` is now a lean
+  conduct card for child sessions (~9.8KB down to ~1.5KB: task contract, bans, blocked-door rule,
+  report contract, test/search/retry discipline); the orchestrator doctrine moved verbatim to
+  `docs/subagent-orchestration.md`, with pointers updated in AGENTS, README, and the
+  issue-orchestrator prompt.
+- **Execution-time doctrine from measured child forensics.** Verification commands name scoped
+  tests — the full suite runs once as the orchestrator's end-of-wave gate; briefs carry 5-10
+  anchors (measured ~14 vs ~38 median child turns); children batch independent tool calls, stop
+  at deliverable, scope searches, never repeat a refused call verbatim, and read windows instead
+  of whole files.
+
 ## [1.70.0] - 01-11-2026
 
 ### Added
