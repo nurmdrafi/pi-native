@@ -355,6 +355,17 @@ export function closestToolName(
   return best?.name;
 }
 
+/** Provider failures worth one automatic resume: the session file already
+ * holds the child's context, so a fresh spawn would re-pay for it from zero.
+ * Matches the shapes that reach result.errorMessage (HTTP status, provider
+ * wording, socket/transport errors) and nothing else — a task-shaped failure
+ * (refusal, tsc error, budget breach) must still deliver. */
+export function isTransientProviderError(message: string): boolean {
+  return /\b(?:429|500|502|503|504)\b|rate.?limit|too many requests|overloaded|capacity|temporarily unavailable|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN/i.test(
+    message,
+  );
+}
+
 /**
  * When this process was spawned as a restricted subagent, the parent pins the
  * set of agents it may itself spawn via PI_SUBAGENT_ALLOWED. `null` means no
@@ -977,12 +988,19 @@ function resolveResultPresentation(
     // produce a usable result — surface the underlying provider/network
     // failure so the orchestrator can decide whether to retry, resume, or
     // change approach instead of silently treating the run as completed.
+    const transient = isTransientProviderError(result.errorMessage);
     return (
       `Sub-agent "${name}" failed after ${formatElapsed(result.elapsed)} ` +
       `(provider/agent error — auto-retry exhausted).\n\n` +
       `Error: ${result.errorMessage}\n\n` +
-      `The subagent did not produce a result. You can retry by spawning a new ` +
-      `subagent or resume the session with subagent_message.${sessionRef}`
+      `The subagent did not produce a result, but its session file is intact. ` +
+      (transient
+        ? `This is a transient provider failure (rate limit or 5xx): resume the same session with ` +
+          `subagent_message instead of spawning a fresh subagent — a fresh spawn re-pays the whole ` +
+          `context the child had already built.`
+        : `Resume it with subagent_message to keep its context; spawn a fresh subagent only when the ` +
+          `task itself must change.`) +
+      sessionRef
     );
   }
 
@@ -3233,6 +3251,32 @@ function deliverSubagentResult(
   synthesized?: "pane_lost" | "stalled" | "cancelled_by_parent",
 ): void {
   if (running.delivered) return; // sweep or watcher already finalized this entry
+  // Transient provider death (429 / 5xx / overload): the session file already
+  // holds the child's context, so one automatic resume of the SAME session
+  // beats delivering a failure the orchestrator would answer with a fresh
+  // spawn — that re-pays the whole context. canRestartLostPane caps this at
+  // one attempt per child and refuses when the sandbox snapshot is missing;
+  // the second call falls through to delivery (restart flag now set).
+  if (
+    result.errorMessage &&
+    isTransientProviderError(result.errorMessage) &&
+    canRestartLostPane(running)
+  ) {
+    void restartLostPane(running)
+      .then((respawned) => {
+        if (respawned) {
+          reportDiagnostic(
+            `[pi-subagents] "${running.name}" hit a transient provider error — resuming its session instead of failing it`,
+          );
+          return;
+        }
+        if (!running.delivered) deliverSubagentResult(pi, running, result);
+      })
+      .catch(() => {
+        if (!running.delivered) deliverSubagentResult(pi, running, result);
+      });
+    return;
+  }
   running.delivered = true;
   // Final meter read (O(delta) since the last poll tick): the turn count the
   // budget stopper enforced, mirrored into the history row below.
