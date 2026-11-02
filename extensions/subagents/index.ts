@@ -317,7 +317,7 @@ function getToolExtensionPath(tool: string, manifestIndex?: Map<string, string>)
   const bundled = join(SUBAGENTS_DIR, "tools", `${tool.replace(/_/g, "-")}.ts`);
   if (existsSync(bundled)) return bundled;
   const extBase = join(getAgentConfigDir(), "extensions");
-  const manifestPath = (manifestIndex ?? scanToolManifests(extBase)).get(tool);
+  const manifestPath = (manifestIndex ?? scanToolManifests(extBase, reportDiagnostic)).get(tool);
   if (manifestPath && existsSync(manifestPath)) return manifestPath;
   const conventional = join(extBase, tool.replace(/_/g, "-"), "index.ts");
   if (existsSync(conventional)) return conventional;
@@ -1231,14 +1231,18 @@ const reportedDiagnostics = new Set<string>();
 function reportDiagnostic(message: string): void {
   if (reportedDiagnostics.has(message)) return;
   reportedDiagnostics.add(message);
-  const ui = latestCtx?.ui as { notify?: (text: string, severity?: string) => void } | undefined;
-  if (latestCtx?.hasUI && typeof ui?.notify === "function") {
-    try {
+  try {
+    const ui = latestCtx?.ui as { notify?: (text: string, severity?: string) => void } | undefined;
+    if (latestCtx?.hasUI && typeof ui?.notify === "function") {
       ui.notify(message, "error");
       return;
-    } catch {
-      // A broken notify must not hide the diagnostic — fall through to stderr.
     }
+  } catch {
+    // Both UI-side failures land here: a stale context throws on the hasUI
+    // read (a session torn down right after a headless run), and a broken
+    // notify throws on the call. Neither may turn the diagnostic into an
+    // unhandled rejection the host prints over the input editor — fall
+    // through to stderr.
   }
   console.error(message);
 }
@@ -1399,10 +1403,12 @@ function setLatestPiForTest(pi: ExtensionAPI | null): void {
 }
 
 /** Test seam: reset per-instance channel state between cases — latest host
- *  handle and any live 1s timers, so no case leaks into the next. */
+ *  handle, any live 1s timers, and the diagnostic dedupe set, so a diagnostic
+ *  one case emitted cannot silence the next case's routing assertion. */
 function resetChannelStateForTest(): void {
   latestPi = null;
   channelDead = false;
+  reportedDiagnostics.clear();
   if (statusInterval) {
     clearInterval(statusInterval);
     statusInterval = null;
@@ -1686,7 +1692,7 @@ function applySandboxToParts(
 
     const extPaths = new Set<string>();
     // Scan the manifest tree once per spawn, not once per allowlisted tool.
-    const toolManifests = scanToolManifests(join(getAgentConfigDir(), "extensions"));
+    const toolManifests = scanToolManifests(join(getAgentConfigDir(), "extensions"), reportDiagnostic);
     for (const tool of loadout.toolAllowlist.split(",")) {
       if (!tool) continue;
       // Control tools resolve from no manifest by design: the sandbox builder

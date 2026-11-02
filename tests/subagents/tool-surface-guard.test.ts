@@ -171,6 +171,17 @@ describe("scanToolManifests", () => {
     mock.restoreAll();
   });
 
+  it("routes manifest warnings to a provided sink instead of stderr", () => {
+    mkdirSync(join(root, "bad"));
+    writeFileSync(join(root, "bad", "pi-tools.json"), "not json{");
+    const err = mock.method(console, "error", () => {});
+    const sink: string[] = [];
+    const out = scanToolManifests(root, (message: string) => sink.push(message));
+    assert.equal(out.size, 0);
+    assert.equal(err.mock.calls.length, 0);
+    assert.equal(sink.filter((m) => m.includes("bad")).length, 1);
+  });
+
   it("returns an empty map when the base is missing", () => {
     assert.equal(scanToolManifests(join(root, "nope")).size, 0);
   });

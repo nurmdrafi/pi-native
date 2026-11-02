@@ -25,21 +25,26 @@ export interface ToolManifest {
   entry: string;
 }
 
-/** Parse one manifest file; undefined when absent, malformed, or empty. */
-export function readToolManifest(manifestPath: string): ToolManifest | undefined {
+/** Parse one manifest file; undefined when absent, malformed, or empty.
+ *  Problems go to `warn` — stderr by default, or the caller's diagnostic
+ *  funnel, so manifest text never lands on the TUI input line. */
+export function readToolManifest(
+  manifestPath: string,
+  warn: (message: string) => void = console.error,
+): ToolManifest | undefined {
   if (!existsSync(manifestPath)) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
   } catch (err) {
-    console.error(
+    warn(
       `[pi-subagents] malformed ${MANIFEST_NAME} at ${manifestPath}: ${err instanceof Error ? err.message : String(err)} — skipping`,
     );
     return undefined;
   }
   const record = (parsed ?? {}) as { tools?: unknown; entry?: unknown };
   if (!Array.isArray(record.tools)) {
-    console.error(
+    warn(
       `[pi-subagents] ${MANIFEST_NAME} at ${manifestPath} must carry a "tools" string array — skipping`,
     );
     return undefined;
@@ -57,7 +62,10 @@ export function readToolManifest(manifestPath: string): ToolManifest | undefined
  * the first declaration of a tool wins, so manifests cannot silently steal a
  * name from an earlier extension.
  */
-export function scanToolManifests(extBase: string): Map<string, string> {
+export function scanToolManifests(
+  extBase: string,
+  warn: (message: string) => void = console.error,
+): Map<string, string> {
   const out = new Map<string, string>();
   if (!existsSync(extBase)) return out;
   const children = readdirSync(extBase, { withFileTypes: true })
@@ -66,7 +74,7 @@ export function scanToolManifests(extBase: string): Map<string, string> {
   for (const child of children) {
     for (const sub of MANIFEST_SUBDIRS) {
       const dir = join(extBase, child.name, sub);
-      const manifest = readToolManifest(join(dir, MANIFEST_NAME));
+      const manifest = readToolManifest(join(dir, MANIFEST_NAME), warn);
       if (!manifest) continue;
       const entryPath = join(dir, manifest.entry);
       for (const tool of manifest.tools) {

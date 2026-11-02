@@ -139,6 +139,28 @@ describe("sendMessageContained dead-channel funnel", () => {
     assert.equal(notified.filter((l) => DEAD_LINE.test(l)).length, 1);
     assert.ok(notified[0]!.startsWith("error:"), "severity is error");
   });
+
+  it("a stale UI context whose hasUI read throws falls back to stderr instead of escaping", async () => {
+    // After a reload the old instance's watchers keep polling a torn-down
+    // session: reading hasUI on the stale context throws (same shape as the
+    // updateWidget guard). That throw must not turn a diagnostic into an
+    // unhandled rejection the host prints over the input editor — stderr is
+    // the last resort.
+    __test__.setUiContext({
+      get hasUI() {
+        throw new Error("stale context");
+      },
+    } as never);
+    const err = mock.method(console, "error", () => {});
+    __test__.sendMessageContained(
+      failingPi("reject") as never,
+      { customType: "subagent_result", content: "m", display: true },
+      undefined,
+    );
+    await flushMicrotasks();
+    const lines = err.mock.calls.map((c) => c.arguments.join(" "));
+    assert.equal(lines.filter((l) => DEAD_LINE.test(l)).length, 1);
+  });
 });
 
 describe("deliverPendingQuestion rides the funnel", () => {
