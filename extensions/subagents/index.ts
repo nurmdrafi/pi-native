@@ -1487,7 +1487,11 @@ function borderBottom(width: number): string {
   return `${ACCENT}╰${"─".repeat(inner)}╯${RST}`;
 }
 
-function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): string[] {
+function renderSubagentWidgetLines(
+  agents: RunningSubagent[],
+  width: number,
+  currentScope?: string,
+): string[] {
   const count = agents.length;
   const title = "Subagents";
   const info = `${count} running`;
@@ -1502,7 +1506,17 @@ function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): st
     // Compact lock indicator for declared write scopes: glyph + path count.
     const scopeCount = agent.scope?.origin === "declared" ? agent.scope.paths.length : 0;
     const lockTag = scopeCount > 0 ? ` ${ACCENT}▣${RST}${scopeCount}` : "";
-    const left = ` ${icon} ${elapsed}${lockTag}  ${agent.name}${agentTag} `;
+    // A child registered under another repo root (worktree, `cwd` param, a
+    // second project in the same process) belongs to someone else's session.
+    // It stays visible — dropping it made the whole widget disappear — but
+    // dimmed and tagged with its own repo so the row is never mistaken for
+    // this session's child.
+    const foreignScope = currentScope !== undefined && childScopeKey(agent) !== currentScope;
+    const nameCell = foreignScope ? `${ICON_DIM}${agent.name}${RST}` : agent.name;
+    const foreignTag = foreignScope
+      ? ` ${ICON_DIM}@${basename(childScopeKey(agent)) || "?"}${RST}`
+      : "";
+    const left = ` ${icon} ${elapsed}${lockTag}  ${nameCell}${agentTag}${foreignTag} `;
     // Metered usage tail on the right label; elapsed already leads the row.
     const usage = agent.budgetMeter?.update();
     const right = statusConfig.enabled
@@ -1522,8 +1536,17 @@ function updateWidget() {
   try {
     if (!latestCtx?.hasUI) return;
 
-  const widgetScope = runningInScope(currentScopeKey());
-  if (widgetScope.length === 0) {
+  const scope = currentScopeKey();
+  // Every registered child is drawn, own scope first: a spawn registers its
+  // project scope from its own cwd, so filtering the render set by the
+  // session's scope emptied the widget (and cleared it) whenever the two
+  // disagreed, which looked exactly like "no subagents running".
+  const children = Array.from(runningSubagents.values());
+  const widgetAgents = [
+    ...children.filter((r) => childScopeKey(r) === scope),
+    ...children.filter((r) => childScopeKey(r) !== scope),
+  ];
+  if (widgetAgents.length === 0) {
     latestCtx.ui.setWidget("subagent-status", undefined);
     if (widgetInterval) {
       clearInterval(widgetInterval);
@@ -1539,7 +1562,7 @@ function updateWidget() {
       return {
         invalidate() {},
         render(width: number) {
-          return renderSubagentWidgetLines(widgetScope, width);
+          return renderSubagentWidgetLines(widgetAgents, width, scope);
         },
       };
     },
@@ -1551,6 +1574,19 @@ function updateWidget() {
     // throws. The widget is cosmetic — a dying session must never crash the
     // host process from a .then/.catch continuation.
   }
+}
+
+/**
+ * Take a session's UI context and draw the widget immediately.
+ *
+ * Called from session_start: without it the widget stayed blank until the
+ * next tool call replaced `latestCtx`, so a fresh session (or one reloaded
+ * while children from an earlier spawn are still registered) showed an
+ * empty subagent area and looked like nothing was running.
+ */
+function armWidgetForSession(ctx: ExtensionContext): void {
+  latestCtx = ctx;
+  if (runningSubagents.size > 0) startWidgetRefresh();
 }
 
 /**
@@ -2405,6 +2441,8 @@ export const __test__ = {
   pendingSpawns,
   resetSpawnQueue: () => spawnQueue.resetForTest(),
   renderSubagentWidgetLines,
+  updateWidget,
+  armWidgetForSession,
   loadAgentDefaults,
   discoverAgentDefinitions,
   resolveEffectiveSessionMode,
@@ -4107,7 +4145,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   latestPi = pi;
   // Capture the UI context for widget updates
   pi.on("session_start", (_event, ctx) => {
-    latestCtx = ctx;
+    armWidgetForSession(ctx);
     // Drain the repo's durable subagent-result inbox: entries whose spawning
     // parent is gone wait there until some session in this repo wakes up.
     drainResultInbox(pi, ctx);
