@@ -1157,21 +1157,69 @@ function describeScopeConflicts(conflicts: ReturnType<typeof findConflicts>): st
   );
 }
 
+/** Set once any send fails on this module instance: the funnel then goes
+ *  silent and the instance's timers disarm — a dead channel must cost one
+ *  notice, never one diagnostic per tick flooding the terminal input line. */
+let channelDead = false;
+
+/** Diagnostics must never raw-print to the terminal: console.error from an
+ *  extension lands in the TUI input editor region where the user is typing
+ *  (identically on mac and Linux). Route every diagnostic through the host
+ *  UI notify channel, which the TUI renders without touching the input line;
+ *  fall back to stderr only when no UI exists (headless, print mode, tests). */
+function reportDiagnostic(message: string): void {
+  const ui = latestCtx?.ui as { notify?: (text: string, severity?: string) => void } | undefined;
+  if (latestCtx?.hasUI && typeof ui?.notify === "function") {
+    try {
+      ui.notify(message, "error");
+      return;
+    } catch {
+      // A broken notify must not hide the diagnostic — fall through to stderr.
+    }
+  }
+  console.error(message);
+}
+
+/** Disarm this instance's 1s timers and abort its poll loops — the same
+ *  teardown shape as the /reload handshake and session_shutdown. An instance
+ *  that can no longer deliver anything must stop ticking; durable artifacts
+ *  and the next session's reconcile carry the rest. */
+function disarmInstanceTimers(): void {
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+    (globalThis as any)[STATUS_INTERVAL_KEY] = null;
+  }
+  if (widgetInterval) {
+    clearInterval(widgetInterval);
+    widgetInterval = null;
+    (globalThis as any)[WIDGET_INTERVAL_KEY] = null;
+  }
+  const moduleAbort = (globalThis as any)[POLL_ABORT_KEY] as AbortController | undefined;
+  moduleAbort?.abort();
+}
+
 /** Send through `pi` while containing a failure of the channel itself: after
  *  a /reload this module instance is replaced but its watchers keep polling,
  *  and sends on the dead ExtensionAPI handle reject. That rejection must
  *  never escape as an unhandled rejection the host renders above the input
- *  editor — log a diagnostic and stop. */
+ *  editor — report once through the UI channel, disarm, and stay silent for
+ *  the rest of the instance's life. */
 function sendMessageContained(
   pi: ExtensionAPI,
   message: Parameters<ExtensionAPI["sendMessage"]>[0],
   options: Parameters<ExtensionAPI["sendMessage"]>[1],
 ): void {
-  const diagnostic = (reportErr: unknown) =>
-    console.error(
+  if (channelDead) return;
+  const diagnostic = (reportErr: unknown) => {
+    if (channelDead) return; // one notice per instance, never one per tick
+    channelDead = true;
+    reportDiagnostic(
       `[pi-subagents] message could not be delivered (extension reloaded? channel gone): ` +
         `${reportErr instanceof Error ? reportErr.message : String(reportErr)}`,
     );
+    disarmInstanceTimers();
+  };
   try {
     Promise.resolve(pi.sendMessage(message, options)).catch(diagnostic);
   } catch (reportErr) {
@@ -1273,8 +1321,39 @@ const RUNNING_CHILDREN_COUNT_KEY = Symbol.for("pi-subagents/running-children-cou
 
 /** Latest ExtensionContext from session_start, used for widget updates. */
 let latestCtx: ExtensionContext | null = null;
+
+/** Test seam: install a fake host context (UI notify channel) for
+ *  diagnostics-routing tests. */
+function setLatestCtxForTest(ctx: ExtensionContext | null): void {
+  latestCtx = ctx;
+}
 /** Latest ExtensionAPI, used to deliver ask_question notifications from the watcher. */
 let latestPi: ExtensionAPI | null = null;
+
+/** Test seam: point the ask_question notify path at a fake host handle. */
+function setLatestPiForTest(pi: ExtensionAPI | null): void {
+  latestPi = pi;
+}
+
+/** Test seam: reset per-instance channel state between cases — latest host
+ *  handle and any live 1s timers, so no case leaks into the next. */
+function resetChannelStateForTest(): void {
+  latestPi = null;
+  channelDead = false;
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
+  if (widgetInterval) {
+    clearInterval(widgetInterval);
+    widgetInterval = null;
+  }
+}
+
+/** Test seam: whether this instance's 1s timers are armed. */
+function channelTimersActive(): { status: boolean; widget: boolean } {
+  return { status: statusInterval != null, widget: widgetInterval != null };
+}
 
 /** Interval timer for widget re-renders. */
 let widgetInterval: ReturnType<typeof setInterval> | null = null;
@@ -1525,7 +1604,7 @@ function applySandboxToParts(
       // (typo, unregistered name, extension removed from disk) would silently
       // strip the tool from the child — say so once at spawn time instead.
       if (BUILTIN_TOOLS.has(tool)) continue;
-      console.error(
+      reportDiagnostic(
         `[pi-subagents] allowlisted tool "${tool}" resolves to no extension path — the child will NOT receive it`,
       );
     }
@@ -1537,7 +1616,7 @@ function applySandboxToParts(
     // A sandboxed child without its permission gate is the condition to
     // surface, never to skip silently — env entry or shipped default alike.
     for (const miss of dropped) {
-      console.error(`[pi-subagents] PI_SUBAGENT_EXTRA_EXTENSIONS entry not found, dropping: ${miss}`);
+      reportDiagnostic(`[pi-subagents] PI_SUBAGENT_EXTRA_EXTENSIONS entry not found, dropping: ${miss}`);
     }
     for (const extPath of kept) {
       if (!extPaths.has(extPath) && existsSync(extPath)) parts.push("-e", shellEscape(extPath));
@@ -2062,7 +2141,8 @@ async function resumeSubagentByName(
         running.delivered = true;
         persistResultRecord(running, { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId });
 
-        pi.sendMessage(
+        sendMessageContained(
+          pi,
           {
             customType: "subagent_result",
             content: presentation,
@@ -2082,7 +2162,8 @@ async function resumeSubagentByName(
       })
       .catch((err) => {
         updateWidget();
-        pi.sendMessage(
+        sendMessageContained(
+          pi,
           {
             customType: "subagent_result",
             content: `Resume error: ${err?.message ?? String(err)}`,
@@ -2303,6 +2384,14 @@ export const __test__ = {
   childScopeKey,
   currentScopeKey,
   handleSessionShutdown,
+  sendMessageContained,
+  deliverPendingQuestion,
+  setLatestPi: setLatestPiForTest,
+  setUiContext: setLatestCtxForTest,
+  resetChannelState: resetChannelStateForTest,
+  startWidgetRefresh,
+  startStatusRefresh,
+  channelTimersActive,
   formatElapsed,
   formatTokens,
   formatContextUsage,
@@ -2816,7 +2905,8 @@ function deliverPendingQuestion(running: RunningSubagent): void {
   const elapsed = Math.floor((Date.now() - running.startTime) / 1000);
   const replyHint = `\n\nReply with subagent_message({ name: "${name}", message: "…" }) — the same name works whether it is still running or has since exited. It stays open until you reply.`;
 
-  latestPi?.sendMessage(
+  if (latestPi) sendMessageContained(
+    latestPi,
     {
       customType: "subagent_question",
       content: `Sub-agent "${name}" asks (${formatElapsed(elapsed)}):\n\n${payload.question}${replyHint}`,
@@ -3467,7 +3557,7 @@ function finalizeLostSubagent(
         }
       })
       .catch((reportErr) => {
-        console.error(
+        reportDiagnostic(
           `[pi-subagents] restart attempt failed (${reportErr instanceof Error ? reportErr.message : String(reportErr)}); synthesizing loss`,
         );
         if (!running.delivered) {
@@ -3831,7 +3921,8 @@ function drainResultInbox(pi: ExtensionAPI, ctx?: unknown): void {
       // through only when the parent never observed it in memory, so `own`
       // means "reclaim my own unobserved result", never a foreign task.
       const own = sessionId != null && record.parentSessionId === sessionId;
-      pi.sendMessage(
+      sendMessageContained(
+        pi,
         {
           customType: "subagent_result",
           content: own
@@ -4547,7 +4638,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             // Fire-and-forget like spawn: the stop waits out the grace
             // window and the cancelled result arrives as a steer.
             void cancelRunningSubagent(pi, resolved.running).catch((err: unknown) => {
-              console.error(
+              reportDiagnostic(
                 `[pi-subagents] cancel of "${name}" failed: ` +
                   `${err instanceof Error ? err.message : String(err)}`,
               );
@@ -4585,11 +4676,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           void restartSubagent(resolved.running)
             .then((outcome) => {
               if ("error" in outcome) {
-                console.error(`[pi-subagents] restart of "${name}": ${outcome.error}`);
+                reportDiagnostic(`[pi-subagents] restart of "${name}": ${outcome.error}`);
               }
             })
             .catch((err: unknown) => {
-              console.error(
+              reportDiagnostic(
                 `[pi-subagents] restart of "${name}" failed: ` +
                   `${err instanceof Error ? err.message : String(err)}`,
               );
