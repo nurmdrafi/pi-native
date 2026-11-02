@@ -20,12 +20,15 @@ PRIME DIRECTIVE: complete the batch as fast as possible — use subagents for AL
 - Seed: given number/link → that issue plus one hop of references in body + comments; only open issues of this repo; closed/foreign refs noted, skipped; dedupe; record chain in state. Seed empty after expansion → report, stop.
 - Fetch records: `gh issue list --state open --limit 300 --json number,title,body,labels,comments,createdAt,url`; gaps → `gh issue view <n>`.
 - Per issue: number · title · module (label, else ONE batched `rg` pass over all issues' symbols together → file paths; never per-issue sweeps) · type · acceptance criteria (verbatim; derive only if missing, mark "derived") · dependencies ("#N" refs, shared files).
-- One batched `git log --all --grep` sweep over issue keywords at triage: issues already fixed in base ancestry → mark done-upstream, at most add a regression test inline.
+- Acceptance criteria are VALIDATED, never assumed: for every issue, check EACH criterion against current base code (`rg` the criterion's symbols, read the touched files) and stamp it `met | unmet | unverifiable` with evidence (`path:line`); unmet criteria define the fix scope; derived criteria count exactly like verbatim ones once stamped.
+- Creator comments are criteria: read EVERY comment authored by the issue creator (same login as the issue author, all pages, oldest to newest) — creator comments amend or extend the acceptance criteria and override any derived criterion; the reopen reason usually lives in the creator's latest comment. Comments by others are context only, never criteria.
+- Reopened issues are first-class work items: an open issue with a close→reopen history (state open after a close event, or a prior `done`/`pr-open`/`done-upstream` entry while the issue is open again) means the earlier fix FAILED a criterion. NEVER treat a reopened issue as already fixed, done-upstream, or resolved — void the prior status (keep a one-line history note), re-triage, re-validate every criterion from scratch.
+- One batched `git log --all --grep` sweep over issue keywords at triage: issues already fixed in base ancestry → mark done-upstream, at most add a regression test inline. EXCEPTION: a reopened issue is never done-upstream — its fix demonstrably missed something, so it re-enters as `pending` regardless of ancestry hits.
 - Note arg = constraints: exclusions override inclusion.
 
 ## 2. Resume + drift check (state file exists)
 - Cross-check state vs live: `gh issue list --state open` · `gh pr list --state open,merged --json number,state,headRefName,url`.
-- Recompute per issue: closed or merged PR covers it → resolved, skip. Manually closed → drop. Open PR exists → keep waiting. Rest → pending.
+- Recompute per issue: closed or merged PR covers it → resolved, skip. Manually closed → drop. Open PR exists → keep waiting. Rest → pending. Reopened (open again after any close/merge) → NOT resolved, never claimed fixed: void the entry, re-enter `pending`, re-validate criteria per §1 — the prior PR missed something.
 - `blocked-waiting-merge`: dependency merged → unblock, rebase group branch off base; conflict → keep `blocked` with reason. User may direct "proceed without merges": run overlapping groups on temp branches, fold into the group branch locally, declare expected cross-PR conflicts in the PR body — merge order never changes: canonical sequence (Rules).
 - Reconcile the child layer before dispatching: `subagents_list` against the state entries. Entry says running but no live child → read its `/tmp` report and history row, then write `delivered` or `failed`. Delivered without a review verdict → run the review gate before the next dispatch. Queued entry, no live child, no lock on its scope → respawn under the same name.
 - Args on resume may extend the note; never shrink executed scope.
@@ -81,6 +84,7 @@ SKIP: anything confusing · backend dependency needed · risk beyond SCOPE · ru
 - State file = live tracker at `docs/issue-orchestrator-state.md` (always the same path and name); single writer = orchestrator; edited only on the trigger branch; every transition written immediately; NEVER committed or staged — exclude it from every `git add`.
 - Never: merge, mark PR ready, push base/trigger branch, force-push, delete branches. NEVER touch the repo default branch in any way.
 - Never comment on or close issues directly; `Closes #N` in the PR body; partial fixes never auto-close.
+- A reopened issue is never skipped, dropped, resolved, or claimed "already fixed" — reopen voids every prior terminal status; re-validate all criteria (creator comments included) and fix the unmet ones.
 - Every commit references its issue; every PR title references its issues; every PR body lists per-issue commit refs.
 - Scoped verification only (changed files); NEVER build — a build regenerates shared artifacts (.next, version modules, caches) and collides with parallel agents in other worktrees; no dep installs, lockfile edits, repo-wide format/generate, port binds, or shared-cache writes under parallel agents.
 - Worker blocker → mark blocked, continue elsewhere, surface at close-out; never work around, never stall.
