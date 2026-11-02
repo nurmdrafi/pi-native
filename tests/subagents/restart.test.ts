@@ -251,6 +251,30 @@ describe("restartLostPane", () => {
     assert.equal(running.delivered, undefined, "not delivered — still being watched");
   });
 
+  it("keeps the queue-wait stamp across the in-place restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "restart-qwait-"));
+    const sessionFile = writeSessionFixture(dir);
+    writeLoadoutFixture(sessionFile, dir);
+    const artifactDir = join(dir, "artifacts");
+    mkdirSync(artifactDir, { recursive: true });
+    // A spawn that queued behind a lock before launching carries its
+    // park-to-launch wait on the entry; the restart mutates this same
+    // entry in place, so the stamp must still be there after respawn.
+    const running = fakeRunning({
+      sessionFile,
+      cwd: dir,
+      parentArtifactDir: artifactDir,
+      queueWaitMs: 4321,
+      budgetStopper: { breached: () => false, onExit() {}, onTick() {}, onBreach() {} },
+    });
+    const f = fakeRestartDeps();
+
+    const ok = await __test__.restartLostPane(running as never, f.deps);
+    assert.equal(ok, true);
+    assert.equal(running.restart?.respawnedAt != null, true, "respawned");
+    assert.equal(running.queueWaitMs, 4321, "queue-wait stamp survives the restart");
+  });
+
   it("refuses and burns the single attempt when no loadout snapshot exists", async () => {
     const dir = mkdtempSync(join(tmpdir(), "restart-noloadout-"));
     const sessionFile = writeSessionFixture(dir); // no .loadout.json sidecar

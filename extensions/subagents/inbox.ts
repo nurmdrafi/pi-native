@@ -297,6 +297,9 @@ export interface SubagentHistoryExtra {
   files_read?: string[];
   diff?: string;
   turns?: number;
+  /** Park-to-launch wait (ms) for a spawn that queued before launching;
+   *  omitted for immediate spawns. */
+  queueWaitMs?: number;
 }
 
 /** One record of the append-only per-repo history file. */
@@ -340,6 +343,9 @@ function appendHistoryLine(record: InboxRecord, extra?: SubagentHistoryExtra): v
       ...(extra?.files_read?.length ? { files_read: extra.files_read } : {}),
       ...(extra?.diff ? { diff: extra.diff } : {}),
       ...(typeof extra?.turns === "number" ? { turns: extra.turns } : {}),
+      ...(typeof extra?.queueWaitMs === "number" && Number.isFinite(extra.queueWaitMs) && extra.queueWaitMs > 0
+        ? { queueWaitMs: Math.round(extra.queueWaitMs) }
+        : {}),
       ...(tokens > 0 ? { tokens } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
       durationMs: Math.round(record.elapsed * 1000),

@@ -181,12 +181,14 @@ describe("cancel queued spawn", () => {
       reservedName: "Queue-A",
       scopeId: "scope-q-1",
       scope: { origin: "declared" as const, paths: [join(dir, "src")] },
+      queuedAt: Date.now(),
     };
     const neighbor = {
       params: { agent: "worker", task: "t", name: "Queue-B" },
       ctx: {} as never,
       parentArtifactDir: dir,
       reservedName: null,
+      queuedAt: Date.now(),
     };
     __test__.pendingSpawns.push(entry, neighbor);
     __test__.declareScope("scope-q-1", { name: "Queue-A", paths: entry.scope.paths, state: "queued" });

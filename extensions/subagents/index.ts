@@ -694,7 +694,8 @@ const statusConfig = loadStatusConfig();
 /** Per-child live metrics: elapsed, the live status phase, and — only when
  *  a budget meter is attached — its live usage. Unmetered children omit
  *  turns/tokens/costUsd rather than faking zeros; queued children carry
- *  just name+agent+phase (no start time exists yet). `pastP90Min` is set by
+ *  name+agent+phase plus a wait-so-far (no start time exists yet).
+ *  `pastP90Min` is set by
  *  annotatePastP90 when the child outran its agent's history baseline. */
 export interface ChildMetrics {
   name: string;
@@ -705,6 +706,8 @@ export interface ChildMetrics {
   tokens?: number;
   costUsd?: number;
   pastP90Min?: number;
+  /** Queued children only: seconds since the spawn parked in the FIFO. */
+  waitSec?: number;
 }
 
 function runningChildMetrics(running: RunningSubagent): ChildMetrics {
@@ -730,13 +733,15 @@ function queuedChildMetrics(pending: PendingSpawn): ChildMetrics {
     name: pending.params.name ?? pending.reservedName ?? pending.params.agent,
     agent: pending.params.agent,
     phase: "queued",
+    ...(pending.queuedAt ? { waitSec: Math.max(0, Math.floor((Date.now() - pending.queuedAt) / 1000)) } : {}),
   };
 }
 
 /** Compact line: `worker-1 · 842s · active · 12t · 84k tok · $0.42 · past p90 (14m)` —
  *  absent fields are trimmed, never zero-filled. */
 function formatChildMetricsLine(m: ChildMetrics): string {
-  if (m.phase === "queued") return `${m.name} · queued`;
+  if (m.phase === "queued")
+    return m.waitSec != null ? `${m.name} · queued · waiting ${m.waitSec}s` : `${m.name} · queued`;
   const parts = [m.name, `${m.elapsedSec ?? 0}s`, m.phase];
   if (m.turns !== undefined) parts.push(`${m.turns}t`);
   if (m.tokens !== undefined) parts.push(`${formatTokens(m.tokens)} tok`);
@@ -1049,6 +1054,12 @@ interface RunningSubagent {
   agent?: string;
   surface: string;
   startTime: number;
+  /** Park-to-launch wait (ms) for a spawn that queued (scope lock or
+   *  concurrency cap) before launching; immediate spawns leave it unset.
+   *  Stamped once at launch on this entry — restarts mutate the entry in
+   *  place, so the stamp survives them. Mirrored into the delivered result
+   *  and the history row. */
+  queueWaitMs?: number;
   sessionFile: string;
   parentArtifactDir?: string;
   /** Spawn-time git baseline snapshot (PI_SUBAGENT_BASELINE) when the child
@@ -1173,6 +1184,9 @@ interface PendingSpawn {
    * carry `scope` only — parsed scope never locks. */
   scopeId?: string;
   scope?: SubagentScope;
+  /** Wall-clock park stamp: set when the spawn enters the FIFO (scope
+   *  conflict or cap); consumed at launch to stamp the entry's queueWaitMs. */
+  queuedAt: number;
 }
 const pendingSpawns: PendingSpawn[] = [];
 
@@ -1363,7 +1377,7 @@ function drainPendingSpawns(): void {
       // an unhandled rejection with no result anywhere. It releases its slot
       // (and its scope) itself before re-throwing, so only the report is
       // needed here.
-      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName, scopeInfoOf(next)).catch(
+      void launchReservedSpawn(pi, next.params, next.ctx, next.parentArtifactDir, next.reservedName, scopeInfoOf(next), next.queuedAt).catch(
         (err: unknown) => reportQueuedLaunchFailure(pi, next, err),
       );
     } catch (err) {
@@ -2621,6 +2635,8 @@ async function launchReservedSpawn(
   parentArtifactDir: string,
   reservedName: string | null,
   scopeInfo?: ScopeInfo,
+  /** Park stamp carried from the FIFO entry; absent for immediate spawns. */
+  queuedAt?: number,
 ): Promise<RunningSubagent> {
   let running: RunningSubagent;
   try {
@@ -2640,6 +2656,14 @@ async function launchReservedSpawn(
     );
   } finally {
     if (reservedName) reservedNames.delete(reservedName);
+  }
+
+  // Queue-wait stamp: launchedAt is the entry's startTime (stamped as the
+  // launch began). Only parked spawns carry a queuedAt; the wait lives on
+  // the entry itself, which restarts mutate in place — never recreate.
+  if (queuedAt != null) {
+    const waited = running.startTime - queuedAt;
+    if (Number.isFinite(waited) && waited > 0) running.queueWaitMs = Math.round(waited);
   }
 
   // Persist name → session so subagent_message({ name }) can resume this
@@ -3333,6 +3357,12 @@ function persistResultRecord(
   synthesized?: "pane_lost" | "stalled" | "cancelled_by_parent",
   historyExtra?: SubagentHistoryExtra,
 ): void {
+  // Queue-wait mirror (history-only extra): the park-to-launch wait
+  // stamped on the entry at launch. Immediate spawns keep the field absent.
+  const extra: SubagentHistoryExtra | undefined =
+    running.queueWaitMs != null
+      ? { ...(historyExtra ?? {}), queueWaitMs: running.queueWaitMs }
+      : historyExtra;
   appendSubagentResult(
     {
       id: running.id,
@@ -3355,7 +3385,7 @@ function persistResultRecord(
       ...(result.files_changed ? { files_changed: result.files_changed } : {}),
       ...(result.files_changed_source ? { files_changed_source: result.files_changed_source } : {}),
     },
-    historyExtra,
+    extra,
   );
 }
 
@@ -3476,6 +3506,7 @@ function deliverSubagentResult(
         agent: running.agent,
         exitCode: result.exitCode,
         elapsed: result.elapsed,
+        ...(running.queueWaitMs != null ? { queueWaitMs: running.queueWaitMs } : {}),
         sessionFile: result.sessionFile,
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
         ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
@@ -4511,7 +4542,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           // so a third colliding spawn queues behind this one too). No slot
           // is taken — the scope release wakes it.
           declareScope(scopeId!, { name: params.name, paths: scope.paths, state: "queued" });
-          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName, scopeId, scope });
+          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName, scopeId, scope, queuedAt: Date.now() });
           startWidgetRefresh();
           return {
             content: [
@@ -4543,7 +4574,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         } else {
           // Cap reached: queue FIFO and return immediately. The drain hook
           // launches it when a slot frees; result delivery is unchanged.
-          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName, scopeId, scope });
+          pendingSpawns.push({ params, ctx, parentArtifactDir, reservedName, scopeId, scope, queuedAt: Date.now() });
           startWidgetRefresh();
           return {
             content: [

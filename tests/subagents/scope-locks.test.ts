@@ -126,11 +126,11 @@ function writeHistory(records: unknown[]): void {
 function armSpawn(projectDir: string, agentDir: string, ctx: unknown) {
   process.env.PI_CODING_AGENT_DIR = agentDir;
   __surfaceTest__.setTmuxRunner(fakeTmux().runner);
-  const { pi, tools } = fakePi();
+  const { pi, tools, messages } = fakePi();
   subagentsExtension(pi as never);
   const spawn = tools.find((t) => t.name === "subagent") as { execute: Function };
   const list = tools.find((t) => t.name === "subagents_list") as { execute: Function; renderResult?: Function };
-  return { pi, tools, spawn, list, projectDir, ctx };
+  return { pi, tools, messages, spawn, list, projectDir, ctx };
 }
 
 async function spawnTool(
@@ -870,6 +870,108 @@ describe("live child metrics", () => {
       assert.equal(row.tokens, 3150, "tokens mirrored from record stats");
       assert.equal(row.costUsd, 0.42, "cost mirrored from record stats");
       assert.equal(row.durationMs, 3000, "durationMs = elapsed * 1000");
+    } finally {
+      if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
+      else process.env.PI_SUBAGENT_INBOX = savedInbox;
+    }
+  });
+});
+
+// ── queue-wait instrumentation (park stamp → launch stamp → surfaces) ──
+
+describe("queue wait from park to launch", () => {
+  it("stamps queuedAt at park and queueWaitMs at launch, mirrored to the result and history", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    const harness = armSpawn(projectDir, agentDir, ctx);
+
+    const a = await spawnTool(harness, { task: "own it", name: "qw-a", files: ["src/a.ts"] });
+    assert.match(a.content[0].text, /launched/);
+    const aRunning = [...__test__.runningSubagents.values()].find((r) => r.name === "qw-a")!;
+
+    const parkedAt = Date.now();
+    const b = await spawnTool(harness, { task: "same file", name: "qw-b", files: ["src/a.ts"] });
+    assert.match(b.content[0].text, /queued behind "qw-a"/);
+    const parked = __test__.pendingSpawns.find(
+      (e: { params: { name?: string } }) => e.params.name === "qw-b",
+    ) as { queuedAt?: number };
+    assert.ok(parked.queuedAt != null && parked.queuedAt > 0, "queuedAt stamped when the spawn parks");
+    assert.ok(Math.abs(parked.queuedAt - parkedAt) < 5000, "stamp is wall-clock now");
+
+    // Guarantee a measurable wait: hold the park a beat before releasing.
+    await new Promise((r) => setTimeout(r, 30));
+    aRunning.abortController?.abort();
+    assert.ok(await waitUntil(() => runningNames().has("qw-b")), "parked spawn launches after release");
+    const bRunning = [...__test__.runningSubagents.values()].find(
+      (r) => r.name === "qw-b",
+    ) as unknown as { queueWaitMs?: number; abortController?: AbortController };
+    assert.ok(
+      typeof bRunning.queueWaitMs === "number" && bRunning.queueWaitMs >= 20,
+      "queueWaitMs = launchedAt - queuedAt stamped on the entry",
+    );
+
+    // Delivery surfaces the wait: result details (the history mirror is
+    // pinned separately below — this harness yields no files_changed).
+    bRunning.abortController?.abort();
+    assert.ok(await waitUntil(() => !runningNames().has("qw-b")), "watcher settles and delivers");
+    const delivered = harness.messages
+      .map((m) => m.content as { customType?: string; details?: Record<string, unknown> })
+      .find((c) => c.customType === "subagent_result" && c.details?.name === "qw-b");
+    assert.ok(delivered, "result delivered");
+    assert.ok(
+      typeof delivered!.details!.queueWaitMs === "number" && (delivered!.details!.queueWaitMs as number) >= 20,
+      "delivered result carries queueWaitMs",
+    );
+  });
+
+  it("immediate spawn carries no wait anywhere", async () => {
+    const { agentDir, projectDir, ctx } = freshRoot();
+    const harness = armSpawn(projectDir, agentDir, ctx);
+
+    const a = await spawnTool(harness, { task: "solo", name: "qw-i", files: ["src/a.ts"] });
+    assert.match(a.content[0].text, /launched/);
+    const entry = [...__test__.runningSubagents.values()].find(
+      (r) => r.name === "qw-i",
+    ) as unknown as { queueWaitMs?: number; abortController?: AbortController };
+    assert.equal(entry.queueWaitMs, undefined, "no stamp on a never-parked spawn");
+
+    entry.abortController?.abort();
+    assert.ok(await waitUntil(() => !runningNames().has("qw-i")), "delivered");
+    const delivered = harness.messages
+      .map((m) => m.content as { customType?: string; details?: Record<string, unknown> })
+      .find((c) => c.customType === "subagent_result" && c.details?.name === "qw-i");
+    assert.ok(delivered, "result delivered");
+    assert.equal(delivered!.details!.queueWaitMs, undefined, "result details omit queueWaitMs");
+  });
+
+  it("history row mirrors queueWaitMs only when the extra carries it", () => {
+    const { projectDir } = freshRoot();
+    const savedInbox = process.env.PI_SUBAGENT_INBOX;
+    process.env.PI_SUBAGENT_INBOX = join(projectDir, "inbox.jsonl");
+    try {
+      const base = {
+        id: "qw-h1",
+        ts: Date.now(),
+        name: "qw-h",
+        task: "t",
+        sessionFile: "/tmp/s.jsonl",
+        repoRoot: projectDir,
+        summary: "done",
+        exitCode: 0,
+        elapsed: 3,
+        files_changed: ["a.ts"],
+      };
+      appendSubagentResult(base, { turns: 2, queueWaitMs: 1532.6 });
+      appendSubagentResult({ ...base, id: "qw-h2" }, { turns: 1 });
+      const rows = readFileSync(historyPath(), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      const waited = rows.find((r) => r.id === "qw-h1");
+      const immediate = rows.find((r) => r.id === "qw-h2");
+      assert.ok(waited, "waited row written");
+      assert.equal(waited!.queueWaitMs, 1533, "queueWaitMs mirrored, rounded to ms");
+      assert.ok(immediate, "immediate row written");
+      assert.equal("queueWaitMs" in immediate!, false, "row without a wait omits the field");
     } finally {
       if (savedInbox === undefined) delete process.env.PI_SUBAGENT_INBOX;
       else process.env.PI_SUBAGENT_INBOX = savedInbox;
