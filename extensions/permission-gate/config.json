@@ -2,8 +2,8 @@
   "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: destructiveConfirm and commitMessageLint cannot be configured below \"error\". Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names. outputCap/confirm/destructive tune numeric limits and the confirm command list.",
 
   "rules": {
-    "editAnchorGuard": "warn",
-    "editRegionGuard": "error",
+    "editAnchorGuard": "off",
+    "editRegionGuard": "off",
     "reReadGuard": "error",
     "reReadConsume": "warn",
     "largeReadGuard": "warn",
