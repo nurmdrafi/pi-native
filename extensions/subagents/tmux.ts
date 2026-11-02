@@ -109,12 +109,47 @@ function runTmux(args: string[]): string {
   return execFileSync("tmux", args, { encoding: "utf8" });
 }
 
-/** Whether an error is tmux reporting the target pane does not exist — the
- *  one pane failure creation can self-heal from by re-targeting the split. */
-export function isPaneNotFound(err: unknown): boolean {
+/** Both places a tmux failure text can live: the exec error's stderr and
+ *  the error message itself (tests and wrapped errors carry either). */
+function tmuxErrorText(err: unknown): string {
   const stderr = typeof (err as { stderr?: unknown })?.stderr === "string" ? (err as { stderr: string }).stderr : "";
   const message = err instanceof Error ? err.message : String(err ?? "");
-  return /can't find pane/i.test(stderr) || /can't find pane/i.test(message);
+  return `${stderr}\n${message}`;
+}
+
+/** Error classes the surface layer can act on. Wordings are tmux's own and
+ *  identical on macOS and Linux — only socket paths vary, so they are never
+ *  parsed. `pane-gone`: the target object (pane/window/client/session) no
+ *  longer exists — heal by re-deriving from live state. `server-gone`: the
+ *  server is unreachable, dead, or version-mismatched — re-derive,
+ *  recreating as needed. `size`: the window's geometry refuses the operation
+ *  — grow the window and retry. `duplicate-race`: a parallel creator won
+ *  the race — re-probe. */
+export type TmuxErrorClass = "pane-gone" | "server-gone" | "size" | "duplicate-race" | "unknown";
+
+const TMUX_ERROR_PATTERNS: Array<[TmuxErrorClass, RegExp]> = [
+  ["pane-gone", /can't find (?:pane|window|client|session)|no such (?:pane|window|client|session)/i],
+  ["server-gone", /no server running|error connecting to|server exited(?: unexpectedly)?|lost server|server version is too old for client|protocol version mismatch/i],
+  ["size", /no space for (?:a )?new pane|create pane failed|pane too small|(?:size|change) is too big or too small|(?:size|change) too (?:small|big)(?: or too (?:big|small))?|adjustment too (?:small|large)/i],
+  ["duplicate-race", /duplicate session/i],
+];
+
+/** Classify a tmux failure by tmux's own wording (stderr or message). */
+export function classifyTmuxError(err: unknown): TmuxErrorClass {
+  const text = tmuxErrorText(err);
+  for (const [cls, re] of TMUX_ERROR_PATTERNS) {
+    if (re.test(text)) return cls;
+  }
+  return "unknown";
+}
+
+/** Whether an error is tmux reporting the target pane does not exist — the
+ *  one pane failure creation can self-heal from by re-targeting the split.
+ *  A dead window or client takes the pane with it and heals the same way;
+ *  session loss is excluded here because it means the whole dedicated
+ *  session was reaped (still recoverable — see isMuxRecoverableError). */
+export function isPaneNotFound(err: unknown): boolean {
+  return /can't find (?:pane|window|client)|no such (?:pane|window|client)/i.test(tmuxErrorText(err));
 }
 
 /** Whether an error means the multiplexer layer itself is gone or racing —
@@ -131,12 +166,8 @@ export function isPaneNotFound(err: unknown): boolean {
  *  path varies between machines, so it is matched by prefix and never
  *  parsed. */
 export function isMuxRecoverableError(err: unknown): boolean {
-  if (isPaneNotFound(err)) return true;
-  const stderr2 = typeof (err as { stderr?: unknown })?.stderr === "string" ? (err as { stderr: string }).stderr : "";
-  const message2 = err instanceof Error ? err.message : String(err ?? "");
-  return /no server running|error connecting to|no such session|can't find session|duplicate session/i.test(
-    `${stderr2}\n${message2}`,
-  );
+  const cls = classifyTmuxError(err);
+  return cls === "pane-gone" || cls === "server-gone" || cls === "duplicate-race";
 }
 
 /**
@@ -154,7 +185,15 @@ function ensureAgentsSessionPane(sessionName: string = AGENTS_TMUX_SESSION): str
   } catch {}
   if (!exists) {
     try {
-      runTmux(["new-session", "-d", "-s", sessionName, "-x", "200", "-y", "50"]);
+      runTmux(["new-session", "-d", "-s", sessionName, "-x", "220", "-y", "55"]);
+      // No `-A` here: attach-if-exists on an existing session acts as a
+      // detached attach and would detach a user watching it. The parallel
+      // first-spawn race stays handled by the duplicate-session catch below
+      // (and `duplicate-race` is classified recoverable upstack). Fixed
+      // geometry: `window-size manual` keeps the dedicated session's panes
+      // usable no matter what terminal later attaches (a client smaller than
+      // the window must not shrink panes below sentinel width).
+      runTmux(["set-option", "-w", "-t", sessionName, "window-size", "manual"]);
     } catch (err) {
       // Parallel first-spawn race: both saw no session, both create it; the
       // loser is told `duplicate session`. The winner's session now exists,
@@ -259,6 +298,111 @@ export function createSurface(name: string): string {
   return createSurfaceSplit(name, "right", splitOriginPane());
 }
 
+/** Window sizes the dedicated agents session may grow through. Splits
+ *  refused for geometry (`no space for a new pane`) step up this ladder
+ *  instead of failing the spawn. */
+const AGENTS_WINDOW_SIZES: Array<[number, number]> = [
+  [220, 55],
+  [280, 70],
+  [360, 90],
+  [480, 120],
+];
+
+/** Grow the window containing `target` (a pane id) one step up the size
+ *  ladder — the first step with BOTH dimensions strictly larger, so a
+ *  manually enlarged window is never shrunk. `window-size manual` first so
+ *  resize-window is honored even when a client is attached. No step larger
+ *  in both dimensions means the window is already at or past capacity: fail
+ *  with an explicit error naming the current size instead of tmux's bare
+ *  refusal. A size that does not parse is never guessed: set `window-size
+ *  manual` only and let the caller retry the split un-grown. */
+function growAgentsWindow(target: string): void {
+  const out = runTmux(["display-message", "-p", "-t", target, "#{window_width}x#{window_height}"]).trim();
+  const m = out.match(/^(\d+)x(\d+)$/);
+  if (!m) {
+    runTmux(["set-option", "-w", "-t", target, "window-size", "manual"]);
+    return;
+  }
+  const cur: [number, number] = [+m[1], +m[2]];
+  const next = AGENTS_WINDOW_SIZES.find(([w, h]) => w > cur[0] && h > cur[1]);
+  const max = AGENTS_WINDOW_SIZES[AGENTS_WINDOW_SIZES.length - 1];
+  if (!next) {
+    // Distinguish "top of our ladder" from "already larger than anything we
+    // grow to" — the latter must not imply the ladder max is bigger.
+    const beyond = cur[0] > max[0] || cur[1] > max[1];
+    throw new Error(
+      beyond
+        ? `tmux pane capacity reached: the window is already ${out} — larger than the largest ` +
+            `supported step (${max.join("x")}) and the split still needs more space. Reduce ` +
+            `concurrent subagents or split fewer panes into this window.`
+        : `tmux pane capacity reached: the window is ${out} and the split still needs more space ` +
+            `(max supported ${max.join("x")}). Reduce concurrent subagents or enlarge the window.`,
+    );
+  }
+  runTmux(["set-option", "-w", "-t", target, "window-size", "manual"]);
+  runTmux(["resize-window", "-t", target, "-x", String(next[0]), "-y", String(next[1])]);
+}
+
+/** Oldest pane in `base`'s window that is not the base itself (tmux
+ *  `pane_created` epoch seconds), or null when none exists — the eviction
+ *  victim when capacity is reached. */
+function oldestEvictablePane(base: string): string | null {
+  try {
+    const out = runTmux(["list-panes", "-t", base, "-F", "#{pane_id} #{pane_created}"]).trim();
+    const panes = out
+      .split("\n")
+      .map((line) => line.trim().match(/^(%\d+) (\d+)$/))
+      .filter((m): m is RegExpMatchArray => m !== null)
+      .map((m) => ({ id: m[1], created: Number(m[2]) }))
+      .filter((p) => p.id !== base);
+    if (!panes.length) return null;
+    panes.sort((a, b) => a.created - b.created);
+    return panes[0].id;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `surface` lives in the same tmux window as the parent pi's pane
+ *  — the user's own window, which must never be resized by the extension.
+ *  Without a parent pane (pi outside tmux) no pane can share it; when window
+ *  identity cannot be established, assume it does — never resize what cannot
+ *  be identified. */
+function paneSharesWindowWithParent(surface: string): boolean {
+  const parent = process.env.TMUX_PANE;
+  if (!parent) return false;
+  try {
+    const paneWindow = runTmux(["display-message", "-p", "-t", surface, "#{window_id}"]).trim();
+    const parentWindow = runTmux(["display-message", "-p", "-t", parent, "#{window_id}"]).trim();
+    return paneWindow !== "" && paneWindow === parentWindow;
+  } catch {
+    return true;
+  }
+}
+
+/** Kill dead-but-remained panes in agents sessions (best-effort, called once
+ *  per session start): a parent crash between child exit and pane close
+ *  leaves "Pane is dead" rows behind. Only panes whose session name carries
+ *  the agents prefix are touched — the user's own windows, including their
+ *  own dead panes, are never modified. */
+export function reapDeadAgentPanes(): void {
+  try {
+    const out = runTmux([
+      "list-panes",
+      "-a",
+      "-F",
+      "#{pane_id} #{pane_dead} #{session_name}",
+    ]).trim();
+    for (const line of out.split("\n")) {
+      const m = line.trim().match(/^(%\d+) ([01]) (.+)$/);
+      if (!m || m[2] !== "1" || !m[3].startsWith(AGENTS_TMUX_SESSION)) continue;
+      try {
+        runTmux(["kill-pane", "-t", m[1]]);
+      } catch {}
+    }
+  } catch {}
+}
+
 /** Run one split-window against `fromSurface` (or the current window when
  *  absent) and return the new pane id. With `command` the pane is born running
  *  it — tmux takes the command as the LAST argv element, so no separate
@@ -286,6 +430,16 @@ function splitPaneOnce(
   const pane = runTmux(args).trim();
   if (!pane.startsWith("%")) {
     throw new Error(`Unexpected tmux split-window output: ${pane}`);
+  }
+  try {
+    // Keep a dead child's pane visible with its exit status: a spawn whose
+    // command cannot start (missing binary, bad path) would otherwise vanish
+    // and only surface as a bare "gone" — remain-on-exit lets the poll read
+    // the real exit code ("Pane is dead", status 127 = command not found).
+    runTmux(["set-option", "-p", "-t", pane, "remain-on-exit", "on"]);
+  } catch {
+    // Older tmux without pane-scoped options: panes vanish on death as
+    // before — the gone-tick path still covers them.
   }
   return pane;
 }
@@ -326,6 +480,44 @@ function splitWithHeal(
   try {
     return splitPaneOnce(direction, fromSurface, command);
   } catch (err) {
+    if (classifyTmuxError(err) === "size") {
+      // Geometry refused the split. Never resize the user's own window: a
+      // size-refused split from the parent pi's pane moves to the dedicated
+      // session and grows that instead; inside the dedicated session, grow
+      // the window one step and retry the split once.
+      if (fromSurface !== undefined && fromSurface === process.env.TMUX_PANE) {
+        agentsSessionBasePanes.delete(sessionName);
+        const base = ensureAgentsSessionPane(sessionName);
+        try {
+          growAgentsWindow(base);
+        } catch (growErr) {
+          if (!/pane capacity reached/.test(growErr instanceof Error ? growErr.message : "")) {
+            throw growErr;
+          }
+          const victim = oldestEvictablePane(base);
+          if (!victim) throw growErr;
+          runTmux(["kill-pane", "-t", victim]);
+        }
+        return splitPaneOnce(direction, base, command);
+      }
+      const target = fromSurface ?? ensureAgentsSessionPane(sessionName);
+      try {
+        growAgentsWindow(target);
+      } catch (growErr) {
+        // Capacity: growth cannot help. Evict the oldest subagent pane in
+        // the same window to make room — deliberate capacity policy; the
+        // evicted child's watcher finalizes it as gone. The split base is
+        // never the victim; with nothing left to evict, the capacity error
+        // stands.
+        if (!/pane capacity reached/.test(growErr instanceof Error ? growErr.message : "")) {
+          throw growErr;
+        }
+        const victim = oldestEvictablePane(target);
+        if (!victim) throw growErr;
+        runTmux(["kill-pane", "-t", victim]);
+      }
+      return splitPaneOnce(direction, target, command);
+    }
     if (!isMuxRecoverableError(err)) throw err;
     agentsSessionBasePanes.delete(sessionName);
     return splitPaneOnce(direction, ensureAgentsSessionPane(sessionName), command);
@@ -408,13 +600,28 @@ export function sendLongCommand(
   // the completion sentinel echo lives — alive after the script exits, matching
   // the old typed-in-a-shell behavior; the watcher closes the pane on
   // completion. SHELL falls back to /bin/sh for portability.
-  runTmux([
+  const respawnArgs = [
     "respawn-pane",
     "-k",
     "-t",
     surface,
     `bash ${shellEscape(scriptPath)}; exec "\${SHELL:-/bin/sh}"`,
-  ]);
+  ];
+  try {
+    runTmux(respawnArgs);
+  } catch (err) {
+    // A pane too narrow/short for the respawn (`pane too small`) is a
+    // geometry refusal, not a delivery failure — but never grow the user's
+    // own window: when the parent pi runs inside tmux the pane lives in the
+    // user's window, and resizing it is exactly what the split heal forbids.
+    // Grow-and-retry only for panes in the dedicated session.
+    if (classifyTmuxError(err) !== "size") throw err;
+    if (paneSharesWindowWithParent(surface)) {
+      throw new Error("pane too small for script delivery — enlarge the terminal window hosting pi");
+    }
+    growAgentsWindow(surface);
+    runTmux(respawnArgs);
+  }
   return scriptPath;
 }
 
@@ -450,7 +657,13 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
  */
 export function closeSurface(surface: string): void {
   requireTmux();
-  execFileSync("tmux", ["kill-pane", "-t", surface], { encoding: "utf8" });
+  try {
+    runTmux(["kill-pane", "-t", surface]);
+  } catch (err) {
+    // Idempotent close: the pane already reaped (or its window/session
+    // gone) is the success state kill-pane aims at, not a failure.
+    if (classifyTmuxError(err) !== "pane-gone") throw err;
+  }
   rebalanceSurfaces();
 }
 
@@ -523,6 +736,32 @@ function interpretExitSidecar(data: any): PollResult {
 
 export const __pollForExitTest__ = { interpretExitSidecar };
 
+/** Exit status of a dead-but-remained pane (`remain-on-exit on`), or null
+ *  when tmux cannot answer. `list-panes -t <pane>` lists the pane's whole
+ *  window, so the pane's own line is matched by id. */
+async function queryPaneDeadState(
+  surface: string,
+): Promise<{ dead: boolean; status?: number } | null> {
+  try {
+    const { stdout } = await execFileAsync("tmux", [
+      "list-panes",
+      "-t",
+      surface,
+      "-F",
+      "#{pane_id} #{pane_dead} #{pane_dead_status}",
+    ]);
+    const line = stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.startsWith(`${surface} `));
+    const m = line?.match(/^%\d+ ([01])(?: (-?\d+))?$/);
+    if (!m) return null;
+    return { dead: m[1] === "1", status: m[2] !== undefined ? Number(m[2]) : undefined };
+  } catch {
+    return null;
+  }
+}
+
 /** Test hooks for the pane-creation paths: substitute the tmux binary and
  *  reset the state a fake run leaves behind (base-pane cache, availability
  *  cache, pending layout rebalance). */
@@ -562,12 +801,14 @@ export async function pollForExit(
     deps?: {
       readScreen?: (surface: string, lines?: number) => Promise<string> | string;
       waitTmux?: (args: string[]) => Promise<unknown>;
+      paneDeadState?: (surface: string) => Promise<{ dead: boolean; status?: number } | null>;
     };
   },
 ): Promise<PollResult> {
   const start = Date.now();
   let goneTicks = 0;
   const readScreen = options.deps?.readScreen ?? readScreenAsync;
+  const paneDeadState = options.deps?.paneDeadState ?? queryPaneDeadState;
   // One wait-for may be outstanding for the whole poll, reused across ticks.
   // A fresh wait-for per tick leaks a blocked tmux subprocess every time the
   // interval timer wins the race, and each `-S` wakes exactly one waiter, so
@@ -619,6 +860,22 @@ export async function pollForExit(
       const match = screen.match(/^__SUBAGENT_DONE_(\d+)__[ \t\r]*$/m);
       if (match) {
         return { reason: "sentinel", exitCode: parseInt(match[1], 10) };
+      }
+      if (/Pane is dead/.test(screen)) {
+        // The pane's process exited and remained (remain-on-exit on): read
+        // the true exit status instead of polling a corpse forever. Exit 127
+        // means the child command could not start at all (not in PATH).
+        const dead = await paneDeadState(surface);
+        if (dead?.dead) {
+          return {
+            reason: "gone",
+            exitCode: dead.status ?? -1,
+            errorMessage:
+              dead.status === 127
+                ? "child process not found (exit 127) — the pane command could not start"
+                : undefined,
+          };
+        }
       }
       goneTicks = 0;
     } catch {
