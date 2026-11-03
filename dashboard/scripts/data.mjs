@@ -549,17 +549,6 @@ export const GATE_RULE_META = {
   cadenceNudge: { code: "CN", group: "advisory", label: "Cadence nudge (turns / context)" },
 };
 
-/** Group names in plain words, in display order. */
-export const GATE_GROUP_LABELS = {
-  anchor: "anchor guard",
-  tokens: "token economy",
-  search: "search",
-  gate: "gate & destructive",
-  toolchain: "toolchain",
-  loop: "loop guard",
-  advisory: "advisory",
-};
-
 /** Inverted tag map: for each rule id, the transcript tags whose counts land
  * on its row. First entry is the live tag — the string the gate prints in the
  * terminal — so the dashboard can lead with exactly what the operator saw;

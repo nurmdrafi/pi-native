@@ -108,21 +108,6 @@ function classifyTranslations(translations) {
   return { supplied, usable, unknownKeys, placeholderMismatches };
 }
 
-// Validates caller-supplied translation data against the canonical (English)
-// message-key set. Pure and side-effect free; coverage here describes only the
-// supplied data. resolveCatalog() reports the final resolved coverage.
-export function validateTranslations(translations = {}) {
-  const { usable, unknownKeys, placeholderMismatches } = classifyTranslations(translations);
-  return {
-    totalKeys: CANONICAL_KEYS.length,
-    coveredKeys: usable.size,
-    coverage: CANONICAL_KEYS.length ? usable.size / CANONICAL_KEYS.length : 1,
-    missingKeys: CANONICAL_KEYS.filter((key) => !Object.hasOwn(translations || {}, key)),
-    unknownKeys,
-    placeholderMismatches,
-  };
-}
-
 export function bundledLocaleFor(locale) {
   if (typeof locale !== 'string') return null;
   return MANIFEST.get(locale.toLowerCase())?.locale || null;

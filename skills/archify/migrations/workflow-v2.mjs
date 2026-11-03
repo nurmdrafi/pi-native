@@ -6,8 +6,6 @@ import {
 } from '../renderers/workflow/workflow-migration-geometry.mjs';
 import { validateSchema } from '../renderers/shared/validator.mjs';
 
-export { createHorizontalRankMapper } from '../renderers/workflow/workflow-migration-geometry.mjs';
-
 const TARGET_SCHEMA_VERSION = 2;
 
 function clone(value) {

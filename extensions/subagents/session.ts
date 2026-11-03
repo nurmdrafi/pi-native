@@ -530,25 +530,6 @@ function lookupSessionIndex(
   return best ? best.path : null;
 }
 
-/**
- * Async variant used by the interactive resume path. Index building/refresh is
- * synchronous I/O, which can take many seconds on a cold OS page cache with a
- * few thousand sessions; running it synchronously would block the extension
- * host's single thread and freeze the terminal UI. Deferring to a macrotask
- * keeps the event loop responsive. The heavy work only happens on the first
- * resolution per process (and incrementally thereafter); warm lookups are ~50ms.
- */
-export async function resolveSessionFileByIdAsync(
-  sessionId: string,
-  sessionsRoot: string,
-): Promise<string | null> {
-  if (!sessionId || !existsSync(sessionsRoot)) return null;
-  // Let the event loop breathe (and the UI repaint) before the sync scan.
-  await new Promise<void>((r) => setImmediate(r));
-  const idx = getSessionIndex(sessionsRoot);
-  return lookupSessionIndex(idx, sessionId);
-}
-
 /** Test hook: drop the cached session index so tests start clean. */
 export function resetSessionIndexCache(): void {
   sessionIndexCache.clear();
