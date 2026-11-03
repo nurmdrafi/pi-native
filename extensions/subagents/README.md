@@ -286,6 +286,11 @@ externally killed pane, a stale cached pane id. Each lifecycle step self-heals:
 - **split origin** — a `split-window` whose from-pane is dead resets the cached
   agents-session pane id and re-splits once from a live pane (`tmux.ts`
   `createSurfaceSplit`);
+- **full window** — a `split-window` refused with `create pane failed: pane too
+  small` grows the target window one step and retries; when growth hits the
+  pane-capacity limit, the oldest non-base pane in that window is closed to
+  make room; with nothing left to close the capacity error propagates
+  unchanged (`tmux.ts` `splitWithHeal`);
 - **delivery** — spawn and resume deliver the launch script by replacing the
   pane process; on pane loss one replacement surface is created and the script
   redelivered exactly once; a second loss fails the call with retry guidance

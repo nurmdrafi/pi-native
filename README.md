@@ -129,7 +129,7 @@ A subagent orchestration runtime built into the harness: parallel throughput wit
 *   **Duplicate-spawn detection:** a near-identical same-agent re-spawn draws a warn-only note before you pay for it — steer the running child or re-check the prior result.
 *   **Measured time-sense:** spawn acks carry per-agent baselines from your own history (``typical for `worker`: median 5m · p90 15m · $0.34``); a child running past its agent's p90 is flagged live.
 *   **Full control plane:** `cancel` walks interrupt → grace → kill through one delivery funnel (exactly one result), `restart` re-dispatches, steer/resume verbs reach running or finished children, and per-child budgets (wall-clock, turns, USD) are enforced with stops.
-*   **Failure recovery:** pane loss self-heals with one auto-restart, the next session adopts orphans, and budget kills plus crash residue still deliver — a dead child's work arrives.
+*   **Failure recovery:** pane loss self-heals with one auto-restart, a window too full for a new pane makes room by closing the oldest subagent pane, the next session adopts orphans, and budget kills plus crash residue still deliver — a dead child's work arrives.
 *   **Token discipline:** work happens in isolated child contexts and only summaries return to the orchestrator; inspection is pull-based (zero parent tokens until asked), and a delegation gate keeps small tasks linear so parallelism is spent only where it pays.
 *   **Live dashboard:** per-child health and metric cards with deep links — [dashboard/](dashboard/).
 
