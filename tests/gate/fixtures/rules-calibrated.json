@@ -1,0 +1,53 @@
+{
+  "_comment": "Calibration fixture for the gate case runner and the severity-specific test files: the canonical severities the shipped cases were authored against (AG warn tier — teaching notes; AG2 error; WB error). The tracked config.json next to loader.ts is user policy and may ship rules off; cases must not follow that churn. PGATE_CONFIG points here before the gate import.",
+  "rules": {
+    "editAnchorGuard": "warn",
+    "editRegionGuard": "error",
+    "writeBindingGuard": "error",
+    "reReadGuard": "error",
+    "reReadConsume": "warn",
+    "largeReadGuard": "warn",
+    "locateFirst": "warn",
+    "nativeReadFirst": "error",
+    "nativeBashFirst": "error",
+    "outputCap": "error",
+    "readOutputCap": "error",
+    "destructiveConfirm": "error",
+    "commitMessageLint": "error",
+    "rerunGuard": "warn",
+    "reblockEscalation": "error",
+    "toolchainPnpm": "warn",
+    "toolchainNode": "warn",
+    "searchScope": "warn",
+    "searchMidPipe": "warn",
+    "searchReplaceFlag": "warn",
+    "findFirst": "warn",
+    "searchPortability": "warn",
+    "errorSwallow": "warn",
+    "readerBypass": "warn",
+    "bashViewCredit": "warn",
+    "cadenceNudge": "error",
+    "loopGuard": "error",
+    "failureLoopGuard": "error",
+    "phaseNudge": "warn",
+    "outputScrub": "error"
+  },
+  "outputCap": {
+    "maxLines": 40,
+    "maxBytes": 2048
+  },
+  "confirm": {
+    "timeoutMs": 300000
+  },
+  "destructive": {
+    "remove": [
+      "db-migrators",
+      "artisan-migrate",
+      "managepy-migrate",
+      "rake-db-migrate",
+      "dotnet-ef-update",
+      "js-migrate-deploy"
+    ],
+    "extra": []
+  }
+}

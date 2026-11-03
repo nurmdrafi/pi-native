@@ -3,41 +3,11 @@
  * Blocks violations with a corrective reason before the tool runs, or caps
  * output after it; every block reason carries the fix.
  *
- * CURRENT rules (IDs are stable; family = block-reason prefix):
- * | ID  | Family / mechanism            | Enforces |
- * |-----|-------------------------------|----------|
- * | AG  | Anchor Guard                  | edit oldText: existence (exact+fuzzy), uniqueness, no intra-call overlap; anchor lines must be in context — a line this session's own search PRINTED certifies like a read span (2026-10-27), a path-only result (`rg -l`, `wc -l`) certifies nothing; snippet on a miss; 2nd+ miss per file per turn appends a loop-break hint; a target inside a compaction gap (piread details.compaction.omissions[], else marker walk) names the sanctioned sub-window remedy read (C2/C3 2026-10-27); Stale bind (stat or hash drift since the certified read) with every anchor exact in the CURRENT file passes with a Stale-relaxed note (M2 skipped, coverage dropped; miss/fuzzy/duplicate reverts to the Stale warn) (2026-10-29) |
- * | AG2 | Anchor Guard (Unread)         | every unread target region in an edit batch is listed and the batch blocked until read (`editRegionGuard` off disables it) |
- * | R1  | Token Economy (Re-read)       | no read whose window is fully covered by in-context spans (reads/edits/writes/@file injections); stat-mismatch invalidation; single-file view commands in bash results credit their printed H1-visible lines (VC, 2026-10-29) |
- * | R1b | Token Economy (Big read)      | whole-file (no-limit) or >=500-line-window read of a >10KB file blocked with a targeted-window fix |
- * | R1c | Locate-first                  | a >=100-line window on a path no search named this session — as an argv operand or a line its output printed (`path:line:`, bare `NN:` for a single-file search, `wc -l` count rows) — is blocked unless the window covers a reported hit line; a fused piread `--hits` result certifies its `details.locate.windows` spans (complement over totalLines stays unread, a miss certifies nothing) and seeds the hit store with `locate.hits`; the block lists those hit lines and the piread call that covers them |
- * | R1x | Token Economy (Re-read)       | partial-overlap re-read: >=50% of a read's rendered lines already in context — warn (default) notes on the tool_result, error blocks at call time (requested window + pending same-batch sibling); same stat-freshness as R1 |
- * | P1  | Token Economy (Piread-first)  | built-in read of a text file blocked — use the piread tool; images keep `read` (piread would return them as lossy text) |
- * | VC  | Token Economy (View credit)   | printed lines of a mappable single-file view command in a bash result certify their H1-visible spans (feeds R1 and AG coverage) |
- * | P2  | Token Economy (Pibash-first)  | built-in bash blocked — use the pibash tool (same schema, full bash-kind rules; no built-in fallback) |
- * | H1  | output cap (non-blocking)     | bash output capped at 40 lines / 2KB UTF-8 (bounds.gen.ts, config cannot lower it); oversized first line head+tail; tail spilled to $TMPDIR/pgate-spill; errors capped too |
- * | H1b | read cap (non-blocking)       | read/piread result over 300 lines / 8KB truncated to the head, full text spilled to $TMPDIR/pgate-spill with a pointer — reads had no post-cap before |
- * | OS  | output scrub (non-blocking)   | ANSI stripping, test-run aggregation, build filtering on bash results — failure/error lines always kept; never applied to reads, gate messages, structuredContent |
- * | H2  | Permission Gate (Destructive) | destructive commands need approval: chat yes / UI confirm; fail closed headless; re-send re-prompts |
- * | R9  | Commitlint                    | conventional-commit headers, subject case, body line length (incl. heredoc bodies), pre-hook |
- * | TC1 | Toolchain (pnpm)              | npm/npx/yarn in a pnpm repo (packageManager/pnpm-lock) — pnpm run/exec/dlx |
- * | TC2 | Toolchain (Node)              | node-family binary under an exact x.y.z Node pin (.nvmrc/engines) the interpreter misses — nvm use first |
- * | SS1 | Search (Scope)                | recursive grep with no path/glob scope — scope it or use rg |
- * | PB1 | Portability (grep -P)         | grep -P on darwin — rg / grep -E |
- * | SS2 | Search (rg-first)             | 'grep' mid-pipe or as the segment head is the fallback, not the default — use rg |
- * | SS3 | Search (fd-first)             | `find` as segment head — use fd; fallback only when fd genuinely errored |
- * | SS4 | Search (rg -r)                | `-r` on rg is --replace (display substitution), not recursion — drop it |
- * | SE1 | Hygiene (Error-swallow)       | `|| true` / `|| :` hides the failure exit code — drop it or handle the error explicitly |
- * | SE2 | Hygiene (Reader-bypass)       | read-position `cat` / `sed -n` reads a window bash-side — piread gives offset windows and compaction markers; a `|`-stage sed filter and a cat that writes are not flagged |
- * | R10 | Token Economy (Re-run)         | identical command re-run within 10 min without an edit/write/mutating-bash since is blocked |
- * | R11 | Loop Guard (Failure loop)     | >=5 consecutive tool failures with no landed mutation since the streak began: the next shell call is blocked (a red-green cycle edits between runs, so it never arms) |
- * | PH1 | Phase label (Advisory)        | labels the turn's stage and notes once per turn when a verify-family command fails right after an edit; never blocks, and never displaces H1's cap |
- * | RB  | Token Economy (Re-block)      | verbatim re-send of a just-blocked command escalates (never armed for H2) |
- * | CN  | cadence nudge (non-blocking)  | tool_result note at ~120 user turns / ~150K context tokens (AGENTS.md Token Economy); resets on compaction |
- * | LG1 | loop guard                      | same-target churn: note at 4th landed same-path edit/write in a user turn, one-shot block of that path's next mutation at the 7th; 3 consecutive tool errors note once; resets per user turn + compaction |
- *
- * Destructive matching is a TRIPWIRE, not a boundary — see destructive.ts.
- * Change history lives in git log; this table lists what is CURRENTLY enforced.
+ * Rule catalog (ID | mechanism | what is enforced) — one canonical home in
+ * extensions/README.md; the key↔ID map is RULE_IDS in loader.ts, and
+ * config.json accepts either spelling (IDs there). Destructive matching is
+ * a TRIPWIRE, not a boundary — see destructive.ts. Change history lives in
+ * git log.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { config, ruleBlocks, ruleEnabled, ruleSeverity } from "./loader.ts";
@@ -718,7 +688,9 @@ export default function (pi: ExtensionAPI) {
         }
       }
       const prior = coverage.get(path);
-      if (path && prior && coversAll(prior.spans, win)) {
+      // block tier keyed to its own rule (2026-11-04): the read-family wrap
+      // above runs when ANY sibling rule is on; R1 must respect its own key.
+      if (ruleBlocks("reReadGuard") && path && prior && coversAll(prior.spans, win)) {
         // freshness: only block while mtime+size still match the certified snapshot —
         // any external change (bash, IDE, git) shows up in stat without guessing
         // from command text; missing baseline or stat failure allows the re-read
@@ -802,15 +774,18 @@ export default function (pi: ExtensionAPI) {
         const r = await confirmDestructive(`write:${path}`, prot, ctx);
         if (r) return blockCall(r);
       }
-      // S5 M1+M3+M2 (2026-10-16): write binding (spec §5.1–§5.3). A blind
-      // full overwrite silently reverts external changes — the worst failure
-      // class — so writes to EXISTING files bind like edits: stat drift since
-      // the last certified read blocks Stale; same-stat content drift blocks
-      // through the hash chain (drop coverage on that block, or R1 would
-      // block the corrective re-read); a never-read existing file blocks
-      // Unread (one targeted read is the cheap recovery). New/deleted files
-      // pass — nothing to bind; missing stat/hash fails open throughout.
-      {
+      // S5 M1+M3+M2 (2026-10-16): write binding (spec §5.1–§5.3), keyed as WB
+      // (2026-11-04: every rule configurable — this fired unconditionally
+      // before). A blind full overwrite silently reverts external changes —
+      // the worst failure class — so writes to EXISTING files bind like
+      // edits: stat drift since the last certified read blocks Stale;
+      // same-stat content drift blocks through the hash chain (drop coverage
+      // on that block, or R1 would block the corrective re-read); a
+      // never-read existing file blocks Unread (one targeted read is the
+      // cheap recovery). New/deleted files pass — nothing to bind; missing
+      // stat/hash fails open throughout. Severity is `writeBindingGuard`:
+      // off skips the binding, warn notes the write result, error blocks.
+      if (ruleEnabled("writeBindingGuard")) {
         const display = String(event.input.path ?? "");
         const shown = display.length > 57 ? `…${display.slice(-56)}` : display;
         const prior = coverage.get(path);
@@ -827,17 +802,23 @@ export default function (pi: ExtensionAPI) {
             // re-block the edit even after the recommended re-read, turning a
             // one-shot recovery into a loop.
             coverage.delete(path);
-            return blockCall(
+            const r = enforce(
+              "writeBindingGuard",
               `Anchor Guard (Stale): '${shown}' changed on disk since your last read (your own shell write or an external edit) — re-read it, then re-send.`,
+              event.toolCallId,
             );
+            if (r) return r;
           }
           if (prior.stat && now && prior.hash) {
             const h = await hashFile(path);
             if (h && h !== prior.hash) {
               coverage.delete(path); // disproven spans/stat — let the re-read through
-              return blockCall(
+              const r = enforce(
+                "writeBindingGuard",
                 `Anchor Guard (Stale): '${shown}' changed without mtime/size change (fast write / restored mtime) — re-read before overwriting.`,
+                event.toolCallId,
               );
+              if (r) return r;
             }
           }
         } else {
@@ -848,10 +829,14 @@ export default function (pi: ExtensionAPI) {
           } catch {
             /* ENOENT: creating a new file — nothing to bind */
           }
-          if (exists)
-            return blockCall(
+          if (exists) {
+            const r = enforce(
+              "writeBindingGuard",
               `Anchor Guard (Unread): '${shown}' exists but was never read this session — read it before overwriting.`,
+              event.toolCallId,
             );
+            if (r) return r;
+          }
         }
       }
       // whole file content is in context after a write — every window overlaps it

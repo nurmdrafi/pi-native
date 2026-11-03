@@ -104,15 +104,17 @@ function loadConfigBody(body, env = {}) {
   return runLoader(script, { PGATE_CONFIG: file, ...env });
 }
 
-test("every RULE_IDS key is present in config.json", () => {
+test("every RULE_IDS key is present in config.json (key or ID spelling)", () => {
   const raw = JSON.parse(readFileSync(CONFIG_JSON, "utf8"));
-  const missing = KEYS.map((k) => k.key).filter((k) => !(k in (raw.rules ?? {})));
+  const byId = new Map(KEYS.map((k) => [k.id, k.key]));
+  const present = new Set(Object.keys(raw.rules ?? {}).map((k) => byId.get(k) ?? k));
+  const missing = KEYS.map((k) => k.key).filter((k) => !present.has(k));
   assert.deepEqual(missing, [], `config.json is missing rule keys: ${missing.join(", ")}`);
 });
 
 test("config.json has no unknown rule keys (catches typos)", () => {
   const raw = JSON.parse(readFileSync(CONFIG_JSON, "utf8"));
-  const known = new Set(KEYS.map((k) => k.key));
+  const known = new Set([...KEYS.map((k) => k.key), ...KEYS.map((k) => k.id)]);
   const unknown = Object.keys(raw.rules ?? {}).filter((k) => !known.has(k));
   assert.deepEqual(unknown, [], `config.json has keys with no matching rule: ${unknown.join(", ")}`);
 });
@@ -122,22 +124,44 @@ test("rule IDs are unique", () => {
   assert.equal(new Set(ids).size, ids.length, `duplicate rule IDs: ${ids.join(", ")}`);
 });
 
-test("tracked config.json loads every rule at warn or error", () => {
+// Tracked-policy allowlist: rules the shipped config.json deliberately
+// turns off (user direction — teaching layers whose block tier the user
+// disabled). Everything else ships warn/error; an off outside this list is
+// config drift the test below catches.
+const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "writeBindingGuard"];
+
+test("tracked config.json loads every rule at warn or error (explicit off allowlist)", () => {
   const { config } = loadConfig();
-  const bad = Object.entries(config.severity).filter(([, v]) => v !== "warn" && v !== "error");
-  assert.deepEqual(bad, [], `rules not loaded from config.json: ${bad.map(([k]) => k).join(", ")}`);
+  const bad = Object.entries(config.severity)
+    .filter(([k, v]) => v !== "warn" && v !== "error" && !SHIPPED_OFF.includes(k))
+    .map(([k]) => k);
+  const unfollowed = SHIPPED_OFF.filter((k) => config.severity[k] !== "off");
+  assert.deepEqual([...bad, ...unfollowed], [], `rules not loaded from config.json: ${[...bad, ...unfollowed].join(", ")}`);
 });
 
 test("env override disables exactly one rule", () => {
   const { config } = loadConfig({ PGATE_RERUN_GUARD: "0" });
   assert.equal(config.severity.rerunGuard, "off", "PGATE_RERUN_GUARD=0 should disable rerunGuard");
-  const others = Object.entries(config.severity).filter(([k, v]) => k !== "rerunGuard" && v === "off");
-  assert.deepEqual(others, [], "env override must not affect other rules");
+  const others = Object.entries(config.severity).filter(([k, v]) => k !== "rerunGuard" && v === "off" && !SHIPPED_OFF.includes(k));
+  assert.deepEqual(others, [], "env override must not affect other rules (beyond the shipped off allowlist)");
 });
 
 test("env override accepts 2 to raise a rule to blocking severity", () => {
   const { config } = loadConfig({ PGATE_RERUN_GUARD: "2" });
   assert.equal(config.severity.rerunGuard, "error");
+});
+
+test("rule IDs resolve like keys in config.json rules", () => {
+  const { config } = loadConfig({}, { AG2: "off", WB: "warn", rerunGuard: "off" });
+  assert.equal(config.severity.editRegionGuard, "off", "AG2 should map to editRegionGuard");
+  assert.equal(config.severity.writeBindingGuard, "warn", "WB should map to writeBindingGuard");
+  assert.equal(config.severity.rerunGuard, "off", "plain keys keep working");
+});
+
+test("an unknown ID-like key warns and is ignored (no silent ID typos)", () => {
+  const { config, stderr } = loadConfig({}, { A99: "off" });
+  assert.equal(config.severity.editAnchorGuard, "error", "unrecognized entry must leave the default");
+  assert.match(stderr, /unknown rule "A99"/);
 });
 
 test("rejected scalar falls back to the documented default", () => {

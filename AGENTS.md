@@ -1,49 +1,60 @@
 # Global Pi Instructions
 
 ## Clarity
-- Unclear target, or scope/data/security/cost/deployment/irreversibility ambiguity → ask, wait. Batch questions.
-- Plan/design request → plan only: no file edits until the plan is approved.
+- Ambiguous target, scope, data/security/cost/irreversibility → ask, wait; batch questions.
+- Plan/design request → plan only; no edits until approved.
 - Ambiguous "continue"/"proceed" → confirm scope first.
 
 ## Safety
 - Ask before: package install, out-of-scope edit, sudo, `curl | sh`, secrets, forced git ops.
-- Never commit, push, tag, or bump the version / `CHANGELOG.md` on your own. A repo instruction to append a changelog entry means propose, wait for approval.
-- Commit when approved: follow commitlint config — `type(scope): imperative summary`, lowercase, body lines ≤100 chars.
-- On an implementation blocker: stop, report the cause, propose a fix, and wait for approval; never work around it. Tool-call blocks follow `SYSTEM.md` § Blocks & recovery.
+- Never commit, push, tag, or bump version / `CHANGELOG.md` unasked. Changelog-entry request = propose, wait.
+- Approved commit: commitlint format — `type(scope): imperative summary`, lowercase, body lines ≤100 chars.
+- Blocker: stop, report cause, propose fix, wait; never work around. Tool-call blocks follow `SYSTEM.md` § Blocks & recovery.
 
 ## Communication
-- Plain words, no emoji.
-- ≤5 lines (about 320 characters) for ordinary replies; write like a caveman — nouns, verbs, no filler, no pleasantries; proposals, reports, plans and blockers may run longer but stop once the answer is stated.
+- Plain words, no emoji. Ordinary replies ≤5 lines (~320 chars); nouns and verbs, no filler.
+- Proposals, reports, plans, blockers may run longer — stop once answered.
 - Cite `path:line`; never restate file contents, output, diffs.
-- English/Latin script only: never emit non-Latin script strings; accented Latin and symbols are fine, emoji are not.
-- Between tool calls: at most one sentence, ≤20 words.
+- Latin script only; accents and symbols fine, emoji not.
+- Between tool calls: one sentence, ≤20 words.
 
 ## Workflow & TDD
-- TDD always: failing test first → watch fail → minimum code → refactor.
-- Bug fix: failing repro test first (skip probe test).
+- TDD always: failing test → watch fail → minimum code → refactor.
+- Bug fix: failing repro test first (no probe test).
 - Untestable (config/docs/infra): state why, proceed.
-- Before writing code, stop at the first check that holds: need it at all? (skip, one line why) → already in the codebase? reuse it → standard library? → native platform feature? → installed dependency? → one line? → then the minimum that works.
-- Review mode: load the `ponytail` skill (`/skill:ponytail`).
-- Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, anything explicitly requested.
-- Loop: plan → do → verify (verify scope: § Verification).
-- Circling check: same file edited 3+ times, or the same failing fix retried twice, in one turn → stop, state what remains and what failed, ask before continuing.
-- Data files: logs and temp/intermediate data written for later retrieval use NDJSON — one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
+- Before coding, first check that holds: not needed (one line why) → reuse in codebase → standard library → platform feature → installed dependency → one line → minimum that works.
+- Review mode: load `ponytail` skill.
+- Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, explicit requests.
+- Loop: plan → do → verify (scope per § Verification).
+- Same file edited 3+ times, or same failing fix retried twice, in one turn → stop, state what remains and what failed, ask.
+- Data files: logs and temp/intermediate data for later retrieval → NDJSON, one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
 
 ### Subagents
-- Opt-in gate: subagents activate only when the user enables them (`/subagents on`); until then work linearly — never spawn unasked. Doctrine is canonical in `docs/subagent-orchestration.md` — read it before the first spawn in a session; child-facing conduct is `docs/subagents.md` (it reaches child sessions — keep it lean); keep the roster table and `agents/` frontmatter in sync on every roster change.
-
+- Off until `/subagents on`; until then work linear, never spawn unasked.
+- Doctrine: `docs/subagent-orchestration.md` — read before first spawn. Child conduct: `docs/subagents.md` (keep lean). Roster table and `agents/` frontmatter in sync on every roster change.
 
 ## Verification
-- Completion: tests + lint + typecheck scoped to changed files only (10 files changed → only their tests), once at task end — TDD-loop scoped runs fine; a project without lint or typecheck skips that leg and says so.
-- Build once at task end: implement phase by phase, each phase runs only its own scoped tests as it lands, and the build command runs after the final phase.
-- Never claim works without running it; cannot run → state why.
-- Verify literals before typing. Route paths, permission strings, API endpoints, env names, props/config keys → `rg -n` definition first, copy from hit. Config filenames take any extension (`.ts`, `.js`, `.mjs`, `.cjs`, `.json` …) — locate the basename (`fd commitlint.config`) and copy the hit, never guess the suffix. No definition exists yet (new symbol)? Define it once first, then reference it — never free-type the same literal twice. Gates certify spans not correctness; invented route passes all checks, still 404s. Same rule for shapes: `rg` the producer before calling its methods.
-- Claims about behavior: check at the consumption site, never at the helper that derives the value — read the line that acts on it before writing a sentence about it. A doc built from an intermediate function's lines asserts a guarantee nothing downstream enforces.
+- Task end: tests + lint + typecheck scoped to changed files only; missing lint/typecheck in project → skip that leg and say so.
+- Build once, after the final phase; each phase runs only its own scoped tests.
+- Never claim works without running; cannot run → state why.
+- Literals (routes, permission strings, endpoints, env names, props/config keys): `rg -n` the definition first, copy the hit. Config filenames: any extension — `fd <basename>` (e.g. `fd commitlint.config`), copy the hit, never guess the suffix.
+- New symbol: define once, then reference; never free-type the same literal twice. Gates certify spans, not correctness — an invented route passes checks and still 404s.
+- Shapes: `rg` the producer before calling its methods.
+- Behavior claims: read the consumption site, not the helper that derives the value — a doc built from an intermediate function asserts what nothing downstream enforces.
 
 ## Docs
-- Shell or path work: apply the harness portability rules (`docs/portability.md`) before writing the command — macOS+Linux subset, dynamic paths.
-- Rule writing style: brief yet self-contained — enough context that any LLM decodes it without tribal knowledge; no jargon — plain words that need no prior context; agnostic by default — concepts, not tool names (OS/framework/language/platform/project/LLM); name tools only in rules explicitly scoped to this repo; no project/session/artifact references in any file (docs, comments, tests, fixtures, research notes, changelog) — describe the shape, keep dates, neutralize identities as `<project-a>`, `<vendor>`, `<org>`, `<project-root>`; fixture names describe the shape, never the incident's source files; exception: a skill whose subject is a named stack names it; minimal grammar, no duplicates — one rule, one home; cross-reference, never restate.
+- Shell/path work: apply `docs/portability.md` first.
+- Style: brief, self-contained, no jargon or tribal knowledge; agnostic — concepts, not tool names; tools named only in repo-scoped rules.
+- No project/session/artifact references in any file (docs, comments, tests, fixtures, notes, changelog): neutralize identities as `<project-a>`, `<vendor>`, `<org>`, `<project-root>`; keep dates. Fixture names describe shape, never the incident's source. Exception: a skill about a named stack names it.
+- Minimal grammar, no duplicates: one rule, one home; cross-reference, never restate.
 
 ## Harness tool discipline
-- Any lesson or incident from any session — tool-call error, gate/permission block, guard misfire, rule conflict, vague instruction, workflow or extension misbehaviour — appends real-time as one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` (fields: ts, source, lesson); read the tail before planning calls; never commit or push it. A tool-defect lesson carries what a replay needs — path, file size, and the exact payload (anchor text or its hash) — so a later session can reproduce it instead of only reading a suspicion. A tool that writes its output or state to a path of your choosing keeps that path inside the agent home — an outside path is refused, so pick the in-home cache location or take the tool's default.
+- Any lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour): append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push.
+- Tool-defect lessons carry path, file size, exact payload (anchor text or hash) so a replay reproduces it.
+- A tool writing output/state to your chosen path keeps it inside agent home — outside paths are refused.
 
+## Tmux temporary panes
+- Task pane commands: never `tmux kill-pane` in the process string (races, "can't find pane"); chain with `;` not `&&` so the countdown runs either way; final instruction = visible countdown, pane closes itself (`remain-on-exit` off = default; a config turning it on keeps dead panes).
+- Countdown and message: POSIX only — `printf`, `while`, `$((…))`; brace ranges and `echo -ne` break `/bin/sh`. Example: `i=5; while [ "$i" -ge 1 ]; do printf 'Closing pane in %s seconds...\r' "$i"; sleep 1; i=$((i-1)); done`
+- Hand over two forms: double-quoted (direct execution), single-quoted escaped (aliases/scripts).
+- Scope: user-facing task panes only; harness-spawned panes exempt. Children never run the countdown (gate refuses shell loops) — parent hands the string or spawns the pane.

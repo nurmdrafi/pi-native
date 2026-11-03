@@ -6,6 +6,7 @@
  * correctness. Mirrors research 2026-10-25: Claude Code's Edit enforces
  * read-file + exact-match + uniqueness, but no region check.
  * Run: node tests/pgate-region-off.test.mjs  (env set BEFORE the import). */
+process.env.PGATE_CONFIG = new URL("./fixtures/rules-calibrated.json", import.meta.url).pathname;
 process.env.PGATE_EDIT_REGION_GUARD = "0";
 
 import { mkdtempSync, writeFileSync } from "node:fs";

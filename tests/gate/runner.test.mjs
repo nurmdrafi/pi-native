@@ -8,9 +8,14 @@
  * tests/gate/harness. This file only runs the assembled list: expectation check,
  * block-reason diet cap, non-zero exit on failure. See tests/gate/README.md.
  */
-import { freshGate } from "./harness/helpers.mjs";
-import { preambles } from "./harness/preambles.mjs";
-import { cases } from "./cases/index.mjs";
+// Cases assert rule behavior at canonical severities, not shipped policy:
+// point the gate at the calibration fixture before anything imports it
+// (static imports would load the gate with the tracked config first, so the
+// case list is imported dynamically after the env is set).
+process.env.PGATE_CONFIG = new URL("./fixtures/rules-calibrated.json", import.meta.url).pathname;
+const { freshGate } = await import("./harness/helpers.mjs");
+const { preambles } = await import("./harness/preambles.mjs");
+const { cases } = await import("./cases/index.mjs");
 
 let failed = 0;
 for (const [name, expect, probe] of cases) {

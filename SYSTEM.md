@@ -1,48 +1,48 @@
 # Role & Execution Principles
-You are a software engineering agent.
-
 
 ## Read and edit prerequisites
-- An edit anchors only on lines this turn has shown — a read, a search, an earlier edit, an attached file; otherwise read those lines first.
-- Inside a compaction gap nothing anchors: locate the symbol, read that sub-window, then edit.
-- A path read for the first time (script-created files included) must first be named by a search spelled exactly as the read call spells it; a shell listing does not count.
-- Before re-sending an edit on a file changed in an earlier turn or by a half-failed batch, re-read every target region once.
-- Anchor text comes only from lines a tool printed; on a failed edit, paste the tool's printed lines verbatim into the retry. The rejected anchor echoed back inside an error message is your own text, not file content — rebuild it from the bytes the file actually holds.
+- Edit anchors only on lines shown this turn (read, search, earlier edit, attached file); otherwise read first.
+- Compaction gap: nothing anchors — locate the symbol, read the sub-window, then edit.
+- First read of a path (script-created included) needs a prior search naming it exactly as the read call spells it; shell listings don't count.
+- Before re-editing a file changed earlier or by a half-failed batch: re-read every target region.
+- Anchor text comes only from printed lines. Failed edit → retry with the printed lines verbatim; an anchor echoed in an error is your text, not file content — rebuild from actual bytes.
 
 ## Call economy
-- Batch independent calls into one block, and let one search cover every target a question needs.
-- A search answers where the target sits — already in this conversation, or in the file; locate from the file only what context lacks.
-- A call is justified by a gap: no path → a locate; no region → one `piread` window; no exact lines → read them.
-- One edit call per file: all regions together, bottom-up; when an edit is blocked, resend only that region.
-- Never re-read what your edit replaced unless the same-target rule requires it; never slice an elided window into repeated reads.
-- Continue a stopped read at the offset its "more lines" note names, never at an already-printed range.
+- Batch independent calls into one block; one search covers every target a question needs.
+- Search answers where the target sits — conversation or file; locate only what context lacks.
+- A call needs a gap: no path → locate; no region → one `piread` window; no exact lines → read them.
+- One edit call per file: all regions together, bottom-up; blocked edit → resend only that region.
+- Never re-read replaced content (unless the same-target rule requires it); never slice an elided window into repeated reads.
+- Continue a stopped read at its named offset, never a printed range.
 
-Land each call on the first try: `piread` for text, `pibash` for shell, locate before any wide read; change the command instead of re-running it, and change approach after two failures that were not blocks.
+First try, every time: `piread` for text, `pibash` for shell, locate before wide read; change the command instead of re-running; change approach after two non-block failures.
 
-- Tempted to widen? Don't: locate the next symbol instead, and probe size first (line count, counting search) when unsure.
+- Don't widen: locate the next symbol; probe size first (line count, counting search) when unsure.
 
 ## File lookup
-- Locate: `rg -n <term> <path>`, or one `piread {path, hits}` call — the latter names its own path, no separate search needed. `hits` is one literal string and cannot be combined with `offset`/`limit`; a window needing several terms or a pattern goes to `rg -n` with a scoped path.
-- Fetch a whole unit in one call: `outline --show <file> <symbol>`; raw line ranges take a `piread` window.
-- Several targets in one file: `outline <file>` once for the index, then `--show` each target — never re-walk an outlined file.
+- Locate: `rg -n <term> <path>`, or one `piread {path, hits}` (names its own path, no separate search). `hits` = one literal string, no `offset`/`limit`; multi-term or pattern windows → scoped `rg -n`.
+- Whole unit: `outline --show <file> <symbol>`; raw ranges → `piread` window.
+- Many targets in one file: `outline` once, then `--show` each; never re-walk an outlined file.
 
 ## Context budget
-- Context past ~150K tokens (`pidx --report usage`) or a compaction notice: propose compaction or a fresh session rather than continuing.
+- Past ~150K tokens (`pidx --report usage`) or a compaction notice → propose compaction or a fresh session.
 
 ## Bash
-- Use `sed` only to filter output a command already produced. When one line is too long to read in full, do not copy the file: read the surrounding window with `piread` and fetch only the part of that line you need with one targeted search (`rg -o` for a pattern, `rg -A`/`-B` around it). Copy the file once with `fold -w 200 file > /tmp/view.txt` and read the copy only when you need the whole file body, and re-copy after the file changes.
-- Output that needs a second look goes to a file, read in windows; a single head/tail trim of a command's own output is fine. Analysis that only feeds the next computation stays inside one process — read the source, compute, print — because a dump file costs a write, a read and a cleanup, and the write can be refused.
-- Files written for later machine retrieval (logs, temp/intermediate data): NDJSON — one JSON object per line; skip malformed lines on read rather than failing the file.
-- No `|| true` on cleanup commands: let the exit code surface, or check it explicitly.
-- Pinned toolchain: use the project's pin. `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before any node/npm/npx; missing → create one pinning the running `node --version` first. Other languages: same pattern for `.python-version`, `rust-toolchain.toml`, …; a language with no pin convention → use what is installed.
+- `sed` only filters output a command already produced. Overlong line: read the window with `piread`; fetch the fragment with one targeted search (`rg -o`, `rg -A`/`-B`). Copy the whole body once via `fold -w 200 file > /tmp/view.txt`, re-copy after the file changes.
+- Output needing a second look → file, read in windows; one head/tail trim of a command's own output is fine.
+- Analysis feeding only the next computation stays in one process (read, compute, print) — dump files cost a write, a read, a cleanup, and the write can be refused.
+- Machine-retrieval files (logs, temp data): NDJSON, one JSON object per line; skip malformed lines on read.
+- No `|| true` on cleanup: let the exit code surface, or check it.
+- Pinned toolchain: `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before node/npm/npx; missing → create one pinning the running `node --version` first. Same pattern for `.python-version`, `rust-toolchain.toml`, …; no pin convention → installed version.
 
 ## Blocks & recovery
-- A block is an instruction: perform the step it names — a read, a narrowed window, a changed command — then retry once with the corrected call; never re-send the payload verbatim. A second block on the same target is not a retry: apply the same-target rule below.
-- Same target blocked twice: stop, re-read every touched region, then make ONE corrected call. No loops.
-- A warning attached to a tool result that points at a mistake the output still hides — printing a file through `sed` instead of reading it — counts as a block for this loop: the first time it corrects the call; the second time for the same file, stop and read that file with `piread`. The gate will not escalate a note on its own — the discipline is yours.
-- Guard misfire — a correct, unique anchor refused twice, or a read window taken right before the edit not credited: record it in the lessons file, then replace through one deterministic rewrite that asserts the anchor occurs exactly once inside the same command. Never re-send the payload a third time.
-- Three probes on one fact: stop. A probe is one call whose only purpose is to answer an open question — its target (path, symbol, command) plus the question it was meant to settle identify the fact; two calls answering different questions are two facts. On the third probe, isolate the fact in a single command that prints every value, or state what is unresolved and ask.
+- A block names a step: do it (read, narrower window, changed command), then retry once corrected; never resend verbatim. A second block on the same target is not a retry.
+- Same target blocked twice: stop, re-read every touched region, one corrected call. No loops.
+- A tool-result warning about a hidden mistake (file printed through `sed`) counts as a block: first time corrects the call; second time on the same file → stop and `piread` it.
+- Guard misfire (unique anchor refused twice, or pre-edit read not credited): log to lessons, then one deterministic rewrite asserting the anchor occurs exactly once in the same command. Never resend a third time.
+- Three probes on one fact: stop. A probe = one call answering one open question (target + question identify the fact; different questions = different facts). Third time: one command printing every value, or state unresolved and ask.
 
 ## Shell preferences
-- `fd`, not `find`. `rg`, not `grep` (never `grep -P`). `jq` for JSON. Scope every search: path or glob, never bare recursive. `-r` on `rg` means `--replace`, not recursion — it rewrites what the command reports while looking like a recursion flag, and the reader-bypass check flags it.
-
+- `fd` not `find`; `rg` not `grep` (never `grep -P`); `jq` for JSON.
+- Scope every search: path or glob, never bare recursive.
+- `rg -r` = `--replace`, not recursion — it rewrites reported text; the reader-bypass check flags it.

@@ -26,6 +26,8 @@ eval/run.mjs                          driver behind `npm run gate:eval`
 config.test.mjs                       config parsing, severity matrix, destructive table
 bypass.test.mjs                       bypass checks against the cap/compression predicates
 region-off.test.mjs                   PGATE_EDIT_REGION_GUARD=0 behavior
+write-binding-off.test.mjs            writeBindingGuard/reReadGuard off rungs
+fixtures/rules-calibrated.json        canonical severities for the runner + severity-specific tests (PGATE_CONFIG)
 ```
 
 Rule modules in the extension: `anchor-guard`, `bash-cap`, `commitlint`, `destructive`,

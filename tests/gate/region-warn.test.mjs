@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+process.env.PGATE_CONFIG = new URL("./fixtures/rules-calibrated.json", import.meta.url).pathname;
 process.env.PGATE_EDIT_REGION_GUARD = "warn";
 
 const { freshGate } = await import("./harness/stub.mjs");

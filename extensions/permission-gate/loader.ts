@@ -11,7 +11,8 @@
  * deciding what to switch off, so keys are descriptive (`rerunGuard`) rather
  * than the terse source cross-reference (`R10`). The IDs remain in the module
  * headers and the README rule table for grepping; `RULE_IDS` below is the
- * single place the two vocabularies meet.
+ * single place the two vocabularies meet. Either spelling is accepted in
+ * `rules` (`BY_ID` resolves IDs); env overrides stay key-named.
  *
  * Precedence (highest first):
  *   1. `PGATE_<SCREAMING_SNAKE_KEY>=0|false` env var, e.g. `PGATE_RERUN_GUARD=0`
@@ -39,6 +40,7 @@ import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
 export const RULE_IDS = {
   editAnchorGuard: "AG",
   editRegionGuard: "AG2",
+  writeBindingGuard: "WB",
   reReadGuard: "R1",
   reReadConsume: "R1x",
   largeReadGuard: "R1b",
@@ -67,6 +69,13 @@ export const RULE_IDS = {
   phaseNudge: "PH1",
   outputScrub: "OS",
 } as const;
+
+/** Rule ID → config key (the inverse of RULE_IDS): `config.json` accepts
+ * either spelling in `rules` — keys read naturally (`rerunGuard`), IDs grep
+ * against the rule tables in index.ts and extensions/README.md (`R10`). */
+const BY_ID = Object.fromEntries(
+  Object.entries(RULE_IDS).map(([k, id]) => [id, k]),
+) as Record<string, RuleKey>;
 
 export type RuleKey = keyof typeof RULE_IDS;
 
@@ -214,12 +223,14 @@ function loadGateConfig(): GateConfig {
     warn("`rules` must be an object — every rule stays at its default (on)");
   } else if (rawRules) {
     for (const [key, value] of Object.entries(rawRules as Record<string, unknown>)) {
-      if (!(key in RULE_IDS)) {
-        warn(`unknown rule "${key}" in config.json — ignored (see RULE_IDS in loader.ts for valid keys)`);
+      // key or ID ("editRegionGuard" or "AG2") — both address the same rule
+      const ruleKey = (key in RULE_IDS ? key : BY_ID[key]) as RuleKey | undefined;
+      if (ruleKey === undefined) {
+        warn(`unknown rule "${key}" in config.json — ignored (see RULE_IDS in loader.ts for valid keys and IDs)`);
         continue;
       }
       const b = asSeverity(value, `rules.${key}`);
-      if (b !== undefined) rules[key as RuleKey] = b;
+      if (b !== undefined) rules[ruleKey] = b;
     }
   }
 
