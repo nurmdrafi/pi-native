@@ -19,7 +19,9 @@
  * - the ask_question notify (deliverPendingQuestion) rides the funnel: one
  *   attempt per question, one notice when the channel is dead;
  * - diagnostics go to the host UI notify channel when a UI exists — never to
- *   stderr, which corrupts the terminal input line.
+ *   stderr, which corrupts the terminal input line; before any context
+ *   answers (or on a stale one) the diagnostic is held in a queue, not
+ *   printed.
  */
 import "./test-env.ts";
 
@@ -85,7 +87,8 @@ describe("sendMessageContained dead-channel funnel", () => {
       );
     }
     await flushMicrotasks();
-    const lines = err.mock.calls.map((c) => c.arguments.join(" "));
+    assert.equal(err.mock.calls.length, 0, "no stderr while no context has answered");
+    const lines = __test__.pendingDiagnostics();
     assert.equal(lines.filter((l) => DEAD_LINE.test(l)).length, 1);
     assert.equal(pi.attempts(), 1);
   });
@@ -100,7 +103,8 @@ describe("sendMessageContained dead-channel funnel", () => {
         undefined,
       );
     }
-    const lines = err.mock.calls.map((c) => c.arguments.join(" "));
+    assert.equal(err.mock.calls.length, 0, "no stderr while no context has answered");
+    const lines = __test__.pendingDiagnostics();
     assert.equal(lines.filter((l) => DEAD_LINE.test(l)).length, 1);
     assert.equal(pi.attempts(), 1);
   });
@@ -140,12 +144,13 @@ describe("sendMessageContained dead-channel funnel", () => {
     assert.ok(notified[0]!.startsWith("error:"), "severity is error");
   });
 
-  it("a stale UI context whose hasUI read throws falls back to stderr instead of escaping", async () => {
+  it("a stale UI context whose hasUI read throws holds the diagnostic instead of escaping", async () => {
     // After a reload the old instance's watchers keep polling a torn-down
     // session: reading hasUI on the stale context throws (same shape as the
     // updateWidget guard). That throw must not turn a diagnostic into an
-    // unhandled rejection the host prints over the input editor — stderr is
-    // the last resort.
+    // unhandled rejection the host prints over the input editor — and the
+    // host TUI may still be alive, so the diagnostic is held for the next
+    // context rather than raw-printed to stderr.
     __test__.setUiContext({
       get hasUI() {
         throw new Error("stale context");
@@ -158,8 +163,11 @@ describe("sendMessageContained dead-channel funnel", () => {
       undefined,
     );
     await flushMicrotasks();
-    const lines = err.mock.calls.map((c) => c.arguments.join(" "));
-    assert.equal(lines.filter((l) => DEAD_LINE.test(l)).length, 1);
+    assert.equal(err.mock.calls.length, 0);
+    assert.equal(
+      __test__.pendingDiagnostics().filter((l) => DEAD_LINE.test(l)).length,
+      1,
+    );
   });
 });
 
@@ -198,7 +206,8 @@ describe("deliverPendingQuestion rides the funnel", () => {
       __test__.deliverPendingQuestion(running);
       await flushMicrotasks();
 
-      const lines = err.mock.calls.map((c) => c.arguments.join(" "));
+      assert.equal(err.mock.calls.length, 0);
+      const lines = __test__.pendingDiagnostics();
       assert.equal(pi.attempts(), 1);
       assert.equal(lines.filter((l) => DEAD_LINE.test(l)).length, 1);
     } finally {

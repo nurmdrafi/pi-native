@@ -34,10 +34,14 @@ const savedExtraExt = process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
 
 beforeEach(() => {
   delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
+  __test__.resetChannelState();
+  __test__.setUiContext(null);
 });
 
 afterEach(() => {
   mock.restoreAll();
+  __test__.resetChannelState();
+  __test__.setUiContext(null);
   if (savedExtraExt === undefined) delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
   else process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = savedExtraExt;
 });
@@ -61,11 +65,21 @@ function baseLoadout() {
   };
 }
 
-/** Capture console.error lines emitted while `run` executes. */
+/** Capture console.error lines emitted while `run` executes. Diagnostics
+ *  reported while no UI context exists are held in a queue, not printed —
+ *  materialize them the way a confirmed-headless context would so the
+ *  assertions below still see exactly what a headless run would print. */
 function captureStderr(run: () => void): string[] {
   const err = mock.method(console, "error", () => {});
-  run();
-  return err.mock.calls.map((c) => c.arguments.join(" "));
+  try {
+    run();
+    if (__test__.pendingDiagnostics().length > 0) {
+      __test__.setUiContext({ hasUI: false } as never);
+    }
+    return err.mock.calls.map((c) => c.arguments.join(" "));
+  } finally {
+    err.mock.restore();
+  }
 }
 
 describe("resolveExtraExtensions", () => {

@@ -1235,30 +1235,69 @@ let channelDead = false;
  *  extension lands in the TUI input editor region where the user is typing
  *  (identically on mac and Linux). Route every diagnostic through the host
  *  UI notify channel, which the TUI renders without touching the input line;
- *  fall back to stderr only when no UI exists (headless, print mode, tests). */
+ *  before any context answers (or on a stale one) the message waits in a
+ *  queue — stderr only for a context that confirms no UI exists. */
 /** Every diagnostic text already emitted by this module instance. A repeated
  * condition (a persistent typo, a dead extension) otherwise repaints the TUI
  * input line on every spawn and resume; one notice per distinct text is enough
  * for the user to act on. Reload resets the set. */
 const reportedDiagnostics = new Set<string>();
 
-function reportDiagnostic(message: string): void {
-  if (reportedDiagnostics.has(message)) return;
-  reportedDiagnostics.add(message);
+/** Diagnostics that arrived before any UI context existed (module load,
+ *  extension reload) or while the previous context was torn down. stderr
+ *  interleaves with the TUI input editor where the user is typing, so a
+ *  diagnostic must never raw-print while an interactive session may still
+ *  be alive: hold it for the next context — a UI context flushes it inline
+ *  through notify, a confirmed-headless context flushes it to stderr. */
+const pendingDiagnostics: string[] = [];
+const PENDING_DIAGNOSTICS_MAX = 50;
+
+function enqueueDiagnostic(message: string): void {
+  pendingDiagnostics.push(message);
+  if (pendingDiagnostics.length > PENDING_DIAGNOSTICS_MAX) pendingDiagnostics.shift();
+}
+
+/** Route one diagnostic to its surface: inline notify when a UI exists,
+ *  held in the queue while no context has answered, stderr only once a
+ *  context confirms no UI exists (no TUI to corrupt). */
+function routeDiagnostic(message: string): void {
+  let sawUI = false;
   try {
     const ui = latestCtx?.ui as { notify?: (text: string, severity?: string) => void } | undefined;
     if (latestCtx?.hasUI && typeof ui?.notify === "function") {
       ui.notify(message, "error");
       return;
     }
+    sawUI = latestCtx?.hasUI === true;
   } catch {
-    // Both UI-side failures land here: a stale context throws on the hasUI
-    // read (a session torn down right after a headless run), and a broken
-    // notify throws on the call. Neither may turn the diagnostic into an
-    // unhandled rejection the host prints over the input editor — fall
-    // through to stderr.
+    // A torn-down context throws on the hasUI read (a session reaped right
+    // after a run). The host TUI may still be alive — hold the diagnostic
+    // for the next context instead of raw-printing over the input editor.
+    enqueueDiagnostic(message);
+    return;
+  }
+  if (latestCtx == null || sawUI) {
+    // No context yet (before session_start, or after an extension reload),
+    // or a live UI that cannot take notifications: hold, never stderr on
+    // the strength of a context's absence.
+    enqueueDiagnostic(message);
+    return;
   }
   console.error(message);
+}
+
+/** Re-route every held diagnostic through the current context — called when
+ *  a context arrives (session_start, test seam). */
+function flushPendingDiagnostics(): void {
+  if (pendingDiagnostics.length === 0) return;
+  const held = pendingDiagnostics.splice(0, pendingDiagnostics.length);
+  for (const message of held) routeDiagnostic(message);
+}
+
+function reportDiagnostic(message: string): void {
+  if (reportedDiagnostics.has(message)) return;
+  reportedDiagnostics.add(message);
+  routeDiagnostic(message);
 }
 
 /** Disarm this instance's 1s timers and abort its poll loops — the same
@@ -1404,9 +1443,10 @@ const RUNNING_CHILDREN_COUNT_KEY = Symbol.for("pi-subagents/running-children-cou
 let latestCtx: ExtensionContext | null = null;
 
 /** Test seam: install a fake host context (UI notify channel) for
- *  diagnostics-routing tests. */
+ *  diagnostics-routing tests; a context arriving flushes held diagnostics. */
 function setLatestCtxForTest(ctx: ExtensionContext | null): void {
   latestCtx = ctx;
+  flushPendingDiagnostics();
 }
 /** Latest ExtensionAPI, used to deliver ask_question notifications from the watcher. */
 let latestPi: ExtensionAPI | null = null;
@@ -1423,6 +1463,7 @@ function resetChannelStateForTest(): void {
   latestPi = null;
   channelDead = false;
   reportedDiagnostics.clear();
+  pendingDiagnostics.length = 0;
   if (statusInterval) {
     clearInterval(statusInterval);
     statusInterval = null;
@@ -1610,6 +1651,9 @@ function updateWidget() {
  */
 function armWidgetForSession(ctx: ExtensionContext): void {
   latestCtx = ctx;
+  // A context has answered — diagnostics held while none existed go inline
+  // (UI) or to stderr (headless) now, never before.
+  flushPendingDiagnostics();
   if (runningSubagents.size > 0) startWidgetRefresh();
 }
 
@@ -2579,6 +2623,7 @@ export const __test__ = {
   deliverPendingQuestion,
   setLatestPi: setLatestPiForTest,
   setUiContext: setLatestCtxForTest,
+  pendingDiagnostics: (): string[] => [...pendingDiagnostics],
   resetChannelState: resetChannelStateForTest,
   startWidgetRefresh,
   startStatusRefresh,
@@ -4127,6 +4172,19 @@ async function watchSubagent(
         sessionFile,
       };
     }
+    // A pane-not-found throw is the pane dying under the watcher — the poll
+    // loop's "gone" contract arriving by a path the loop did not classify
+    // (a mid-extraction capture, a racing kill). Handle it internally with
+    // the same synthesized loss the loop delivers; the multiplexer's raw
+    // wording never reaches a row or the model context.
+    if (isPaneNotFound(err)) {
+      try {
+        closeSurface(running.surface);
+      } catch {}
+      runningSubagents.delete(running.id);
+      return synthesizeLostResult(running, "pane_lost");
+    }
+    const failure = describeTmuxFailure(err, `pane ${running.surface}`);
     try {
       closeSurface(running.surface);
     } catch {}
@@ -4135,10 +4193,10 @@ async function watchSubagent(
     return {
       name,
       task,
-      summary: `Subagent error: ${err?.message ?? String(err)}`,
+      summary: `Subagent error: ${failure}`,
       exitCode: 1,
       elapsed: Math.floor((Date.now() - startTime) / 1000),
-      error: err?.message ?? String(err),
+      error: failure,
     };
   }
 }
