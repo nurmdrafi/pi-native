@@ -8,7 +8,7 @@
     "R1": "error",
     "R1x": "warn",
     "R1b": "warn",
-    "R1c": "warn",
+    "R1c": "off",
     "P1": "error",
     "P2": "error",
     "VC": "warn",

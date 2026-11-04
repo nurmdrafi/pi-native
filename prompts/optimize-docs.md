@@ -1,5 +1,5 @@
 ---
-description: Trim markdown — cut jargon and fluff, keep rules intact
+description: Optimize and trim docs — tighten wording, cut jargon and fluff, keep rules intact
 argument-hint: "<path | @file | harness.ndjson>"
 ---
 
