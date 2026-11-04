@@ -1,6 +1,6 @@
 # Session boundaries — expiry, guards, identity switch, third-party failures
 
-Where a session may end, and what is not allowed to end it. Read with `token-plumbing.md` (holder mechanics) and `route-protection.md` (routes and redirects).
+Where a session may end, and what is not allowed to end it. Read with [token-plumbing.md](token-plumbing.md) (holder mechanics) and [route-protection.md](route-protection.md) (routes and redirects).
 
 ## Expiry derives from the IdP token, never from a static duration
 

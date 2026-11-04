@@ -139,4 +139,4 @@ Even after acceptance, decide per question: browser or terminal. Test: **would u
 
 UI topic ≠ automatically visual question. "What does personality mean here?" = conceptual → terminal. "Which wizard layout works better?" = visual → browser.
 
-Companion accepted → read `skills/brainstorming/references/visual-companion.md` before proceeding.
+Companion accepted → read [skills/brainstorming/references/visual-companion.md](references/visual-companion.md) before proceeding.

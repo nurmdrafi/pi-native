@@ -11,7 +11,7 @@ NextAuth v4 (next-auth@4.x) credentials architecture for Next.js App Router app,
 ## Entry point
 
 - New integration — implementation sequence below, steps 1–5
-- Migrating legacy custom auth (localStorage tokens, cookie-presence middleware, post-login side-effect chains) — `references/migration.md` first, then sequence
+- Migrating legacy custom auth (localStorage tokens, cookie-presence middleware, post-login side-effect chains) — [references/migration.md](references/migration.md) first, then sequence
 
 ## Architecture at a glance
 
@@ -49,11 +49,11 @@ File map (every piece exists for a reason; skip none):
 
 ## Implementation sequence (new integration)
 
-1. NextAuth setup — `lib/auth/options.ts` + route handler + env (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`). `references/nextauth-setup.md`
-2. Route protection — `lib/auth/routes.ts` + `proxy.ts`. `references/route-protection.md`
-3. Token plumbing — `lib/auth/session.ts`, `SessionTokenSync`, `AuthProvider`, base query. `references/token-plumbing.md`; expiry, guards and identity switch: `references/session-boundaries.md`
-4. Flows — login client, register auto-signIn, logout helper: `references/login-flows.md`
-5. Optional — OTP registration/forgot-password: `references/otp-flows.md`; Google/Facebook exchange: `references/social-login.md`
+1. NextAuth setup — `lib/auth/options.ts` + route handler + env (`NEXTAUTH_SECRET`, `NEXTAUTH_URL`). [references/nextauth-setup.md](references/nextauth-setup.md)
+2. Route protection — `lib/auth/routes.ts` + `proxy.ts`. [references/route-protection.md](references/route-protection.md)
+3. Token plumbing — `lib/auth/session.ts`, `SessionTokenSync`, `AuthProvider`, base query. [references/token-plumbing.md](references/token-plumbing.md); expiry, guards and identity switch: [references/session-boundaries.md](references/session-boundaries.md)
+4. Flows — login client, register auto-signIn, logout helper: [references/login-flows.md](references/login-flows.md)
+5. Optional — OTP registration/forgot-password: [references/otp-flows.md](references/otp-flows.md); Google/Facebook exchange: [references/social-login.md](references/social-login.md)
 
 ## Hard rules (each fixes a real observed bug)
 
@@ -63,7 +63,7 @@ File map (every piece exists for a reason; skip none):
 - All backend auth calls inside `authorize()`, server-side. Client-side post-login fetch chains (profile fetch → set-cookie → redirect) = root cause of no-redirect bug. One `signIn()` = one response = one cookie.
 - `await hydrateSessionToken()` after every successful `signIn` (login, register auto-login, any programmatic sign-in) before any authorized request or redirect. `signIn({redirect:false})` resolves *before* `useSession` cache updates; stale empty token → anonymous requests → 401 → logout loop.
 - Redirect = awaited `router.push(callbackUrl)` in the component — never `window.location.href` in an API layer, never conditional on profile fetch. Sanitize `callbackUrl` to same-origin relative path first — query param, user-controllable; `router.push("https://evil.com")` = open redirect.
-- Session cookie maxAge = backend token `exp` (decode with `jose`) — always, no fallback. `authorize()` rejects tokens without usable expiry (`'Login token has no expiry'`); guessed lifetime (fixed 24h etc.) kills live sessions early or leaves expired ones minted. Custom `jwt.encode` override, not default. Derive it per encode (`backendExp - now`): next-auth re-encodes on every session read, so a login-time duration slides expiry — and set `session.expires` from `backendExp` so the client sees the same end. `references/session-boundaries.md`
+- Session cookie maxAge = backend token `exp` (decode with `jose`) — always, no fallback. `authorize()` rejects tokens without usable expiry (`'Login token has no expiry'`); guessed lifetime (fixed 24h etc.) kills live sessions early or leaves expired ones minted. Custom `jwt.encode` override, not default. Derive it per encode (`backendExp - now`): next-auth re-encodes on every session read, so a login-time duration slides expiry — and set `session.expires` from `backendExp` so the client sees the same end. [references/session-boundaries.md](references/session-boundaries.md)
 - API guard: `getToken()` + strict `backendExp <= now`. The middleware 120s buffer is a navigation fail-safe only — never copied into the API layer.
 - 401 with no bearer attached = session not hydrated, not dead — do not sign out.
 - A proxy for a second service never forwards that service's 401/403 (map to `502` + one generic message from one shared constant); other statuses pass through so the toast keeps the real reason. A third-party auth failure is a third-party problem: toast it and alert ops — never `signOut`, never a permission error on the app account.

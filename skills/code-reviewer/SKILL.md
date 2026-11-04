@@ -49,4 +49,4 @@ Read the whole function around a hunk when the hunk alone doesn't decide a findi
 
 Report findings at/above `medium` (CI's default threshold), high first: `file:line`, title, detail, suggestion; end with the summary. Fix each finding, re-run this review on the same range, repeat until zero findings at/above threshold — then push. Below-threshold findings: list once, fix only if cheap.
 
-CI files findings without verifying them — verify locally ([finding-verification.md](references/finding-verification.md)) so you fix real bugs, not false positives.
+CI files findings without verifying them — verify locally via [references/finding-verification.md](references/finding-verification.md) so you fix real bugs, not false positives.

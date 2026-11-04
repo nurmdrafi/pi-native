@@ -105,7 +105,7 @@ done
 
 ## Standard recon (always start here)
 
-One eval, one stable shape — URL, title, readyState, trapped errors, console errors, interactive elements, exposed app state. Install error collector first (`references/debugging.md`) so error fields populate:
+One eval, one stable shape — URL, title, readyState, trapped errors, console errors, interactive elements, exposed app state. Install error collector first via [debugging.md](debugging.md) so error fields populate:
 
 ```javascript
 (() => JSON.stringify({

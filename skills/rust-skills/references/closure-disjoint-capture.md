@@ -77,7 +77,7 @@ fn demo_bind_first() {
 - **Edition 2021 rule:** closures capture the *minimal* path used — `foo.bar` rather than `foo`. This reduces spurious borrow conflicts.
 - **`move` captures the whole named place.** Writing `move || self.field` inside a method moves `*self`, not just `self.field`. Bind to a local to narrow the capture.
 - **Copy types** (integers, booleans) are copied into the closure rather than moved, so the original remains valid even with `move`.
-- **Borrow by reference first:** only escalate to `move` when the closure must outlive the scope (see [closure-move-capture](closure-move-capture.md)).
+- **Borrow by reference first:** only escalate to `move` when the closure must outlive the scope — see [closure-move-capture.md](closure-move-capture.md).
 
 ## See Also
 

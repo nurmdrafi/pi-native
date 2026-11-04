@@ -30,8 +30,8 @@ Before any UI: **extending** existing design system or **creating from scratch**
 
 Detect UI stack from `package.json` + existing components; express design through that stack's idioms — never impose foreign style system. Read the matching reference BEFORE writing component code:
 
-- **Ant Design**: `references/ant-design.md` — version matrix (v4/v5/v6), CLI-first API lookup (`npx @ant-design/cli info`), theming ladder, form/table logic guards, v6 renames.
-- **shadcn/ui + Tailwind**: `references/shadcn-tailwind.md` — `components.json` detection, project context via CLI, Base UI vs Radix primitives, Tailwind v3/v4 token detection, composition rules.
+- **Ant Design**: [references/ant-design.md](references/ant-design.md) — version matrix (v4/v5/v6), CLI-first API lookup (`npx @ant-design/cli info`), theming ladder, form/table logic guards, v6 renames.
+- **shadcn/ui + Tailwind**: [references/shadcn-tailwind.md](references/shadcn-tailwind.md) — `components.json` detection, project context via CLI, Base UI vs Radix primitives, Tailwind v3/v4 token detection, composition rules.
 - **Vanilla/other**: no established idioms → full aesthetic freedom below.
 - Mixed stacks: read both references; check Tailwind reset against AntD styles before mixing.
 - Existing-UI polish/audit/critique (not new build) → impeccable skill: `/skill:impeccable <command>`; full source clone `git/impeccable`.
@@ -44,7 +44,7 @@ Match existing patterns before introducing new ones. New framework = new file un
 - Fetch-on-selection effects: staleness guard + `.catch` + clear list while refetching (out-of-order responses never repaint old entity's data).
 - Bulk-edit forms: open empty or track touched fields — pre-filled field makes every `values.x ?? o.x` fallback dead code.
 - Conditional visibility: check polarity + DEFAULT state of every span/collapse condition before shipping.
-- Framework-specific guards (AntD forms/tabs/tables): `references/ant-design.md`.
+- Framework-specific guards (AntD forms/tabs/tables): [references/ant-design.md](references/ant-design.md).
 
 ### Runtime robustness + errors (new UI ships this)
 
@@ -59,12 +59,12 @@ Match existing patterns before introducing new ones. New framework = new file un
 - Never swallow: no empty `catch`, no `console.error` stripped in prod.
 - Retry only transient failures, with backoff — never infinite, never deterministic.
 - Fallback UI: error page/boundary with reset/retry; keep the last good view.
-- Full failure-UX architecture (transport-owned toasts, message precedence, single-toast dedupe): `references/error-ux.md`.
-- Global API error layer implementation (`ApiError` contract, baseQuery/plain-wrapper adapters, 401 refresh-or-logout modes, window nets, rollout + acceptance tests): `references/api-error-handling.md`.
+- Full failure-UX architecture (transport-owned toasts, message precedence, single-toast dedupe): [references/error-ux.md](references/error-ux.md).
+- Global API error layer implementation (`ApiError` contract, baseQuery/plain-wrapper adapters, 401 refresh-or-logout modes, window nets, rollout + acceptance tests): [references/api-error-handling.md](references/api-error-handling.md).
 
 ## Design Thinking (GREENFIELD ONLY — skip if Pattern Audit found existing UI)
 
-Direction depth: `references/design-language.md` (persona, hero, typography discipline, structural devices, empty/error voice).
+Direction depth: [references/design-language.md](references/design-language.md) (persona, hero, typography discipline, structural devices, empty/error voice).
 
 Before coding greenfield:
 - Purpose: what problem, who uses it?

@@ -90,8 +90,8 @@ env:
 
 ## 5–8. Restructuring + release workflows
 
-- Job removal (dangling `needs:`, lost toolchain) + build-gate deletion → `references/restructuring.md`.
-- Version/tag derivation from one parser, tag-overwrite guards, multiline data between jobs → `references/release-versioning.md`.
+- Job removal (dangling `needs:`, lost toolchain) + build-gate deletion → [references/restructuring.md](references/restructuring.md).
+- Version/tag derivation from one parser, tag-overwrite guards, multiline data between jobs → [references/release-versioning.md](references/release-versioning.md).
 
 ## Checklist
 

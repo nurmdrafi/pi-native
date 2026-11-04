@@ -81,6 +81,6 @@ Copy from `{baseDir}/assets/`: `playwright.config.ts`, `e2e/fixtures/*.ts` (`cdp
 
 ## References
 
-- `references/acceptance-and-budgets.md` — acceptance + artifacts rules, timeout budgeting, slow-startup measurement.
-- `references/headed-review.md` — headed review runs (window sizing, per-test hold, camera, occlusion) + headless quirks.
-- `references/library-and-stress.md` — library/SDK e2e (case registry), update-flow stress pattern, debugging a FAIL.
+- [references/acceptance-and-budgets.md](references/acceptance-and-budgets.md) — acceptance + artifacts rules, timeout budgeting, slow-startup measurement.
+- [references/headed-review.md](references/headed-review.md) — headed review runs (window sizing, per-test hold, camera, occlusion) + headless quirks.
+- [references/library-and-stress.md](references/library-and-stress.md) — library/SDK e2e (case registry), update-flow stress pattern, debugging a FAIL.

@@ -25,7 +25,7 @@ First draft, before any tool run:
 - digits and proper nouns from the voice profile's proof list (specificity)
 - contractions in from the start (voice)
 - plain ASCII punctuation (fingerprint)
-- House format from `references/comment.md`: one comment, 200-320 chars, 3-5 sentences, plain words, gloss, one shorter alternate. Not two options of different types.
+- House format from [references/comment.md](comment.md): one comment, 200-320 chars, 3-5 sentences, plain words, gloss, one shorter alternate. Not two options of different types.
 
 ## One detect run, then deliver
 

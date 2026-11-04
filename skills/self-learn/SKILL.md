@@ -19,7 +19,7 @@ disable-model-invocation: true
 # Self-learn
 
 Reasoning layer over `pidx` session extracts. Detectors are deterministic
-(`jq` queries, `references/detectors.md`); this skill classifies failures,
+(`jq` queries — see [references/detectors.md](references/detectors.md) for the full set); this skill classifies failures,
 discusses them, and applies fixes. Efficiency/cost analysis belongs to
 `session-audit`. Fixes land in the home that owns them — an existing
 skill, a rule, a test — and whatever cannot land yet is archived under
@@ -35,7 +35,7 @@ skill, a rule, a test — and whatever cannot land yet is archived under
      reasons, per-file edit counts, sed/cat reads, hygiene patterns, env
      friction. Spot-check the newest session file only when a count matters.
    - Past sessions: run `pidx` for fresh extracts, then the detector set in
-     `references/detectors.md`.
+     [references/detectors.md](references/detectors.md).
 2. **Detect** — collect the aggregate table (per-signal counts + worst
    offenders). Raw session logs echo rule text into stored context — counts
    come from extract err flags and param hashes, never raw-log keyword greps.

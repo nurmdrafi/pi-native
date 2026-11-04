@@ -128,7 +128,7 @@ Attribution guide: **habit** = working style (resuming big sessions after breaks
 
 Write `~/.pi/agent/audit-reports/<YYYY-MM-DDTHHMMSSZ>.md` (create dir if absent). Timestamp: `date -u +%Y-%m-%dT%H%M%SZ` (UTC, second-precision).
 
-Required content (header, totals, findings-by-rule with sessions-affected, per-project breakdown, ranked fixes, do-this-first pick, trend, self-cost) + two-version ASCII chart format: `references/report-format.md`.
+Required content (header, totals, findings-by-rule with sessions-affected, per-project breakdown, ranked fixes, do-this-first pick, trend, self-cost) + two-version ASCII chart format: [references/report-format.md](references/report-format.md).
 
 Then summarize top 3 changes in chat, in user's own context, say where report saved.
 

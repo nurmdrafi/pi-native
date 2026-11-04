@@ -131,8 +131,8 @@ output.
 Workflow supports schema versions 1 and 2. Version 1 remains the fixed-layout
 compatibility contract; version 2 opts into the readable workflow compiler and
 can be produced explicitly with `archify migrate workflow ... --to-schema 2`.
-Lifecycle accepts only version 3, an automatic main-path layout (see the
-[lifecycle renderer](../renderers/lifecycle/README.md)).
+Lifecycle accepts only version 3, an automatic main-path layout — see the
+[lifecycle renderer](../renderers/lifecycle/README.md).
 The other three diagram schemas keep `schema_version` pinned to `1`; they have
 no schema-version migration command. For any of the five diagram types, repair
 a legacy missing or nonportable `meta.output` in the source and run `validate`.

@@ -41,7 +41,7 @@ Order minimizes broken windows:
 2. Route guard → `proxy.ts` rewrite with `getToken()`; delete presence check. Keep legacy cookie readable (don't clear) so logged-in sessions survive to natural expiry.
 3. API base query → read `getSessionToken()`, drop legacy storage read. Existing sessions without NextAuth cookie → 401 ladder → re-login once. Acceptable; announce if needed.
 4. Logout → `signOut({ redirect: true, callbackUrl })` + cleanup helper.
-5. Register / forgot-password / OTP → rewire submit handlers onto step machines (`references/otp-flows.md`); endpoints usually unchanged.
+5. Register / forgot-password / OTP → rewire submit handlers onto step machines via [otp-flows.md](otp-flows.md); endpoints usually unchanged.
 
 ### Phase 3 — delete legacy (never leave dormant)
 

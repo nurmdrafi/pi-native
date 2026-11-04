@@ -60,7 +60,7 @@ crates sharing one `Cargo.lock` and one `target/`:
 | `piedit` | `bin/piedit` | + `unicode-normalization` (NFKC); `tempfile` (dev) |
 | `pibash` | `bin/pibash` | `serde`, `serde_json` (`preserve_order`); `tempfile` (dev) |
 | `pidx` | `bin/pidx` | + `sha1`; `preserve_order`, `float_roundtrip` |
-| `docheck` | `bin/docheck` | none — std only (all four families of the former `scripts/doc-check.mjs`, deleted after byte-parity; see `docs/plans/permission_gate_implementation_plan.md` §13) |
+| `docheck` | `bin/docheck` | none — std only (all four families of the former `scripts/doc-check.mjs`, deleted after byte-parity; see [plans/permission_gate_implementation_plan.md](plans/permission_gate_implementation_plan.md) §13) |
 
 Deliberately kept small: no `tokio`, no `clap`, no `regex`, no `libc`. Threads
 are `std::thread`; argument parsing is hand-written; `setsid`/`setpgid` are
@@ -865,4 +865,4 @@ expected counts or inventories live in the binary.
 | **Omissions list** | `details.compaction.omissions[]` — the same cut as structured absolute line ranges (piread only) |
 | **Warm run** | `pidx` run where no session file changed; replays cached extracts |
 | **Fail-open** | Any native failure advances to the next rung instead of erroring |
-| **Oracle** | The stock built-in tool the native path must byte-match — parity source of truth (see [`native-tools.md`](native-tools.md)) |
+| **Oracle** | The stock built-in tool the native path must byte-match — parity source of truth, see [`native-tools.md`](native-tools.md) |

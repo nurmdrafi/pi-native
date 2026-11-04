@@ -45,7 +45,7 @@ Externals from build config / emitted output, never top-of-file import scan — 
   Alternative: `yalc publish` + `yalc add <pkg>`. Exercise core feature in real app.
 - Regression rule: previous published version = behavior contract. Something breaks after bump (asset, rendering, export) → diff vs how previous version did it, match — never invent new behavior mid-version.
 
-Pyramid layers, browser-mode pitfalls, e2e infra, pack smoke procedure: `references/testing.md`.
+Pyramid layers, browser-mode pitfalls, e2e infra, pack smoke procedure: [references/testing.md](references/testing.md).
 
 ## Pre-publish gate (in order)
 
@@ -61,9 +61,9 @@ typecheck → lint → unit → browser-mode (npm) → e2e vs dist → README ex
 5. Dependency hygiene if touched: exact pins (no `^`), committed `.npmrc`, `npm/pnpm audit --audit-level high`, non-breaking upgrades only. Sweep dead `package.json` scripts + stray files — every script runnable + referenced; unreferenced scratch files deleted, not parked.
 6. CHANGELOG.md complete for this version; missing shipped versions backfilled.
 7. **User reviews, commits/publishes manually.** Agent never commits/pushes/publishes unprompted — suggests commit message, waits. User may test live first.
-8. `npm publish --access public` (or CI release — `references/ci-and-upgrades.md`).
+8. `npm publish --access public` (or CI release — details in [references/ci-and-upgrades.md](references/ci-and-upgrades.md).)
 
-CI/CD pipelines + dependency major upgrades (engine-major contract breakage protocol): `references/ci-and-upgrades.md`.
+CI/CD pipelines + dependency major upgrades (engine-major contract breakage protocol): [references/ci-and-upgrades.md](references/ci-and-upgrades.md).
 
 ## Documentation (fixed set)
 

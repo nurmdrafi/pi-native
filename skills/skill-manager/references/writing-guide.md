@@ -1,6 +1,6 @@
 # Writing guide — description and body craft
 
-Read while drafting SKILL.md content. Best-practice source (opinionated community, not spec): [SKILL.md best practices](https://www.mdskills.ai/docs/skill-best-practices). Anti-pattern sweep: `anti-patterns.md`.
+Read while drafting SKILL.md content. Best-practice source (opinionated community, not spec): [SKILL.md best practices](https://www.mdskills.ai/docs/skill-best-practices). Anti-pattern sweep: [anti-patterns.md](anti-patterns.md).
 
 ## Description formula (the part that matters most)
 
@@ -31,8 +31,8 @@ Always third person ("Extracts…", never "I can help…") — description lands
 - Reference file >~100 lines → table of contents.
 - Skill spans multiple domains/frameworks → split by variant (`references/aws.md`, `references/gcp.md`, …) so only relevant file read.
 - Descriptive filenames (`form-validation.md`, not `doc2.md`) — filenames drive what agent reads.
-- `scripts/` for deterministic/repetitive code, `assets/` for files used in output (templates, icons, fonts). Helper commands → `scripts/`; script security rules in `anti-patterns.md`.
-- Prose only unless script truly needed; skills shipping scripts → self-contained. Placement per `skill-spec.md`.
+- `scripts/` for deterministic/repetitive code, `assets/` for files used in output (templates, icons, fonts). Helper commands → `scripts/`; script security rules in [anti-patterns.md](anti-patterns.md).
+- Prose only unless script truly needed; skills shipping scripts → self-contained. Placement per [skill-spec.md](skill-spec.md).
 
 ## Writing style
 

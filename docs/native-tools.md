@@ -94,7 +94,7 @@ that class writes the file and prints ~1.2 MB of `baseContent`+`newContent` per 
 on 589 KB put the in-process work at ~5.7 ms (envelope 2.3 ms, apply 2.7 ms, scans 0.7 ms); the
 rest is read, write and stdout.
 
-**pibash** (N=60/arm; oracle vs daemon p50 ms; median of three pinned runs on 2026-10-28 —[`benchmark/runs/pibash-microbench-2026-10-27.md`](../benchmark/runs/pibash-microbench-2026-10-27.md)):
+**pibash** (N=60/arm; oracle vs daemon p50 ms; median of three pinned runs on 2026-10-28) — [../benchmark/runs/pibash-microbench-2026-10-27.md](../benchmark/runs/pibash-microbench-2026-10-27.md):
 
 | command class | built-in p50 | pibash p50 | Δ p50 |
 | --- | ---: | ---: | ---: |

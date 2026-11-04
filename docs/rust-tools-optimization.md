@@ -108,7 +108,7 @@ instead of three, no per-line allocation. Wire bytes unchanged, so every parity
 suite stayed green. Measured on `seq 50000` (~290 KB / 50k lines), one-shot CLI:
 `strip_ansi` 394 µs to 27 µs, `dedup` 2.06 to 1.64 ms, `head_tail` 1.93 to
 0.72 ms, `compress_output` 9.6 to 2.5 ms, end-to-end p50 19.7 to 13.4 ms (−32%).
-The full stage table lives in `docs/rust-tools-architecture.md` (context shaping).
+The full stage table lives in [rust-tools-architecture.md](rust-tools-architecture.md) (context shaping).
 
 **piread scan and decode** — a slope-only win, in two steps. Technique one:
 replace per-line `read_until` with a `fill_buf` plus `memchr` search, same
@@ -184,15 +184,15 @@ one percent. Optimize the rung before optimizing the code.
 
 ## Related
 
-- `docs/rust-tools-architecture.md` — crate layout, dispatch ladder, envelopes.
-- `docs/change-discipline.md` — change ladder, root cause, deployment.
+- [rust-tools-architecture.md](rust-tools-architecture.md) — crate layout, dispatch ladder, envelopes.
+- [change-discipline.md](change-discipline.md) — change ladder, root cause, deployment.
 - `tests/README.md` — entry points for every audit and bench driver.
-- `research/piread-compaction-approaches.md` — compaction methods tried, with
+- [../research/piread-compaction-approaches.md](../research/piread-compaction-approaches.md) — compaction methods tried, with
   outputs and verdict.
-- `research/benchmark-observability.md` — which per-call measurements to record
+- [../research/benchmark-observability.md](../research/benchmark-observability.md) — which per-call measurements to record
   (queue vs work time, raw vs output bytes) so the next optimization starts with
   data instead of a hunch.
-- `docs/plans/permission_gate_implementation_plan.md` §2 — the V-row validation
+- [plans/permission_gate_implementation_plan.md](plans/permission_gate_implementation_plan.md) §2 — the V-row validation
   table: speed ideas already measured and rejected in this repo (mmap shared
   state, `repr(C)` cross-process struct, telemetry sidecar, binary context
   injection), each with the reason it failed.

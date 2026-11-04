@@ -26,7 +26,7 @@ disable-model-invocation: true
 - Read-only research / web content → web-search skill (`tvly search`, `tvly extract`); static pages `{baseDir}/scripts/web-fetch.mjs <url> <maxChars>` = cheapest extractor (headless, capped, no quota). Never this skill for research.
 - Manual QA / visual review → refactoring-ui or user-driven, not agent browser driving.
 - General debugging (runtime errors, wrong data) → systematic-debugging; go live only when failing spec needs it.
-- Failing e2e/browser-mode spec the runner log doesn't explain → live replay: `references/debugging.md` (go live after ONE unexplained failure).
+- Failing e2e/browser-mode spec the runner log doesn't explain → live replay: [references/debugging.md](references/debugging.md) (go live after ONE unexplained failure).
 - Out of scope:
   - frontend feature testing outside e2e specs
   - visual inspection for design review
@@ -37,10 +37,10 @@ disable-model-invocation: true
 
 ## Tools
 
-CDP tools against Chrome on `:9222` (macOS + Linux): per-script usage, setup (`npm install` once), pre-flight, fresh-vs-`--profile` guidance: `references/tools.md`.
+CDP tools against Chrome on `:9222` (macOS + Linux): per-script usage, setup (`npm install` once), pre-flight, fresh-vs-`--profile` guidance: [references/tools.md](references/tools.md).
 
 ## References
 
-- `references/tools.md` — per-script usage, setup, pre-flight, profile trade-offs, slow-startup attribution.
-- `references/debugging.md` — live replay of failing specs: procedure, error/console/network collector, canary probe, engine-source-as-ground-truth.
-- `references/efficiency.md` — eval patterns: standard recon, DOM-over-screenshots, single-call IIFEs, batching, polling.
+- [references/tools.md](references/tools.md) — per-script usage, setup, pre-flight, profile trade-offs, slow-startup attribution.
+- [references/debugging.md](references/debugging.md) — live replay of failing specs: procedure, error/console/network collector, canary probe, engine-source-as-ground-truth.
+- [references/efficiency.md](references/efficiency.md) — eval patterns: standard recon, DOM-over-screenshots, single-call IIFEs, batching, polling.

@@ -1,6 +1,6 @@
 # Failure UX architecture (frontend-design)
 
-Policy contract; implementation code for this layer: `api-error-handling.md`.
+Policy contract; implementation code for this layer: [api-error-handling.md](api-error-handling.md).
 
 Read when adding async data to new UI, or whenever failure handling spans more than one layer (transport, store, component, window). Stack-agnostic — applies to any HTTP wrapper, store query layer, or interceptor.
 

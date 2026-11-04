@@ -2,7 +2,7 @@
 
 How to implement a unified global API error-handling layer for fetch-based frontends (Next.js pages router or SPA, RTK Query and/or plain fetch wrappers, Redux Toolkit, antd `message` toasts). Combined solution; no project-specific references. Code is TypeScript, copy-adaptable.
 
-UX-side policy (ownership, message precedence, dedupe contract): `error-ux.md`.
+UX-side policy (ownership, message precedence, dedupe contract): [error-ux.md](error-ux.md).
 
 ## 1. Architecture
 
@@ -107,10 +107,12 @@ export const isErrorAlerted = (error: unknown): boolean =>
 // flow). Request-option opt-outs live in the transport, not here.
 const ABORT_PATTERN = /abort/i
 const isSilentError = (error: unknown): boolean => {
-  const c = error as { status?: unknown; data?: unknown; name?: string; message?: string; error?: unknown } | null
+  const c = error as { status?: unknown; data?: unknown; name?: string; message?: string; error?: unknown; code?: string } | null
   if (c?.status === 401) return true
   if (c?.data && typeof c.data === 'object' && (c.data as Record<string, unknown>).status === 401) return true
   if (c?.name === 'AbortError' || c?.name === 'TimeoutError') return true
+  // Transport-mapped aborts arrive as ApiError with a code, not a DOMException name
+  if (c?.code === 'ERR_CANCELED' || c?.code === 'ERR_TIMEOUT') return true
   if (typeof c?.message === 'string' && ABORT_PATTERN.test(c.message)) return true
   if (typeof c?.error === 'string' && ABORT_PATTERN.test(c.error)) return true
   return false

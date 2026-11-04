@@ -16,4 +16,4 @@ Read before running a headed suite or a review a human watches.
 
 - Fullscreen: fires `fullscreenchange` at load in headless → assert toggle direction-agnostically (class swaps between two known values), never initial direction.
 - Geolocation: no permission prompt → override `navigator.geolocation` via `context.addInitScript` instead of granting permissions.
-- CPU-rendered graphics rasterize slower than GPU → re-budget settle waits (see `acceptance-and-budgets.md`), prefer `expect.poll` with own timeout.
+- CPU-rendered graphics rasterize slower than GPU → re-budget settle waits, see [acceptance-and-budgets.md](acceptance-and-budgets.md), prefer `expect.poll` with own timeout.

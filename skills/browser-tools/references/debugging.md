@@ -11,7 +11,7 @@ Read when a Playwright/Vitest-browser spec fails and runner log doesn't explain 
 0. Consume runner artifacts first: failure screenshot/trace/report + saved run logs usually answer with zero execution (see `playwright-tester` "Debugging a FAIL"). User asks for screenshot of failing case → prefer runner's failure screenshot over live one. Go live only when artifacts don't explain.
 1. Start dev/test server in background (e.g. `npm run e2e:serve &`).
 2. `{baseDir}/scripts/browser-start.js` → `{baseDir}/scripts/browser-nav.js <failing case URL>`.
-3. Install error collector immediately after navigation (snippet below — idempotent, survives this tab), then standard recon eval (`references/efficiency.md`) as baseline.
+3. Install error collector immediately after navigation (snippet below — idempotent, survives this tab), then standard recon eval via [efficiency.md](efficiency.md) as baseline.
 4. Replay spec's steps with `browser-eval.js` IIFEs — query DOM, read app state (any exposed global, e.g. `window.__APP__`), compare vs spec assertions.
 5. Fix spec or app, re-run runner headless to confirm.
 6. Live window showing nothing moving = usually occlusion, not bug: Chromium suspends rAF/compositing for backgrounded/covered windows, map/canvas interactions replay silently. Bring tab to front (or run step headless) before concluding events don't fire — don't rerun suite.

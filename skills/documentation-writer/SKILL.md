@@ -47,7 +47,7 @@ Hybrid: how-to for local dev (clone → install → build → test → lint) + r
 - Optimize time-to-first-success: shortest "never seen this → worked" path leads every doc.
 - Never invent API paths/payloads/options — read source first; unclear contract → ask.
 - Show expected output after commands/calls (reader verifies success).
-- Link related docs by relative path in-repo; one canonical location per fact.
+- Link related docs by relative path in-repo; every sibling-file mention is a relative link, never a bare code span (code comments excepted); one canonical location per fact.
 
 ## REVIEW MODE
 

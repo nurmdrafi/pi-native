@@ -45,8 +45,8 @@ Each phase before next — each produces evidence the next consumes.
 1. Read errors carefully — don't skip; often contain exact solution. Full stack traces, note line numbers, paths, error codes
 2. Reproduce consistently — exact steps? every time? Not reproducible → gather more data, don't guess
 3. Check recent changes — git diff, recent commits, new deps, config, env differences. Bug reports quote code at the filed commit — re-read current HEAD first; may already be fixed, or that fix may itself be the bug you're chasing
-4. Multi-component systems (CI → build → signing, API → service → database): instrument each component boundary, run once, localize failing layer — full technique + multi-layer example + intermittent external-API throttle-counter case in `references/evidence-gathering.md`
-5. Error deep in call stack: see `references/root-cause-tracing.md` for full backward-trace technique. Quick version: where does bad value originate? what called this with it? trace up to source, fix at source not symptom
+4. Multi-component systems (CI → build → signing, API → service → database): instrument each component boundary, run once, localize failing layer — full technique + multi-layer example + intermittent external-API throttle-counter case in [references/evidence-gathering.md](references/evidence-gathering.md)
+5. Error deep in call stack: see [references/root-cause-tracing.md](references/root-cause-tracing.md) for full backward-trace technique. Quick version: where does bad value originate? what called this with it? trace up to source, fix at source not symptom
 
 ### Phase 2: Pattern Analysis
 
@@ -74,7 +74,7 @@ Fix root cause, not symptom:
 
 ## Red Flags — STOP and Follow Process
 
-Red-flag thoughts, human partner's redirect signals, rationalization→reality table in `references/red-flags.md` — read when caught (or told) guessing. ALL red flags: STOP, return to Phase 1. 3+ fixes failed → question architecture (Phase 4 step 5).
+Red-flag thoughts, human partner's redirect signals, rationalization→reality table in [references/red-flags.md](references/red-flags.md) — read when caught (or told) guessing. ALL red flags: STOP, return to Phase 1. 3+ fixes failed → question architecture (Phase 4 step 5).
 
 ## Quick Reference
 
@@ -97,8 +97,8 @@ But: 95% of "no root cause" = incomplete investigation.
 
 ## Supporting Techniques
 
-- `references/root-cause-tracing.md` — trace bugs backward through call stack to original trigger
-- `references/defense-in-depth.md` — validation at multiple layers after finding root cause
-- `references/condition-based-waiting.md` — replace arbitrary timeouts with condition polling
-- `references/evidence-gathering.md` — multi-component instrumentation + external-API throttle-counter case
-- `references/red-flags.md` — red-flag thoughts, human-partner signals, rationalization→reality table
+- [references/root-cause-tracing.md](references/root-cause-tracing.md) — trace bugs backward through call stack to original trigger
+- [references/defense-in-depth.md](references/defense-in-depth.md) — validation at multiple layers after finding root cause
+- [references/condition-based-waiting.md](references/condition-based-waiting.md) — replace arbitrary timeouts with condition polling
+- [references/evidence-gathering.md](references/evidence-gathering.md) — multi-component instrumentation + external-API throttle-counter case
+- [references/red-flags.md](references/red-flags.md) — red-flag thoughts, human-partner signals, rationalization→reality table

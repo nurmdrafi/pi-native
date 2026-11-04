@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Check project `package.json`, bundler aliases, existing map components before writing anything. Stack families in this workspace:
 
-- `react-bkoi-gl` (current gen — Barikoi's React wrapper): react-map-gl-style API (`Map`, `useMap`, `useControl`, `Source`/`Layer`) + `DrawControl` (draw built in — but callback-only, `references/known-pitfalls.md` #10), `MinimapControl`/`Minimap`, `GlobeControl`, `TerrainControl`, `LogoControl`, `CanvasSource`. Engine (`maplibre-gl@6`) ships as own dep — import everything from `react-bkoi-gl`, never `maplibre-gl` directly; engine utils re-exported. **Its `Map`/`Marker`/`Popup`/controls are React components — engine constructors NOT exported** (`references/known-pitfalls.md` #9), so imperative code (`new Map(...)`, `marker.on('dragend')`) can't run on it. CSS: `import "react-bkoi-gl/styles"`.
+- `react-bkoi-gl` (current gen — Barikoi's React wrapper): react-map-gl-style API (`Map`, `useMap`, `useControl`, `Source`/`Layer`) + `DrawControl` (draw built in — but callback-only, [references/known-pitfalls.md](references/known-pitfalls.md) #10), `MinimapControl`/`Minimap`, `GlobeControl`, `TerrainControl`, `LogoControl`, `CanvasSource`. Engine (`maplibre-gl@6`) ships as own dep — import everything from `react-bkoi-gl`, never `maplibre-gl` directly; engine utils re-exported. **Its `Map`/`Marker`/`Popup`/controls are React components — engine constructors NOT exported** ([references/known-pitfalls.md](references/known-pitfalls.md) #9), so imperative code (`new Map(...)`, `marker.on('dragend')`) can't run on it. CSS: `import "react-bkoi-gl/styles"`.
 - `bkoi-gl` (vanilla JS — Barikoi's MapLibre v6 build): engine constructors live here (`Map` with `BkoiMapOptions` incl. `accessToken`/`style`). Bundles engine + self-contained worker (no maplibre install, no worker hosting); `bkoi-gl/worker` only for strict-CSP apps. CSS: `bkoi-gl/style.css`. React apps prefer `react-bkoi-gl` — but legacy imperative components (class components hand-building maps) need this package. `bkoi-gl-js` = CDN dist name (`cdn.barikoi.com/bkoi-gl-js/...`), NOT npm; npm name `bkoi-gl`.
 - Legacy: `react-map-gl` + `maplibre-gl` / `mapbox-gl` (some pin `mapbox-gl@1.13.3` or alias `mapbox-gl → maplibre-gl`). Same react-map-gl API surface.
 - `@deck.gl/*` (overlays), `@turf/turf` (geometry), `@mapbox/mapbox-gl-draw` (editing), `mqtt`/`socket.io-client` (real-time), `geo-polyline-tools` (route polylines).
@@ -59,12 +59,12 @@ const DeckGLOverlay = (props: MapboxOverlayProps) => {
 - Performance: never `setState` inside `onHover`/view-state callbacks — fire per frame, rerender tree; throttle (dashboards use `useThrottle(popupData, 250)`).
 - Recreating layer instances per render fine (deck diffs props); appending live data must not rebuild whole buffer — append into stable structure or one layer per chunk.
 - Reuse existing layers (marker/trace/boundary) before writing new — search repo's layer components first.
-- Composite-layer performance patterns — stable accessors, `updateState` caches, boolean updateTriggers: `references/composite-layer-perf.md`.
+- Composite-layer performance patterns — stable accessors, `updateState` caches, boolean updateTriggers: [references/composite-layer-perf.md](references/composite-layer-perf.md).
 - Dashboards share one template: `components/Map/DeckGLMap.jsx` (Map shell, `MAP.STYLES[0]`, throttled tooltip) + `OverLayers.jsx` (DeckGLOverlay above — `useControl` from `react-bkoi-gl`) + `Map/Layers/` composite layer classes (`TraceLayer`, `RouteLayer`…), all fed from Redux slice. Before writing new: diff sibling dashboard — forks of same shape.
 
 ## 5. Known map bugs / pitfalls (fixed before — keep guards)
 
-Twelve numbered guards in `references/known-pitfalls.md` — cited as `known-pitfalls.md #N` elsewhere. Covers: queryRenderedFeatures guards, mapbox-gl v3 drift, [lng, lat] order, geolocation validation, draw/polygon sync, geometry staleness, marker `dragend` capture, engine-clear-vs-state-clear, react-bkoi-gl component-vs-constructor exports, DrawControl callback-only architectures, draw-toolbar CSS mismatch, degenerate turf rings.
+Twelve numbered guards in [references/known-pitfalls.md](references/known-pitfalls.md) — cited as `known-pitfalls.md #N` elsewhere. Covers: queryRenderedFeatures guards, mapbox-gl v3 drift, [lng, lat] order, geolocation validation, draw/polygon sync, geometry staleness, marker `dragend` capture, engine-clear-vs-state-clear, react-bkoi-gl component-vs-constructor exports, DrawControl callback-only architectures, draw-toolbar CSS mismatch, degenerate turf rings.
 
 ## 6. Camera idioms
 
@@ -74,7 +74,7 @@ Twelve numbered guards in `references/known-pitfalls.md` — cited as `known-pit
 
 ## 7. Real-time plotting (MQTT / WebSocket)
 
-Established pattern in `references/realtime-plotting.md`: buffer + batch, LRU-cap markers, subscription guards, auth-teardown flush, one config source for broker opts — reference now carries working code shapes (connection hook, batch buffer, store merge, deck overlay).
+Established pattern in [references/realtime-plotting.md](references/realtime-plotting.md): buffer + batch, LRU-cap markers, subscription guards, auth-teardown flush, one config source for broker opts — reference now carries working code shapes (connection hook, batch buffer, store merge, deck overlay).
 
 ## 8. GPX / route utilities (reuse, don't rewrite)
 
@@ -121,7 +121,7 @@ Realtime & render prevention (from the repo review audit):
 - Real-time: batch messages, LRU-cap markers, guard subscriptions, cleanup on unmount.
 - Shared map state in store slice — map components subscribe, don't own.
 - Map wrapper library work: framework apps install fresh packed tarball (never link); every README claim covered by e2e case; engine majors = silent render failures — run README matrix first.
-- Draw/edit flows: idempotent polygon-sync upsert covering all three triggers (`known-pitfalls.md` #5); guarded geometry loads with failure-path clearing (#6); resets touch every derived field; markers capture `dragend`, draw-clears propagate to parent state (#7–8).
+- Draw/edit flows: idempotent polygon-sync upsert covering all three triggers ([known-pitfalls.md](references/known-pitfalls.md) #5); guarded geometry loads with failure-path clearing (#6); resets touch every derived field; markers capture `dragend`, draw-clears propagate to parent state (#7–8).
 - CI touched: secrets step-scoped, actions SHA-pinned, least-privilege permissions (§11).
 - No provider key literal in source or bundled config (`app.config.ts` etc.) — keys ride env vars; anything `NEXT_PUBLIC_*` or client-imported = public by definition. Server-side Barikoi/routing calls via API proxy, never client-held key.
 - Layers/scenes rebuild on data/selection change, not hover/zoom/tick; heavy math off main thread; no O(N²) scans or pagination.
