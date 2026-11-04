@@ -60,6 +60,7 @@ Match existing patterns before introducing new ones. New framework = new file un
 - Retry only transient failures, with backoff — never infinite, never deterministic.
 - Fallback UI: error page/boundary with reset/retry; keep the last good view.
 - Full failure-UX architecture (transport-owned toasts, message precedence, single-toast dedupe): `references/error-ux.md`.
+- Global API error layer implementation (`ApiError` contract, baseQuery/plain-wrapper adapters, 401 refresh-or-logout modes, window nets, rollout + acceptance tests): `references/api-error-handling.md`.
 
 ## Design Thinking (GREENFIELD ONLY — skip if Pattern Audit found existing UI)
 
