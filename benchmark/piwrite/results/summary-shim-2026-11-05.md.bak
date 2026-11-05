@@ -1,0 +1,18 @@
+# piwrite benchmark summary — 2026-11-05
+
+- generated: 2026-11-05T16:53:15.982Z
+- node: v24.21.0
+- PI_WRITE_BIN: <unset; default /home/nurmdrafi/.pi/agent/bin/piwrite>
+
+## mode=--smoke
+
+### 4KB
+
+| arm | label | rounds | ops | min ms/op | p50 ms/op | max ms/op | MB/s |
+|---|---|---|---|---|---|---|---|
+| A1 | node-builtin | 2 | 56 | 0.265 | 0.399 | 2.502 | 8.38 |
+| A2 | piwrite-oneshot | 2 | 4 | 115.828 | 211.905 | 229.038 | 0.021 |
+| A3 | piwrite-serve | 2 | 12 | 37.355 | 49.178 | 61.001 | 0.083 |
+
+verdict 4KB [mode=--smoke]: piwrite-serve vs node-builtin — p50 49.178ms vs 0.399ms → 0.008x faster; throughput 0.083 vs 8.38 MB/s → 0.01x
+
