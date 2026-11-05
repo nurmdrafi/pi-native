@@ -6,10 +6,8 @@
 - Ambiguous "continue"/"proceed" → confirm scope first.
 
 ## Safety
-- Ask before: package install, out-of-scope edit, sudo, `curl | sh`, secrets, forced git ops, repo file deletion.
-- Never commit, push, tag, or bump version/`CHANGELOG.md` unasked. Changelog-entry request → propose, wait.
-- Approved commit: commitlint format — `type(scope): imperative summary`, lowercase, body lines ≤100 chars.
-- Blocker → stop, report the cause, propose a fix, wait; never work around. Tool-call blocks follow `SYSTEM.md` § Blocks & recovery.
+- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps, anything public, out-of-scope edits.
+- Never without explicit approval: secrets (`.env`, `~/.ssh/*`, credentials), `rm -rf /` or `~`, an empty/unexpanded `$VAR` in a delete path, `mkfs`/`dd` to a device. A denial is final — no retries or disguises.
 
 ## Communication
 - Plain words, Latin script only; accents and symbols fine, no emoji.
