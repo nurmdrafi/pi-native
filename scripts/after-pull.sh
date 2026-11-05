@@ -19,10 +19,10 @@ echo "== after-pull: syncing setup ($(uname -s))"
 . "$ROOT/scripts/lib/install-native.sh"
 . "$ROOT/scripts/lib/progress.sh"
 
-# 6 counted steps: deps, dashboard, piread, piedit, pibash, auto-heal. The
-# pidoc health check stays un-wrapped — its FAIL/WARN rows are the deliverable,
-# not noise.
-ui_total 6
+# 7 counted steps: deps, dashboard, piread, piedit, pibash, piwrite,
+# auto-heal. The pidoc health check stays un-wrapped — its FAIL/WARN rows are
+# the deliverable, not noise.
+ui_total 7
 
 # 1. Node deps + host pi package links. Fresh install only when the manifest
 #    moved in this pull or node_modules is missing; link-pi self-validates.
@@ -80,7 +80,7 @@ chmod +x bin/pidoc
 #     Each session lazily restarts them from the fresh binaries on its
 #     next native tool call (one-shot fallback covers the gap).
 if command -v pkill >/dev/null 2>&1; then
-  pkill -f "$ROOT/bin/(pibash|piread|piedit) --serve" 2>/dev/null || true
+  pkill -f "$ROOT/bin/(pibash|piread|piedit|piwrite) --serve" 2>/dev/null || true
 fi
 
 # 3. piread (native read tool — registers unconditionally; Rust is the only
@@ -139,6 +139,24 @@ if [ -d "$PIBASH_CRATE/src" ] && [ -f "$PIBASH_CRATE/Cargo.toml" ]; then
         || echo "!! pibash: build/install failed — the pibash tool will reject until rebuilt" >&2
   else
     ui_step "pibash: cargo not found — the pibash tool will reject until Rust is installed"
+  fi
+fi
+
+# 5b. piwrite (native write tool — registers unconditionally; Rust is the only
+#     executor, so a missing binary is a tool error, not a built-in route).
+#     Always rebuilt like piread; builds from the rust-tools workspace (-p).
+PIWRITE_CRATE=rust-tools/piwrite
+PIWRITE_TARGET=rust-tools/target/release/piwrite
+if [ -d "$PIWRITE_CRATE/src" ] && [ -f "$PIWRITE_CRATE/Cargo.toml" ]; then
+  CARGO=$(command -v cargo || true)
+  [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
+  if [ -n "$CARGO" ]; then
+      ui_run "piwrite: build + install (cargo --release)" \
+        sh -c 'cd rust-tools && exec "$1" build --release -p piwrite' sh "$CARGO" \
+        && install_native "$PIWRITE_TARGET" bin/piwrite \
+        || echo "!! piwrite: build/install failed — the piwrite tool will reject until rebuilt" >&2
+  else
+    ui_step "piwrite: cargo not found — the piwrite tool will reject until Rust is installed"
   fi
 fi
 

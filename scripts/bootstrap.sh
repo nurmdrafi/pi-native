@@ -59,6 +59,17 @@ else
        "To enable: install Rust (rustup command above) and re-run"
 fi
 
+# 4b. piwrite (native write tool — registers unconditionally; Rust is the only
+#     executor, so an unbuilt binary makes the tool reject, not fall back)
+if [ -n "$CARGO" ]; then
+  (cd rust-tools && "$CARGO" build --release -p piwrite)
+  install_native rust-tools/target/release/piwrite bin/piwrite
+  echo "== piwrite: built + installed to bin/piwrite"
+else
+  echo "== piwrite: cargo not found — the piwrite tool rejects until Rust is installed." \
+       "To enable: install Rust (rustup command above) and re-run"
+fi
+
 # 5. piedit (native edit tool — registers unconditionally; Rust is the only
 #    executor, so an unbuilt binary makes the tool reject, not fall back)
 if [ -n "$CARGO" ]; then

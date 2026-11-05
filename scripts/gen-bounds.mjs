@@ -46,7 +46,7 @@ export const BOUNDS = {
   },
 };
 
-const RUST_CRATES = ["piread", "pibash", "pidx", "piedit", "outline", "docheck"];
+const RUST_CRATES = ["piread", "pibash", "pidx", "piedit", "outline", "docheck", "piwrite"];
 const TS_PATH = join(ROOT, "extensions/permission-gate/bounds.gen.ts");
 
 /** flatten {a:{b:{c:1}}} → [["a.b.c", 1]] */
