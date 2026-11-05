@@ -104,9 +104,16 @@ let tmuxRunner: ((args: string[]) => string) | null = null;
 
 /** Run one synchronous tmux command and return its stdout. All pane-creation
  *  paths go through here so tests can substitute the multiplexer. */
+/** stdio for every synchronous tmux call. execFileSync forwards a failed
+ * child's stderr to the parent's own stderr unless stdio is pinned, which
+ * printed raw tmux failures (e.g. `error connecting to <socket>` on every
+ * session start while no server was running) into the user's terminal;
+ * piping keeps the text captured on the thrown error for classifyTmuxError. */
+const TMUX_SYNC_STDIO: ["ignore", "pipe", "pipe"] = ["ignore", "pipe", "pipe"];
+
 function runTmux(args: string[]): string {
   if (tmuxRunner) return tmuxRunner(args);
-  return execFileSync("tmux", args, { encoding: "utf8" });
+  return execFileSync("tmux", args, { encoding: "utf8", stdio: TMUX_SYNC_STDIO });
 }
 
 /** Both places a tmux failure text can live: the exec error's stderr and
@@ -277,6 +284,7 @@ function rebalanceSurfaces(hintPane?: string): void {
       // -t <pane> resolves to that pane's window; does not change focus.
       execFileSync("tmux", ["select-layout", "-t", target, SUBAGENT_TMUX_LAYOUT], {
         encoding: "utf8",
+        stdio: TMUX_SYNC_STDIO,
       });
     } catch {
       // Pane/window may be gone; balancing is best-effort.
@@ -552,8 +560,14 @@ export function createSurfaceRunning(
  */
 export function sendCommand(surface: string, command: string): void {
   requireTmux();
-  execFileSync("tmux", ["send-keys", "-t", surface, "-l", command], { encoding: "utf8" });
-  execFileSync("tmux", ["send-keys", "-t", surface, "Enter"], { encoding: "utf8" });
+  execFileSync("tmux", ["send-keys", "-t", surface, "-l", command], {
+    encoding: "utf8",
+    stdio: TMUX_SYNC_STDIO,
+  });
+  execFileSync("tmux", ["send-keys", "-t", surface, "Enter"], {
+    encoding: "utf8",
+    stdio: TMUX_SYNC_STDIO,
+  });
 }
 
 /**
@@ -635,6 +649,7 @@ export function readScreen(surface: string, lines = 50): string {
     ["capture-pane", "-p", "-t", surface, "-S", `-${Math.max(1, lines)}`],
     {
       encoding: "utf8",
+      stdio: TMUX_SYNC_STDIO,
     },
   );
 }
@@ -673,7 +688,10 @@ export function closeSurface(surface: string): void {
  */
 export function sendInterrupt(surface: string): void {
   requireTmux();
-  execFileSync("tmux", ["send-keys", "-t", surface, "C-c"], { encoding: "utf8" });
+  execFileSync("tmux", ["send-keys", "-t", surface, "C-c"], {
+    encoding: "utf8",
+    stdio: TMUX_SYNC_STDIO,
+  });
 }
 
 // ── Exit polling ──

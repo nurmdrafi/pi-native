@@ -7,6 +7,16 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **tmux child stderr no longer leaks into the terminal.** Every synchronous tmux call pins stdio
+  so a failed child's stderr is captured on the thrown error instead of being forwarded to the
+  parent's own stderr — the session-start dead-pane sweep printed raw `error connecting to <socket>`
+  whenever no tmux server was running. Error classification is unchanged; a probe-child regression
+  test guards it.
+
 ## [1.71.0] - 02-11-2026
 
 ### Added
