@@ -1,7 +1,7 @@
 ---
 name: bench-runner
 description: Benchmark/eval runner — executes frozen candidates and suite arms under hard wall budgets; writes only its result file, reports numbers
-tools: write, piread, pibash
+tools: piwrite, piread, pibash
 thinking: medium
 system-prompt: append
 auto-exit: true

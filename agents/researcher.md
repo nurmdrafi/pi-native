@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Web researcher — searches the web via the Tavily CLI and synthesizes findings
-tools: write, piread, pibash
+tools: piwrite, piread, pibash
 skills: web-search
 thinking: medium
 system-prompt: append

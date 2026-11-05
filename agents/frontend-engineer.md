@@ -1,7 +1,7 @@
 ---
 name: frontend-engineer
 description: Frontend implementer — component/UI work, styling, and component tests; use instead of worker when the task is browser-facing UI
-tools: write, piread, piedit, pibash
+tools: piwrite, piread, piedit, pibash
 skills: playwright-tester
 thinking: high
 system-prompt: append

@@ -1,7 +1,7 @@
 ---
 name: docs-optimizer
 description: LLM-instruction and repo-docs optimizer — optimizes rule/instruction Markdown for adherence and token economy; drafts README and CHANGELOG proposals with citation discipline
-tools: write, piread, piedit, pibash
+tools: piwrite, piread, piedit, pibash
 skills: documentation-writer
 thinking: medium
 system-prompt: append

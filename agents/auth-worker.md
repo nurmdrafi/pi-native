@@ -1,7 +1,7 @@
 ---
 name: auth-worker
 description: Auth/session implementer — login flows, token refresh and redirect, cookie-held permissions, route guards and level/hierarchy access control; use instead of worker when the task touches authentication or authorization
-tools: write, piread, piedit, pibash
+tools: piwrite, piread, piedit, pibash
 skills: auth
 thinking: high
 system-prompt: append

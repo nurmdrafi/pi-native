@@ -22,21 +22,21 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 | Agent | Tools | Role |
 | ----- | ----- | ---- |
 | architect-reviewer | ls, piread, pibash | architecture review — dependencies, coupling, boundaries |
-| auth-worker | write, piread, piedit, pibash (`auth`) | auth/session implementation — login flows, token refresh, guards, access control |
-| bench-runner | write, piread, pibash | frozen benchmark/eval arms under hard wall budgets; writes only its result file |
-| docs-optimizer | write, piread, piedit, pibash (`documentation-writer`) | optimizes rule/instruction Markdown; drafts README/CHANGELOG proposals |
-| frontend-engineer | write, piread, piedit, pibash (`playwright-tester`) | component/UI implementation with component tests |
-| map-engineer | write, piread, piedit, pibash (`map-integration`) | map rendering — overlays, composite-layer performance, camera/viewport |
-| product-manager | write, piread, pibash (`brainstorming`) | structured product briefs with numbered acceptance criteria |
-| researcher | write, piread, pibash (`web-search`) | web research via the `tvly` CLI |
+| auth-worker | piwrite, piread, piedit, pibash (`auth`) | auth/session implementation — login flows, token refresh, guards, access control |
+| bench-runner | piwrite, piread, pibash | frozen benchmark/eval arms under hard wall budgets; writes only its result file |
+| docs-optimizer | piwrite, piread, piedit, pibash (`documentation-writer`) | optimizes rule/instruction Markdown; drafts README/CHANGELOG proposals |
+| frontend-engineer | piwrite, piread, piedit, pibash (`playwright-tester`) | component/UI implementation with component tests |
+| map-engineer | piwrite, piread, piedit, pibash (`map-integration`) | map rendering — overlays, composite-layer performance, camera/viewport |
+| product-manager | piwrite, piread, pibash (`brainstorming`) | structured product briefs with numbered acceptance criteria |
+| researcher | piwrite, piread, pibash (`web-search`) | web research via the `tvly` CLI |
 | reviewer | ls, piread, pibash (`code-reviewer`) | pre-commit diff review; never commits/pushes |
-| rust-engineer | write, piread, piedit, pibash (`rust-skills`) | Rust implementation; cargo fmt/clippy/test discipline |
+| rust-engineer | piwrite, piread, piedit, pibash (`rust-skills`) | Rust implementation; cargo fmt/clippy/test discipline |
 | scout | ls, piread, pibash | recon |
 | security-reviewer | ls, piread, pibash | security pass over trust-boundary diffs — auth, secrets, injection, data loss, guards |
 | session-auditor | ls, piread, pibash, pidx (`session-audit`) | session-history analysis; appends lessons, never edits history |
 | ui-verifier | ls, piread, pibash (`browser-tools`) | drives the running app via headless Chromium + CDP |
 | verifier | ls, piread, pibash | runs the change; per-criterion PASS/FAIL, never fixes |
-| worker | write, piread, piedit, pibash (`systematic-debugging`, `ponytail`; `subagent_agents: scout, researcher`) | general implementer; scoped issue-fixing in worktrees |
+| worker | piwrite, piread, piedit, pibash (`systematic-debugging`, `ponytail`; `subagent_agents: scout, researcher`) | general implementer; scoped issue-fixing in worktrees |
 
 ## Orchestration rules
 - Delegate only when it beats inline on speed, accuracy, or context: 2+ disjoint file-sets, a context-heavy read sweep, or an independent check. Overlapping sets serialize — isolation only, never wall clock. Fresh child context costs many times linear; read-heavy parallel work pays, single-file coding does not.

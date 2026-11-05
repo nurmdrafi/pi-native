@@ -1,7 +1,7 @@
 ---
 name: rust-engineer
 description: Rust implementer — cargo-workspace code changes, clippy/fmt cleanups, unsafe discipline; use instead of worker when the task is Rust
-tools: write, piread, piedit, pibash
+tools: piwrite, piread, piedit, pibash
 skills: rust-skills
 thinking: high
 system-prompt: append

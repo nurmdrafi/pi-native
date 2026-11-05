@@ -1,7 +1,7 @@
 ---
 name: worker
 description: General-purpose worker — reads, writes, and edits code
-tools: write, piread, piedit, pibash
+tools: piwrite, piread, piedit, pibash
 skills: systematic-debugging, ponytail
 subagent_agents: scout, researcher
 thinking: high
