@@ -1,5 +1,5 @@
 {
-  "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: destructiveConfirm and commitMessageLint cannot be configured below \"error\". Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names — either spelling works in `rules` (`editRegionGuard` or `AG2`); entries below use the IDs. outputCap/confirm/destructive tune numeric limits and the confirm command list.",
+  "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: destructiveConfirm and commitMessageLint cannot be configured below \"error\". Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names — either spelling works in `rules` (`editRegionGuard` or `AG2`); entries below use the IDs. outputCap/confirm/destructive tune numeric limits and the confirm command list. The docs object maps every rule ID to a one-line description — advisory, never parsed.",
 
   "rules": {
     "AG": "off",
@@ -33,6 +33,40 @@
     "LG1": "error",
     "R11": "error",
     "PH1": "warn"
+  },
+
+  "docs": {
+    "AG": "Edits (anchor): blocks an edit whose oldText misses (exact or fuzzy), whose anchor is non-unique, or whose anchors overlap within one call.",
+    "AG2": "Edits (region): the edit's target lines must themselves have been read; 'off' downgrades to path-read-this-session parity.",
+    "WB": "Writes (binding): overwriting an existing file binds like an edit — never-read, stat drift, or hash drift blocks with a re-read fix.",
+    "R1": "Reads (re-read): a re-read fully covered by certified in-context spans blocks; partial overlap passes; resets on compaction and failed edits.",
+    "R1x": "Reads (consume): >=50% of a read's rendered lines already certified — 'warn' notes, 'error' blocks at call time, 'off' disables.",
+    "R1b": "Reads (large window): whole-file or >=500-line read of a >10KB file blocks with a targeted-window fix.",
+    "R1c": "Reads (locate-first): >=100-line window on a never-searched path blocks with the search to run first.",
+    "P1": "Hygiene (native read): built-in read blocked while piread is registered; 'off' restores the built-in.",
+    "P2": "Hygiene (native bash): built-in bash blocked while pibash is registered; 'off' restores the built-in.",
+    "P3": "Hygiene (native write): built-in write blocked while piwrite is registered; 'off' restores the built-in.",
+    "VC": "Hygiene (view credit): printed lines of a mappable head/tail/sed -n/cat view certify read spans; any non-'off' value enables.",
+    "H1": "Bash (output cap): non-blocking — output capped at 40 lines / 2KB, full text spilled to $TMPDIR/pgate-spill with a pointer.",
+    "H1b": "Reads (output cap): non-blocking — read results over 300 lines / 8KB truncate to head, full text spilled.",
+    "OS": "Bash (output scrub): lossless-or-labeled compaction before the H1 cap — ANSI stripped, passing tests aggregated, failures kept verbatim.",
+    "H2": "Bash (destructive confirm): sudo, rm, forced git, installs, DB drops need approval; safety floor — cannot go below 'error'.",
+    "R9": "Git (commit lint): git commit -m checked against the commitlint pattern; safety floor — cannot go below 'error'.",
+    "R10": "Bash (re-run): identical re-run <=10 min after its last success with no intervening mutation blocks.",
+    "RB": "Bash (reblock): verbatim re-send of a just-blocked command escalates with a dedicated reason.",
+    "TC1": "Toolchain (pnpm pin): npm/npx/yarn in a pnpm-pinned repo blocks; use pnpm run/exec/dlx.",
+    "TC2": "Toolchain (node pin): node-family binary missing the exact .nvmrc/engines pin warns; prefix nvm use.",
+    "SS1": "Search (scope): recursive grep/rg with no path or glob scope blocks — scope it (rg PATTERN path/).",
+    "SS2": "Search (mid-pipe): a grep segment reached mid-pipe blocks; use single-process rg PATTERN path/.",
+    "SS3": "Search (find-first): a find-headed segment warns; use fd PATTERN path/.",
+    "SS4": "Search (replace flag): rg carrying -r/--replace (display substitution) warns; drop the flag.",
+    "PB1": "Search (portability): grep -P on darwin warns; use rg -P or grep -E.",
+    "SE1": "Hygiene (error swallow): non-blocking note when a command tails '|| true', hiding the real error.",
+    "SE2": "Hygiene (reader-bypass): non-blocking note when sed -n/cat reads a file — the printed lines still certify.",
+    "CN": "Cadence: non-blocking nudge at ~120 turns / ~150K context tokens; resets on compaction.",
+    "LG1": "Edits (loop guard): note at the 4th same-path edit in a turn, one-shot block at the 7th; resets per user turn.",
+    "R11": "Bash (failure streak): >=5 consecutive tool failures with no landed mutation block the next shell call.",
+    "PH1": "Phase (label): advisory only, never blocks — labels the turn's stage, one 'recovering' note per turn."
   },
 
   "outputCap": {

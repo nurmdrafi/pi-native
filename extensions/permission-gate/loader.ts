@@ -36,40 +36,101 @@ import { fileURLToPath } from "node:url";
 import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
 
 /** Config key → rule ID. The only place the two vocabularies meet; keep in
- * sync with the README rule table and each module's header. */
+ * sync with the README rule table, the `docs` table in config.json, and each
+ * module's header. */
 export const RULE_IDS = {
+  /** Edits (anchor) — AG: edit blocked when `oldText` misses (exact+fuzzy),
+   *  the anchor is non-unique, or anchors overlap within one call. */
   editAnchorGuard: "AG",
+  /** Edits (region) — AG2: an edit's target lines must themselves have been
+   *  read; "off" downgrades to path-read-this-session parity. */
   editRegionGuard: "AG2",
+  /** Writes (binding) — WB: overwrite of an existing file binds like an edit
+   *  — never-read, stat drift, or hash drift blocks with a re-read fix. */
   writeBindingGuard: "WB",
+  /** Reads (re-read) — R1: a re-read fully covered by certified spans
+   *  blocks; partial overlap passes. Resets on compaction/failed edits. */
   reReadGuard: "R1",
+  /** Reads (consume) — R1x: ≥50% of a read's rendered lines already
+   *  certified — "warn" notes, "error" blocks at call time, "off" disables. */
   reReadConsume: "R1x",
+  /** Reads (large window) — R1b: whole-file or ≥500-line read of a >10KB
+   *  file blocks with a targeted-window fix. */
   largeReadGuard: "R1b",
+  /** Reads (locate-first) — R1c: ≥100-line window on a never-searched path
+   *  blocks with the search to run first. */
   locateFirst: "R1c",
+  /** Hygiene (native read) — P1: built-in read blocked while piread is
+   *  registered; "off" restores the built-in. */
   nativeReadFirst: "P1",
+  /** Hygiene (native bash) — P2: built-in bash blocked while pibash is
+   *  registered; "off" restores the built-in. */
   nativeBashFirst: "P2",
   /** Hygiene (native write) — P3: built-in write blocked while piwrite is
    *  registered; "off" restores the built-in. */
   nativeWriteFirst: "P3",
+  /** Bash (output cap) — H1: non-blocking; output capped at 40 lines / 2KB,
+   *  full text spilled to $TMPDIR/pgate-spill with a pointer. */
   outputCap: "H1",
+  /** Reads (output cap) — H1b: non-blocking; read results over 300 lines /
+   *  8KB truncate to head, full text spilled. */
   readOutputCap: "H1b",
+  /** Bash (destructive confirm) — H2: sudo/rm/forced git/package installs/
+   *  DB drops need approval; safety floor — cannot configure below "error". */
   destructiveConfirm: "H2",
+  /** Git (commit lint) — R9: `git commit -m` checked against the commitlint
+   *  pattern; safety floor — cannot configure below "error". */
   commitMessageLint: "R9",
+  /** Bash (re-run) — R10: identical re-run ≤10 min after its last success
+   *  with no intervening mutation blocks; watchers and retries exempt. */
   rerunGuard: "R10",
+  /** Bash (reblock) — RB: verbatim re-send of a just-blocked command
+   *  escalates with a dedicated reason. */
   reblockEscalation: "RB",
+  /** Toolchain (pnpm pin) — TC1: npm/npx/yarn in a pnpm-pinned repo blocks;
+   *  use `pnpm run`/`exec`/`dlx`. */
   toolchainPnpm: "TC1",
+  /** Toolchain (node pin) — TC2: node-family binary missing the exact
+   *  `.nvmrc`/`engines` pin warns; prefix `nvm use <pin> &&`. */
   toolchainNode: "TC2",
+  /** Search (scope) — SS1: recursive grep/rg with no path or glob scope
+   *  blocks; scope it (`rg PATTERN path/`). */
   searchScope: "SS1",
+  /** Search (mid-pipe) — SS2: a grep segment reached mid-pipe blocks; use
+   *  single-process `rg PATTERN path/`. */
   searchMidPipe: "SS2",
+  /** Search (replace flag) — SS4: `rg` carrying `-r`/`--replace` (display
+   *  substitution) warns; drop the flag. */
   searchReplaceFlag: "SS4",
+  /** Search (find-first) — SS3: a find-headed segment warns; use
+   *  `fd PATTERN path/`. */
   findFirst: "SS3",
+  /** Hygiene (error swallow) — SE1: non-blocking note when a command tails
+   *  `|| true`, hiding the real error. */
   errorSwallow: "SE1",
+  /** Hygiene (reader-bypass) — SE2: non-blocking note when `sed -n`/`cat`
+   *  reads a file — the printed lines still certify. */
   readerBypass: "SE2",
+  /** Hygiene (view credit) — VC: printed lines of a mappable view command
+   *  (head/tail/sed -n/cat) certify read spans; any non-"off" enables. */
   bashViewCredit: "VC",
+  /** Search (portability) — PB1: `grep -P` on darwin warns; use `rg -P`
+   *  or `grep -E`. */
   searchPortability: "PB1",
+  /** Cadence — CN: non-blocking nudge at ~120 turns / ~150K context tokens;
+   *  resets on compaction. */
   cadenceNudge: "CN",
+  /** Edits (loop guard) — LG1: note at the 4th same-path edit in a turn,
+   *  one-shot block at the 7th ("summarize, then ask"); resets per turn. */
   loopGuard: "LG1",
+  /** Bash (failure streak) — R11: ≥5 consecutive tool failures with no
+   *  landed mutation block the next shell call. */
   failureLoopGuard: "R11",
+  /** Phase (label) — PH1: advisory only, never blocks; labels the turn's
+   *  stage, one "recovering" note per turn. */
   phaseNudge: "PH1",
+  /** Bash (output scrub) — OS: lossless-or-labeled compaction before the H1
+   *  cap — ANSI stripped, passing tests aggregated, failures kept verbatim. */
   outputScrub: "OS",
 } as const;
 
