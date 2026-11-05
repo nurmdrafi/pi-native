@@ -94,6 +94,10 @@ Every repo script is exposed through `package.json` — run `npm run <name>` fro
 
 Conventional commits are enforced by husky + commitlint. Release CI extracts the version from `CHANGELOG.md` on push to `main`.
 
+Version-gated git flags: `git stash push --staged` needs git ≥2.35 — older exits 129, and a chained `stash pop` then pops a pre-existing stash into conflicts. Never chain `stash pop` after a possibly-failed `stash push`; recover with `git checkout HEAD -- <conflicted>` + `git rm -f <modify/delete>`.
+
+Prompt templates (`prompts/*.md`) expand from a mid-session cache: after editing one, pass arguments as plain text or restart the session before relying on the edited body.
+
 ### Update when
 
 | File                           | Update when                                                          |

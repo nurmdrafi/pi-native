@@ -140,4 +140,5 @@ Then summarize top 3 changes in chat, in user's own context, say where report sa
 - Dollars priced per session from own model mix (rates derived from sessions' own logged `usage.cost`) — token ranking + dollar ranking can legitimately disagree. When they do, dollar order = one to act on; call it out.
 - `DUP_TOOL_CALL` on `read` was path-keyed in pre-2026-10-10 digests (normalizer dropped `offset`/`limit`) — before attributing read dup as waste, fetch `tool_input`, compare windows: disjoint windows = continuation reads, not dups. Keying fixed for `read` 2026-10-10 (same class as 2026-09-14 `edit` fix); old reports + archived digests still carry false positives.
 - Peak context can exceed 200K on large-context models; not a bug.
+- Count-based sweeps self-pollute: subagent prompts carrying the search strings and extension source echoed into toolResults both match — classify by record role (toolResult vs assistant text), exclude audit-session ids and repro fixtures before counting.
 - Healthy directory (hit ratio >0.95, near-linear growth) → short report saying so; never manufacture findings.

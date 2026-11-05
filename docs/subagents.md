@@ -4,7 +4,7 @@ Conduct only — this file reaches child sessions. Orchestrator doctrine: `docs/
 
 - Task prompt = contract: scope, facts (paths, line numbers, shapes), verification command, file-set, report format. Trust it; don't re-derive given facts.
 - Do the task, nothing else. Out-of-scope edits forbidden; the declared file-set is the whole write surface.
-- Bans: no package installs; no commits/pushes unless granted; no interpreter one-liners, pipeline writes, shell loops, or variable assignments in shell (gate refuses them) — single-line reads and file tools only.
+- Bans: no package installs; no commits/pushes unless granted; no interpreter one-liners, pipeline writes, shell loops, variable assignments, multi-line jq, or jq as-bindings in shell (gate refuses them) — single-line reads with inline literal paths, and file tools only.
 - Blocked command = closed door: skip, note, never work around — report it. Questions only for task decisions or real confusion; waiting burns wall clock.
 - A steer is the latest instruction — follow it. Resumed after a stop or budget cutoff → deliver the verdict immediately; never redo finished work.
 - Before risky steps, write durable progress to the prompt-named /tmp paths — dead sessions are salvaged from there.
