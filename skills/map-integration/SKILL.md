@@ -60,11 +60,80 @@ const DeckGLOverlay = (props: MapboxOverlayProps) => {
 - Recreating layer instances per render fine (deck diffs props); appending live data must not rebuild whole buffer — append into stable structure or one layer per chunk.
 - Reuse existing layers (marker/trace/boundary) before writing new — search repo's layer components first.
 - Composite-layer performance patterns — stable accessors, `updateState` caches, boolean updateTriggers: [references/composite-layer-perf.md](references/composite-layer-perf.md).
+
+### Styled scatter markers (design pins: shadow, uniform stroke, pulse selection)
+
+Beautified marker sets (design mockup fidelity) use a three-part pattern — colors in config, layer pair per category, DOM overlay for selection:
+
+- Colors live in ONE config object (e.g. `RETAIL_MAP_COLORS` in `app.config.ts`); deck.gl wants `[r, g, b, a]`, so keep a `hexToRgb('#RRGGBB') → [r,g,b]` helper next to the config consumers and spread `255` alpha at the layer.
+- Two layers per category: a shadow underlay directly beneath its pin layer (deck draws array order, later on top). deck.gl circles cannot render a CSS `box-shadow`; an underlay circle (radius +2px, `[0,0,0,89]`, `stroked: false`, `pickable: false`) reads as the soft pin shadow from designs.
+- Pin layer keeps ONE stroke for every state (constant `getLineColor`/`getLineWidth`). Selection visuals never live in layer accessors — render a DOM `<Marker>` overlay at the selected feature's coords with a CSS pin (white border, box-shadow, `scale(1.25)` + amber ring when selected) and a pulse keyframe ring. Accessors stay selection-free → no accessor/updateTriggers churn per click.
+- Keep `getRadius` consistent with `radiusMinPixels`/`radiusMaxPixels` (clamps win anyway; mismatch confuses).
+
+```tsx
+// shadow underlay — CSS box-shadow stand-in (deck circles can't)
+new ScatterplotLayer({
+  id: 'outlets-shadow-layer', data: outlets,
+  radiusMinPixels: 10, radiusMaxPixels: 10,
+  stroked: false, filled: true, pickable: false,
+  getPosition: (d) => [Number(d.longitude), Number(d.latitude)],
+  getFillColor: () => [0, 0, 0, 89],
+}),
+new ScatterplotLayer({
+  id: 'outlets-layer', data: outlets,
+  radiusMinPixels: 8, radiusMaxPixels: 8, getRadius: () => 8,
+  stroked: true, filled: true, lineWidthUnits: 'pixels', pickable: true,
+  getPosition: (d) => [Number(d.longitude), Number(d.latitude)],
+  getFillColor: (d) => [
+    ...hexToRgb(d.value_growth >= 0 ? COLORS.positiveGrowth : COLORS.negativeGrowth),
+    255,
+  ],
+  getLineColor: () => [255, 255, 255, 255], // same stroke selected or not
+  getLineWidth: () => 2,
+  onClick: (info) => onOutletClick(info),
+})
+
+// selection overlay — DOM pin + pulse, one for the whole map
+<Marker
+  longitude={Number(selected.longitude)}
+  latitude={Number(selected.latitude)}
+>
+  <div className="map-marker selected">
+    <div className="map-marker-pin" style={{ backgroundColor: pinColor }} />
+    <div className="tap-feedback-ring" />
+  </div>
+</Marker>
+```
+
+```css
+.map-marker { position: absolute; transform: translate(-50%, -50%); cursor: pointer; }
+.map-marker-pin {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.map-marker.selected .map-marker-pin {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px #f59e0b, 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+.tap-feedback-ring {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 3px solid #2563eb;
+  animation: tap-pulse 1.4s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+  pointer-events: none;
+}
+@keyframes tap-pulse {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+}
+```
+
 - Dashboards share one template: `components/Map/DeckGLMap.jsx` (Map shell, `MAP.STYLES[0]`, throttled tooltip) + `OverLayers.jsx` (DeckGLOverlay above — `useControl` from `react-bkoi-gl`) + `Map/Layers/` composite layer classes (`TraceLayer`, `RouteLayer`…), all fed from Redux slice. Before writing new: diff sibling dashboard — forks of same shape.
 
 ## 5. Known map bugs / pitfalls (fixed before — keep guards)
 
-Twelve numbered guards in [references/known-pitfalls.md](references/known-pitfalls.md) — cited as `known-pitfalls.md #N` elsewhere. Covers: queryRenderedFeatures guards, mapbox-gl v3 drift, [lng, lat] order, geolocation validation, draw/polygon sync, geometry staleness, marker `dragend` capture, engine-clear-vs-state-clear, react-bkoi-gl component-vs-constructor exports, DrawControl callback-only architectures, draw-toolbar CSS mismatch, degenerate turf rings.
+Thirteen numbered guards in [references/known-pitfalls.md](references/known-pitfalls.md) — cited as `known-pitfalls.md #N` elsewhere. Covers: queryRenderedFeatures guards, mapbox-gl v3 drift, [lng, lat] order, geolocation validation, draw/polygon sync, geometry staleness, marker `dragend` capture, engine-clear-vs-state-clear, react-bkoi-gl component-vs-constructor exports, DrawControl callback-only architectures, draw-toolbar CSS mismatch, degenerate turf rings, deck.gl `zIndex` inert prop.
 
 ## 6. Camera idioms
 
