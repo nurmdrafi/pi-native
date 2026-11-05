@@ -52,6 +52,7 @@
 - Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push.
 - Tool-defect lessons carry path, file size, and exact payload (anchor text or hash) so a replay reproduces it.
 - A tool writing output/state to a chosen path keeps it inside agent home — outside paths are refused.
+- File writes use `piwrite` when it is registered — see `docs/native-tools.md`.
 
 ## Tmux temporary panes
 - Before the first pane handover, run `tmux has-session -t tasks 2>/dev/null || tmux new-session -d -s tasks` — a missing server shows only an exit code (stderr silenced); `new-session -d` boots detached; identical on macOS and Linux; never reference socket paths.

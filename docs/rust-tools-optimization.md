@@ -158,6 +158,20 @@ indexed, so findings stay byte-identical. 3.0 → 1.9 s on four cores; the rest 
 the serial `bash -n` phase. Lesson: look for the loop that is already separate
 from the output-formatting logic; parallelising that one keeps parity trivial.
 
+**piwrite serve-protocol rework** — the framing was the ceiling, not the disk.
+Technique: replace JSON request bodies, whose parse-and-copy path capped the
+serve feeder at 59 MB/s, with raw length-prefixed frames read into one reused
+1 MiB buffer, and enlarge the stdin pipe with `F_SETPIPE_SZ` — at the 64 KB
+default every write costs a wakeup round-trip; enlarged, a kernel-fed stream
+sustains 1.0-1.2 GB/s (async JS feeder 905 MB/s). Against the built-in write,
+4 KB serve went 0.291 → 0.136 ms/op (2.1x) and the 100 MB one-shot 480 → 904
+MB/s (1.88x). Caveat: large-serve cases that still looked slow in-bench were
+traced to kernel dirty-page throttling — the regime switches once the run owes
+~100-150 MB of unflushed pages — not to the tool. Stage tables and raw frames:
+[../benchmark/piwrite/results/summary-2026-11-05-rawframe3.md](../benchmark/piwrite/results/summary-2026-11-05-rawframe3.md).
+Lesson: when throughput is the goal, size the pipe and the framing before
+blaming the serializer.
+
 **Fixed cost usually wins the ranking.** In-process tool-handler time is ~96 µs
 mean / 81 µs p50 per call, while a one-shot spawn is ~3.1-3.5 ms and a warm
 daemon answers at ~0.08 ms p50. For a short call, moving from one-shot to daemon

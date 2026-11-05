@@ -14,7 +14,7 @@
 ├── skills/                   # one dir per skill: SKILL.md + scripts/ references/ assets/
 ├── extensions/               # Always-on TS extensions (permission-gate, subagents, handoff)
 ├── agents/                   # Subagent definitions
-├── rust-tools/             # Rust workspace: piread, piedit, pibash, pidx
+├── rust-tools/             # Rust workspace: piread, piedit, pibash, piwrite, pidx
 ├── benchmark/                # Model-graded benchmark tasks + validators; runs/ = wall-clock harness reports
 ├── scripts/                  # Repo tooling (bootstrap, agents-lint, gate-eval; doc:check runs the native docheck binary)
 ├── prompts/                  # /command prompt templates (/issue, /ship, /update-changelog)
@@ -38,7 +38,7 @@
 | OS           | macOS or Linux                                        |
 | Terminal     | Any modern terminal                                   |
 | tmux         | Only if using subagents — see [Subagents](subagents.md) |
-| Rust (cargo) | Builds the native tools `piread`, `piedit`, `pibash`, and `pidx` |
+| Rust (cargo) | Builds the native tools `piread`, `piedit`, `pibash`, `piwrite`, and `pidx` |
 | Git          | For sync; `~/.pi/agent` is itself a repo              |
 
 Native tools register unconditionally and always run the Rust binary; nothing opts out via env. Choosing pi's built-in `read`/`bash`/`edit` is configuration: leave that extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`. Bootstrap prints the rustup command if cargo is missing.
@@ -110,7 +110,7 @@ Prompt templates (`prompts/*.md`) expand from a mid-session cache: after editing
 ## Always-on extensions (summary)
 
 - **`permission-gate/`**, **`subagents/`** — see their own docs; full rule catalog and hook tables: [`extensions/README.md`](../extensions/README.md).
-- **`piread/`, `piedit/`, `pibash/`, `pidx/`** — register the native tools: [native-tools.md](native-tools.md).
+- **`piread/`, `piedit/`, `pibash/`, `piwrite/`, `pidx/`** — register the native tools: [native-tools.md](native-tools.md).
 - **`compact-editor/`** — caps the prompt editor height (default 10 lines, `PI_COMPACT_EDITOR_LINES`) so a long prompt or paste cannot push the transcript off screen; keeps the buffer head and tail with an `[... N more lines ...]` notice between them.
 - **`self-heal/`** — on `session_start` runs `scripts/sync-agent-bin.mjs` so the shell PATH pin, native binaries, and the PCRE2 `rg` stay correct after a pull, a pi update, or on a fresh machine. Idempotent, never compiles, never throws, and silent when healthy.
 - **`handoff/`** — `/handoff <goal>` drafts a context-transfer prompt from the session, opens it in the editor, then opens the new session with the draft; nothing is written to disk.

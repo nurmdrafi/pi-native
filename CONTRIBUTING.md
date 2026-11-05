@@ -30,7 +30,8 @@ toolchain for `rust-tools/` work.
 
 Benchmarks and audits are manual drivers, never part of the gate:
 `npm run bench:piread`, `npm run bench:piedit`, `npm run bench:pibash`,
-`npm run audit:session`, `npm run audit:bin-diff` (see `tests/README.md`).
+`npm run bench:piwrite`, `npm run audit:session`, `npm run audit:bin-diff`
+(see `tests/README.md`).
 
 ## Conventions
 
@@ -53,7 +54,7 @@ Benchmarks and audits are manual drivers, never part of the gate:
 | Path | Contents |
 | --- | --- |
 | `extensions/` | TypeScript extensions (permission gate, native tool dispatch) |
-| `rust-tools/` | native binaries: `piread`, `piedit`, `pibash`, `pidx`, `docheck` |
+| `rust-tools/` | native binaries: `piread`, `piedit`, `pibash`, `piwrite`, `pidx`, `docheck` |
 | `tests/` | unit, integration, parity, gate, benchmark, tools (bench/audit drivers) |
 | `docs/` | reference documentation and plans |
 | `skills/` | agent skills, each a `SKILL.md` with YAML frontmatter |

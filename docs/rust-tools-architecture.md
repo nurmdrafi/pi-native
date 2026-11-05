@@ -51,14 +51,15 @@ safe path for changing one of these tools). Per-crate build logs live in
 
 ## Crate layout and dependencies
 
-A Cargo workspace (`rust-tools/Cargo.toml`, resolver 2) holds five binary
-crates sharing one `Cargo.lock` and one `target/`:
+A Cargo workspace (`rust-tools/Cargo.toml`, resolver 2) holds the binary
+crates under one `Cargo.lock` and one `target/`:
 
 | Crate | Binary | Dependency surface |
 | --- | --- | --- |
 | `piread` | `bin/piread` | `serde`, `serde_json` (`preserve_order`), `memchr` |
 | `piedit` | `bin/piedit` | + `unicode-normalization` (NFKC); `tempfile` (dev) |
 | `pibash` | `bin/pibash` | `serde`, `serde_json` (`preserve_order`); `tempfile` (dev) |
+| `piwrite` | `bin/piwrite` | `serde`, `serde_json` (`preserve_order`) |
 | `pidx` | `bin/pidx` | + `sha1`; `preserve_order`, `float_roundtrip` |
 | `docheck` | `bin/docheck` | none — std only (all four families of the former `scripts/doc-check.mjs`, deleted after byte-parity; see [plans/permission_gate_implementation_plan.md](plans/permission_gate_implementation_plan.md) §13) |
 
@@ -110,14 +111,14 @@ which never enters model-visible content.
 
 ### Rung 0 — registration and entry conditions
 
-All three tool extensions register a **distinct tool name** (`pibash`,
-`piread`, `piedit`) alongside the built-in rather than shadowing it. The
+All four tool extensions register a **distinct tool name** (`pibash`,
+`piread`, `piedit`, `piwrite`) alongside the built-in rather than shadowing it. The
 parameter schema is copied verbatim from `createBashToolDefinition` /
-`createReadToolDefinition` / `createEditToolDefinition` so input normalization
+`createReadToolDefinition` / `createEditToolDefinition` / `createWriteToolDefinition` so input normalization
 and sampling behave identically; only name/label/description/promptGuidelines/
 execute/renderCall are native. Registration is unconditional — there is no env
 opt-out, because a native tool never falls back to a built-in executor:
-`PI_BASH_BIN` / `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_PIDX_BIN` override the
+`PI_BASH_BIN` / `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_WRITE_BIN` / `PI_PIDX_BIN` override the
 binary path for parity tests. Choosing a built-in instead is configuration: do
 not load the extension, or set the gate's `nativeReadFirst` / `nativeBashFirst`
 to `off`.
@@ -138,6 +139,7 @@ Entry conditions decided **before** the ladder runs:
 | `pibash` | a bad `timeout` is validated first and thrown once — it must not spawn twice; an empty command is a usage error |
 | `piread` | non-integer / pathological `offset`/`limit` and empty / non-string `hits` are usage errors; `hits` combined with `offset`/`limit` rejected before dispatch (never a silent paged read); nothing routes to a built-in — images and binary content come back as lossy text |
 | `piedit` | the whole ladder runs inside `withFileMutationQueue(absPath)`; a terminal failure throws from inside the queue — there is no built-in rung, so the sentinel is gone |
+| `piwrite` | **one-shot only** — a write is one process lifetime of work, so no daemon rung; the content is piped as raw stdin bytes (never argv); terminal failures throw to the model |
 | `pidx` | **no ladder** — one-shot `execFile` per call (indexing is infrequent; a daemon would never amortize); failures throw to the model |
 
 ### Request framing per tool
@@ -154,6 +156,7 @@ client keeps a `nextId` counter plus a `pending` map keyed by id:
 - `piedit`: `{id, path, edits, renderDiff}` — `renderDiff: true` asks the
   daemon to return the rendered `{diff, patch, firstChangedLine}` instead of
   the content pair.
+- `piwrite`: no daemon rung — the extension spawns one-shot per call; its `--serve` transport (kept for the bench arms) frames each request as one `{"path","bytes"}` header line followed by exactly `bytes` **raw** body bytes, so bodies never pay the JSON tax of escaping and quoting. The serve loop best-effort grows its stdin pipe to 1 MiB (`F_SETPIPE_SZ`, raw `extern "C"` `fcntl` — no `libc` crate): the kernel's 64 KiB pipe default caps any feeder at one wakeup round trip per write.
 
 Responses to unknown ids (late answers to aborted calls) are dropped
 silently. An unparseable response line kills the daemon: every pending call
