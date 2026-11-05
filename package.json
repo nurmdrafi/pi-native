@@ -20,6 +20,7 @@
     "bench:piread": "node tests/tools/bench/piread.mjs",
     "bench:pibash": "node tests/tools/bench/pibash.mjs",
     "bench:piedit": "node tests/tools/bench/piedit.mjs",
+    "bench:piwrite": "node benchmark/piwrite/bench.mjs --full",
     "check": "npm run typecheck && npm run lint:agents && npm run doc:check && npm test",
     "audit:session": "node tests/tools/audit/session-blocks.mjs",
     "audit:bin-diff": "node tests/tools/audit/bin-diff.mjs",
