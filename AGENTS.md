@@ -54,6 +54,7 @@
 - A tool writing output/state to your chosen path keeps it inside agent home — outside paths are refused.
 
 ## Tmux temporary panes
+- Before the first pane handover: `tmux has-session -t tasks 2>/dev/null || tmux new-session -d -s tasks` — a missing server shows only as exit code (stderr silenced); `new-session -d` boots it detached; identical on macOS and Linux, socket paths never referenced.
 - Task pane commands: never `tmux kill-pane` in the process string (races, "can't find pane"); chain with `;` not `&&` so the countdown runs either way; final instruction = visible countdown, pane closes itself (`remain-on-exit` off = default; a config turning it on keeps dead panes).
 - Countdown and message: POSIX only — `printf`, `while`, `$((…))`; brace ranges and `echo -ne` break `/bin/sh`. Example: `i=5; while [ "$i" -ge 1 ]; do printf 'Closing pane in %s seconds...\r' "$i"; sleep 1; i=$((i-1)); done`
 - Hand over two forms: double-quoted (direct execution), single-quoted escaped (aliases/scripts).
