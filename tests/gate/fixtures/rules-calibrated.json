@@ -10,6 +10,7 @@
     "locateFirst": "warn",
     "nativeReadFirst": "error",
     "nativeBashFirst": "error",
+    "nativeWriteFirst": "off",
     "outputCap": "error",
     "readOutputCap": "error",
     "destructiveConfirm": "error",

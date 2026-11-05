@@ -763,6 +763,17 @@ export default function (pi: ExtensionAPI) {
         return blockCall(
           "Permission Gate (Malformed): write call has no path string — re-send the tool call with input.path.",
         );
+      // P3 (2026-11-05): piwrite-first. Built-in `write` is blocked so the
+      // native pipeline (same schema — path + content, copied verbatim from
+      // the built-in's definition) runs; piwrite is a one-shot spawn with
+      // the content piped over stdin, never argv. Skipped when the extension
+      // is not loaded — an absent `piwrite` means the user chose the
+      // built-in tool, and blocking `write` would strand the agent. The
+      // rule's own severity is the switch.
+      if (ruleEnabled("nativeWriteFirst") && isToolCallEventType("write", event))
+        return blockCall(
+          "Token Economy (Piwrite-first): use the piwrite tool (piwrite {path, content}) instead of write.",
+        );
       const path = normPath(event.input.path, ctx?.cwd);
       const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);

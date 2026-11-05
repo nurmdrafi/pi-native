@@ -47,6 +47,9 @@ export const RULE_IDS = {
   locateFirst: "R1c",
   nativeReadFirst: "P1",
   nativeBashFirst: "P2",
+  /** Hygiene (native write) — P3: built-in write blocked while piwrite is
+   *  registered; "off" restores the built-in. */
+  nativeWriteFirst: "P3",
   outputCap: "H1",
   readOutputCap: "H1b",
   destructiveConfirm: "H2",
