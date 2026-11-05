@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whenever no tmux server was running. Error classification is unchanged; a probe-child regression
   test guards it.
 
+- **git child stderr no longer leaks into the terminal.** Both sync git runners — the result
+  inbox's `runGitSync` and the bounded delivery-path runner — pin stdio, so a failed git (missing
+  repo, stale index lock, timeout kill) captures its `fatal:` lines on the thrown error instead of
+  printing them from paths that already treat git failure as fail-soft. Probe-child regression
+  tests guard both runners.
+
 ## [1.71.0] - 02-11-2026
 
 ### Added

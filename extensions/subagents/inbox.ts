@@ -129,8 +129,19 @@ export type GitRunner = (args: string[]) => string;
 /** Asynchronous git runner: the callback receives stdout, or null on failure. */
 export type AsyncGitRunner = (args: string[], cb: (stdout: string | null) => void) => void;
 
+/** stdio for every synchronous git call: execFileSync forwards a failed
+ *  child's stderr to the parent's own stderr unless stdio is pinned, which
+ *  would print raw `fatal:` lines into the user's terminal from paths that
+ *  already treat git failure as fail-soft; piping keeps the text captured
+ *  on the thrown error for callers that inspect it. */
+export const GIT_SYNC_STDIO: ["ignore", "pipe", "pipe"] = ["ignore", "pipe", "pipe"];
+
 const runGitSync: GitRunner = (args) =>
-  execFileSync("git", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }) as string;
+  execFileSync("git", args, {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: GIT_SYNC_STDIO,
+  }) as string;
 
 const runGitAsync: AsyncGitRunner = (args, cb) => {
   try {

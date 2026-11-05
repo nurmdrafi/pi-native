@@ -80,7 +80,7 @@ import {
 } from "./budget.ts";
 import { sweepRunningSubagents } from "./reconcile.ts";
 import { scanToolManifests } from "./tool-manifest.ts";
-import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, subagentHistoryPath, usageTokens, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra, type SubagentHistoryRecord } from "./inbox.ts";
+import { appendSubagentResult, buildPriorWorkBlock, computeFilesChanged, drainSubagentResults, extractFilesRead, gitDiffForBaseline, GIT_SYNC_STDIO, prepareGitBaseline, readRecentResults, repoRootFor, resultInboxPath, subagentHistoryPath, usageTokens, type AsyncGitRunner, type GitRunner, type SubagentHistoryExtra, type SubagentHistoryRecord } from "./inbox.ts";
 import {
   getSubagentActivityFile,
   readSubagentActivityFile,
@@ -2565,6 +2565,7 @@ function resolveResumeLaunchBehavior(): { autoExit: boolean; interactive: boolea
 
 export const __test__ = {
   borderLine,
+  boundedGitSync: (args: string[]) => boundedGitSync(args),
   getShellReadyDelayMs,
   clearAgentDefCache: () => agentDefCache.clear(),
   pendingSpawns,
@@ -3325,6 +3326,7 @@ const boundedGitSync: GitRunner = (args) =>
     maxBuffer: 16 * 1024 * 1024,
     timeout: GIT_BOUND_MS,
     killSignal: "SIGKILL",
+    stdio: GIT_SYNC_STDIO,
   }) as string;
 
 const boundedGitAsync: AsyncGitRunner = (args, cb) => {
