@@ -19,8 +19,14 @@ import { spawn } from "node:child_process";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import {
+  getLanguageFromPath,
+  highlightCode,
+  keyHint,
+  type ExtensionAPI,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 const extDir = dirname(fileURLToPath(import.meta.url));
@@ -250,10 +256,113 @@ export default function piwriteExtension(pi: ExtensionAPI): void {
       content: Type.String({ description: "Content to write to the file" }),
     }),
     execute,
-    renderCall(args, theme, _context) {
-      let text = theme.fg("success", theme.bold("piwrite "));
-      text += theme.fg("text", `${args.path}`);
-      return new Text(text, 0, 0);
+    renderCall(args, theme, context) {
+      const component = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+      component.setText(formatPiwriteCall(args, { expanded: context.expanded }, theme));
+      return component;
+    },
+    renderResult(result, _options, theme, context) {
+      const output = formatPiwriteResult({ ...result, isError: context.isError }, theme);
+      if (!output) {
+        const component = (context.lastComponent as Container | undefined) ?? new Container();
+        component.clear();
+        return component;
+      }
+      const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+      text.setText(output);
+      return text;
     },
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Interactive display — parity with the built-in write tool's
+ * writeRenderers (pi's dist/core/tools/renderers/write.js). Preview and
+ * counting expressions below are copied from that file, not reinvented.
+ *
+ * Degraded vs the built-in, because the package root exports neither:
+ * - `renderToolPath` (home-shortened, hyperlinked path): the title shows
+ *   the verbatim path in the same accent color, same null/empty fallbacks.
+ * - `CodeHighlighter` + the streaming highlight cache: every render
+ *   recomputes the full highlight via the public `highlightCode` — the
+ *   same function `CodeHighlighter.highlight` delegates to on a miss, so
+ *   complete calls render identically (a >50-line streaming partial may
+ *   differ transiently: the built-in highlights its tail line-by-line).
+ * ------------------------------------------------------------------ */
+
+/** render-utils.js `str`: string passthrough, nullish → "", other → null. */
+function str(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  return null;
+}
+
+/** render-utils.js `replaceTabs`: one tab → three spaces. */
+function replaceTabs(text: string): string {
+  return text.replace(/\t/g, "   ");
+}
+
+/** render-utils.js `normalizeDisplayText`: strip carriage returns. */
+function normalizeDisplayText(text: string): string {
+  return text.replace(/\r/g, "");
+}
+
+/** write.js `trimTrailingEmptyLines`: drop empty lines off the tail. */
+function trimTrailingEmptyLines(lines: string[]): string[] {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1] === "") {
+    end--;
+  }
+  return lines.slice(0, end);
+}
+
+/** Degraded `renderToolPath` (render-utils.js) — see block comment. */
+function renderPiwritePath(rawPath: string | null, theme: Theme): string {
+  if (rawPath === null) return theme.fg("error", "[invalid arg]");
+  if (!rawPath) return theme.fg("toolOutput", "...");
+  return theme.fg("accent", rawPath);
+}
+
+/** write.js `formatWriteCall`, name and degraded path aside. */
+function formatPiwriteCall(args: unknown, options: { expanded?: boolean }, theme: Theme): string {
+  const renderArgs = args as { file_path?: unknown; path?: unknown; content?: unknown };
+  const rawPath = str(renderArgs?.file_path ?? renderArgs?.path);
+  const fileContent = str(renderArgs?.content);
+  let text = `${theme.fg("toolTitle", theme.bold("piwrite"))} ${renderPiwritePath(rawPath, theme)}`;
+  if (fileContent === null) {
+    text += `\n\n${theme.fg("error", "[invalid content arg - expected string]")}`;
+  } else if (fileContent) {
+    const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
+    const renderedLines = lang
+      ? highlightCode(replaceTabs(normalizeDisplayText(fileContent)), lang)
+      : normalizeDisplayText(fileContent).split("\n");
+    const lines = trimTrailingEmptyLines(renderedLines);
+    const totalLines = lines.length;
+    const maxLines = options.expanded ? lines.length : 10;
+    const displayLines = lines.slice(0, maxLines);
+    const remaining = lines.length - maxLines;
+    text += `\n\n${displayLines.map((line) => (lang ? line : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
+    if (remaining > 0) {
+      text += `${theme.fg("muted", `\n... (${remaining} more lines, ${totalLines} total,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+    }
+  }
+  return text;
+}
+
+/** write.js `formatWriteResult`: nothing on success, error text otherwise. */
+function formatPiwriteResult(
+  result: { isError?: boolean; content: ReadonlyArray<{ type: string; text?: string }> },
+  theme: Theme,
+): string | undefined {
+  if (!result.isError) {
+    return undefined;
+  }
+  const output = result.content
+    .filter((c) => c.type === "text")
+    .map((c) => c.text || "")
+    .join("\n");
+  if (!output) {
+    return undefined;
+  }
+  return `\n${theme.fg("error", output)}`;
 }
