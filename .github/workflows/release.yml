@@ -14,6 +14,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       release_notes: ${{ steps.release-notes.outputs.notes }}
+      should_release: ${{ steps.version.outputs.should_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -43,18 +44,23 @@ jobs:
 
           VERSION=$(echo "$CHANGELOG_LINE" | cut -d'[' -f2 | cut -d']' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
-          # Gate: released tag must be strict x.y.z (hard fail, no continue)
+          # Release-readiness gates: a non-version top heading or an
+          # already-released version means "nothing to release" — exit green
+          # and let the release job's `if` skip.
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "ERROR: Extracted version '$VERSION' is not x.y.z"
+            echo "::notice::CHANGELOG top heading is '$VERSION' (not x.y.z) — skipping release"
             echo "CHANGELOG line: $CHANGELOG_LINE"
-            exit 1
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           # Immutable-tag guard: ask the remote, not the local clone
           if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
-            echo "ERROR: tag v$VERSION already exists on the remote"
-            exit 1
+            echo "::notice::tag v$VERSION already exists — release for this version is done, skipping"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
 
           echo "Successfully extracted version from CHANGELOG.md: $VERSION"
           echo "CHANGELOG line: $CHANGELOG_LINE"
@@ -75,6 +81,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     permissions:
       contents: write
     runs-on: ubuntu-latest
