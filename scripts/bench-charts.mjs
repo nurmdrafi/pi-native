@@ -5,13 +5,16 @@
  * Parses the hand-written markdown benchmark summaries under benchmark/ and
  * docs/native-tools.md, then renders ONE consolidated dark-mode SVG
  * (docs/assets/benchmarks/all-tools.svg) with two stacked panels:
- *   A — LATENCY: grouped bars, native tool vs baseline, p50 ms, log10 scale,
- *       one representative case per tool (piread, pibash, piedit, piwrite, pidx).
- *   B — THROUGHPUT: piwrite 100 MB one-shot vs node-builtin, MB/s, linear.
+ *   A — LATENCY: grouped bars, native tool vs baseline, p50 ms, per-row
+ *       linear scale (exact proportions within a row), one representative
+ *       case per tool (piread, pibash, piedit, piwrite, pidx).
+ *   B — THROUGHPUT: all five native tools, one 32 MiB case each, native vs
+ *       baseline, MB/s, linear (sources: benchmark/runs/throughput-*.md).
  * Every bar's value label is the verbatim number from its source table; the
  * xN.n sublabels are computed baseline/native ratios (stated in the desc).
- * The SVG <desc> and footer cite every source file plus the honest caveat
- * (piwrite serve medians at 1-100 MB; kernel dirty-page throttling).
+ * The SVG <desc> cites every source file plus the honest caveat (piwrite
+ * serve medians at 1-100 MB; kernel dirty-page throttling); the visible
+ * footer is one short line.
  *
  * Deterministic: fixed sources, fixed ordering, no timestamps, no randomness
  * — rerunning writes a byte-identical file.
@@ -23,13 +26,18 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT_FILE = resolve(ROOT, 'docs/assets/benchmarks/all-tools.svg');
+const OUT_FILE = resolve(ROOT, process.env.PI_BENCH_CHART_OUT ?? 'docs/assets/benchmarks/all-tools.svg');
 
 // ---- read-only sources --------------------------------------------------------
 const SRC_PIWRITE = 'benchmark/piwrite/results/summary-2026-11-05-rawframe3.md';
 const SRC_PIREAD = 'benchmark/runs/piread-microbench-2026-10-27.md';
 const SRC_PIBASH = 'benchmark/runs/pibash-microbench-2026-10-27.md';
 const SRC_PIEDIT = 'benchmark/runs/piedit-microbench-2026-10-27.md';
+const SRC_TP_PIREAD = 'benchmark/runs/throughput-piread-2026-11-07.md';
+const SRC_TP_PIBASH = 'benchmark/runs/throughput-pibash-2026-11-07.md';
+const SRC_TP_PIEDIT = 'benchmark/runs/throughput-piedit-2026-11-07.md';
+const SRC_TP_PIWRITE = 'benchmark/runs/throughput-piwrite-2026-11-07.md';
+const SRC_TP_PIDX = 'benchmark/runs/throughput-pidx-2026-11-07.md';
 const SRC_NATIVE_TOOLS = 'docs/native-tools.md';
 const SRC_RUST_OPT = 'docs/rust-tools-optimization.md';
 
@@ -134,6 +142,21 @@ function parsePidx(text) {
   };
 }
 
+// Throughput arms (2026-11-07): one '## Throughput (MB/s)' table per tool,
+// first data row is the representative case; columns 'baseline MB/s' /
+// 'native MB/s'. Numbers are MB/s = 32 MiB ÷ p50 s, one decimal.
+function parseThroughput(text, tool) {
+  const table = parseTables(text).find((t) => t.header.includes('baseline MB/s'));
+  if (!table) throw new Error(`no throughput table for ${tool}`);
+  const r = rowMaps(table)[0];
+  if (!r) throw new Error(`no throughput row for ${tool}`);
+  return {
+    caseName: r.case.replace(/-32mib$/, ''), // payload stated once, in the panel header
+    baseline: cell(r['baseline MB/s']),
+    native: cell(r['native MB/s']),
+  };
+}
+
 // ---- data assembly ---------------------------------------------------------------
 const read = (p) => readFileSync(resolve(ROOT, p), 'utf8');
 
@@ -145,7 +168,6 @@ const bySize = (name) => {
 };
 const s4 = bySize('4KB');
 const s1 = bySize('1MB');
-const s100 = bySize('100MB');
 
 const pickCase = (rows, name, src) => {
   const r = rows.find((x) => x.caseName === name);
@@ -156,6 +178,12 @@ const pireadOne = pickCase(parseMicrobench(read(SRC_PIREAD), 'piread'), 'one-lin
 const pibashSeq = pickCase(parseMicrobench(read(SRC_PIBASH), 'pibash'), 'seq50000', SRC_PIBASH);
 const pieditBig = pickCase(parseMicrobench(read(SRC_PIEDIT), 'piedit'), 'large-1mib', SRC_PIEDIT);
 const pidx = parsePidx(read(SRC_NATIVE_TOOLS));
+const tp = (src, tool) => parseThroughput(read(src), tool);
+const tpPiread = tp(SRC_TP_PIREAD, 'piread');
+const tpPibash = tp(SRC_TP_PIBASH, 'pibash');
+const tpPiedit = tp(SRC_TP_PIEDIT, 'piedit');
+const tpPiwrite = tp(SRC_TP_PIWRITE, 'piwrite');
+const tpPidx = tp(SRC_TP_PIDX, 'pidx');
 
 const SERIES = [
   { key: 'baseline', name: 'built-in baseline (oracle / node-builtin / cold parse)', color: C.base },
@@ -163,8 +191,9 @@ const SERIES = [
 ];
 
 const panelA = {
-  header: 'A — LATENCY · p50 ms per op, log10 scale · lower is better',
-  yLabel: 'p50 latency (ms, log10 scale)',
+  header: 'A — LATENCY · p50 ms per op · bars scaled per row · lower is better',
+  yLabel: 'p50 latency — % of row max',
+  unit: 'ms',
   groups: [
     { label: 'piread: one-line read', cells: { baseline: pireadOne.baseline, native: pireadOne.native } },
     { label: 'pibash: seq50000', cells: { baseline: pibashSeq.baseline, native: pibashSeq.native } },
@@ -175,14 +204,16 @@ const panelA = {
 };
 
 const panelB = {
-  header: 'B — THROUGHPUT · piwrite 100 MB one-shot vs node-builtin · MB/s · higher is better',
-  yLabel: 'throughput (MB/s)',
+  header: 'B — THROUGHPUT · 32 MiB per op · MB/s · higher is better',
+  yLabel: 'throughput — % of row max',
+  unit: 'MB/s',
   ratio: 'nativeOverBase',
   groups: [
-    {
-      label: 'piwrite: 100MB one-shot',
-      cells: { baseline: s100.arms['node-builtin'].mbs, native: s100.arms['piwrite-oneshot'].mbs },
-    },
+    { label: `piread: ${tpPiread.caseName}`, cells: { baseline: tpPiread.baseline, native: tpPiread.native } },
+    { label: `pibash: ${tpPibash.caseName}`, cells: { baseline: tpPibash.baseline, native: tpPibash.native } },
+    { label: `piedit: ${tpPiedit.caseName}`, cells: { baseline: tpPiedit.baseline, native: tpPiedit.native } },
+    { label: `piwrite: ${tpPiwrite.caseName}`, cells: { baseline: tpPiwrite.baseline, native: tpPiwrite.native } },
+    { label: `pidx: ${tpPidx.caseName}`, cells: { baseline: tpPidx.baseline, native: tpPidx.native } },
   ],
 };
 
@@ -194,6 +225,7 @@ const caveat = `caveat: piwrite serve p50 trails built-in at 1–100 MB in-bench
 
 const FOOTER = [
   `sources: benchmark/runs/{piread,pibash,piedit}-microbench-2026-10-27.md · ${SRC_PIWRITE} (mode=--full)`,
+  `throughput (panel B): benchmark/runs/throughput-{piread,pibash,piedit,piwrite,pidx}-2026-11-07.md · 32 MiB per op · N=10/arm (5 warmup) · MB/s = 32 ÷ p50 s`,
   `${SRC_NATIVE_TOOLS} pidx row: 511 sessions / 110 MB, cold re-parse 2.1 s → warm 28 ms (re-measured 2026-10-28)`,
   caveat,
   'bar labels verbatim from source tables; xN.n sublabels = improvement ratio, computed (latency: baseline/native; throughput: native/baseline); full source paths in the SVG desc element',
@@ -203,8 +235,11 @@ const DESC = [
   TITLE,
   SUBTITLE,
   ...FOOTER,
-  `full paths: ${[SRC_PIREAD, SRC_PIBASH, SRC_PIEDIT, SRC_PIWRITE, SRC_NATIVE_TOOLS, SRC_RUST_OPT].join('; ')}`,
+  `full paths: ${[SRC_PIREAD, SRC_PIBASH, SRC_PIEDIT, SRC_PIWRITE, SRC_TP_PIREAD, SRC_TP_PIBASH, SRC_TP_PIEDIT, SRC_TP_PIWRITE, SRC_TP_PIDX, SRC_NATIVE_TOOLS, SRC_RUST_OPT].join('; ')}`,
 ].join(' | ');
+
+const FOOTER_SHORT =
+  'sources: benchmark/runs · benchmark/piwrite · docs/native-tools.md · bars scaled per row — citations in the SVG desc';
 
 // ---- SVG rendering -----------------------------------------------------------------
 const esc = (s) =>
@@ -214,21 +249,11 @@ const esc = (s) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-// Powers of ten stringify cleanly (1, 10, 0.1, 0.01, ...).
-const tickLabel = (v) => String(v);
-
-function niceLinearTicks(maxValue) {
-  const rough = maxValue / 5;
-  const pow = 10 ** Math.floor(Math.log10(rough));
-  const step = [1, 2, 2.5, 5, 10].map((k) => k * pow).find((s) => s >= rough);
-  const ticks = [];
-  for (let v = 0; v <= maxValue + step / 2; v += step) ticks.push(v);
-  return ticks;
-}
-
-// One panel of grouped bars. log=true → log10 scale (bar base = lowest tick);
-// log=false → linear scale (bar base = 0). Appends SVG fragments, returns bar count.
-function renderPanel(parts, { panel, top, bottom, log, barMax }) {
+// One panel of grouped bars. Bars are scaled PER ROW: within a row, bar
+// height is exactly proportional to the value; rows are not comparable
+// across each other (the value label and xN.n ratio carry the numbers).
+// Appends SVG fragments, returns bar count.
+function renderPanel(parts, { panel, top, bottom, barMax }) {
   const L = 96;
   const R = 26;
   const W = 980;
@@ -237,27 +262,24 @@ function renderPanel(parts, { panel, top, bottom, log, barMax }) {
   const plotW = plotR - plotL;
   const plotH = bottom - top;
 
-  const nums = panel.groups.flatMap((g) =>
-    SERIES.flatMap((s) => (g.cells[s.key] ? [g.cells[s.key].num] : [])),
-  );
-  const lo = Math.floor(Math.log10(Math.min(...nums)));
-  const hi = Math.max(Math.ceil(Math.log10(Math.max(...nums))), lo + 1);
-  const linMax = Math.max(...nums);
-  const ticks = log
-    ? Array.from({ length: hi - lo + 1 }, (_, i) => 10 ** (lo + i))
-    : niceLinearTicks(linMax);
-  const yOf = log
-    ? (v) => bottom - ((Math.log10(v) - lo) / (hi - lo)) * plotH
-    : (v) => bottom - (v / ticks[ticks.length - 1]) * plotH;
+  // Per-row linear scale: exact proportionality inside a row.
+  const rowMax = (g) =>
+    Math.max(...SERIES.flatMap((s) => (g.cells[s.key] ? [g.cells[s.key].num] : [])));
+  const yOfRow = (v, max) => bottom - (v / max) * (plotH - 22); // 22 px label headroom
+  const withUnit = (c) => {
+    if (/\d\s*(ms|s|MB\/s)$/i.test(c.raw)) return c.raw;
+    if (panel.unit === 'ms' && c.num >= 1000) return `${(c.num / 1000).toFixed(2)} s`;
+    return `${c.raw} ${panel.unit ?? 'ms'}`;
+  };
 
   parts.push(
     `<text x="${plotL}" y="${top - 14}" font-size="13" font-weight="700" fill="${C.text}">${esc(panel.header)}</text>`,
   );
-  for (const t of ticks) {
-    const y = yOf(t).toFixed(1);
+  for (let k = 0; k <= 100; k += 25) {
+    const y = (bottom - (k / 100) * (plotH - 22)).toFixed(1);
     parts.push(
-      `<line x1="${plotL}" y1="${y}" x2="${plotR}" y2="${y}" stroke="${C.grid}" stroke-width="1"/>`,
-      `<text x="${plotL - 10}" y="${y}" font-size="11" fill="${C.sub}" text-anchor="end" dominant-baseline="middle">${esc(tickLabel(t))}</text>`,
+      `<line x1="${plotL}" y1="${y}" x2="${plotR}" y2="${y}" stroke="${k === 0 ? C.axis : C.grid}" stroke-width="1"/>`,
+      `<text x="${plotL - 10}" y="${y}" font-size="11" fill="${C.sub}" text-anchor="end" dominant-baseline="middle">${k}%</text>`,
     );
   }
   parts.push(
@@ -277,10 +299,10 @@ function renderPanel(parts, { panel, top, bottom, log, barMax }) {
       if (!c) return;
       bars++;
       const x = center - innerW / 2 + slot * j + (slot - barW) / 2;
-      const yTop = yOf(c.num);
+      const yTop = yOfRow(c.num, rowMax(g));
       parts.push(
         `<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(bottom - yTop, 1).toFixed(1)}" fill="${s.color}"/>`,
-        `<text x="${(x + barW / 2).toFixed(1)}" y="${(yTop - 6).toFixed(1)}" font-size="11" fill="${C.text}" text-anchor="middle">${esc(c.raw)}</text>`,
+        `<text x="${(x + barW / 2).toFixed(1)}" y="${(yTop - 6).toFixed(1)}" font-size="11" fill="${C.text}" text-anchor="middle">${esc(withUnit(c))}</text>`,
       );
     });
     const labelFits = g.label.length * 6.6 <= gw;
@@ -318,13 +340,9 @@ function renderAllTools() {
     );
     lx += 34 + s.name.length * 7;
   }
-  const barsA = renderPanel(parts, { panel: panelA, top: 126, bottom: 468, log: true, barMax: 46 });
-  const barsB = renderPanel(parts, { panel: panelB, top: 550, bottom: 790, log: false, barMax: 110 });
-  FOOTER.forEach((line, i) => {
-    parts.push(
-      `<text x="96" y="${846 + i * 14}" font-size="10" fill="${C.sub}">${esc(line)}</text>`,
-    );
-  });
+  const barsA = renderPanel(parts, { panel: panelA, top: 126, bottom: 468, barMax: 46 });
+  const barsB = renderPanel(parts, { panel: panelB, top: 550, bottom: 790, barMax: 110 });
+  parts.push(`<text x="96" y="846" font-size="10" fill="${C.sub}">${esc(FOOTER_SHORT)}</text>`);
   parts.push(`</g></svg>\n`);
   return { svg: parts.join('\n'), bars: barsA + barsB, panels: 2 };
 }

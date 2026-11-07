@@ -19,6 +19,10 @@
  * Self-assertions (this is a sanity harness): every median/percentile is
  * finite, and the report file is written non-empty — exit 0 only then.
  * Sanity-run: node tests/piread-bench.mjs
+ *
+ * `--throughput` mode: 32 MiB full-read arm pair (built-in oracle vs
+ * piread daemon dispatch), 5 warmup + 10 measured ops, p50 → MB/s;
+ * prints the md table to stdout and exits — default mode is untouched.
  */
 import { execFile, execFileSync, spawn as spawnChild } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -105,16 +109,61 @@ if (!existsSync(BIN)) {
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 const fmt = (ms) => ms.toFixed(3);
 
-async function measureArm(tool, path) {
-  for (let i = 0; i < WARMUP; i++) await tool.execute(`w${i}`, { path });
+async function measureArm(tool, path, warmup = WARMUP, n = N) {
+  for (let i = 0; i < warmup; i++) await tool.execute(`w${i}`, { path });
   const samples = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < n; i++) {
     const a = process.hrtime.bigint();
     await tool.execute(`m${i}`, { path });
     samples.push(Number(process.hrtime.bigint() - a) / 1e6);
   }
   samples.sort((x, y) => x - y);
   return { p50: pct(samples, 0.5), p95: pct(samples, 0.95) };
+}
+
+// ---- --throughput mode: 32 MiB full-read, built-in oracle vs daemon ----
+// Runs ONLY this arm pair and prints the md table to stdout; default-mode
+// behavior and output tables are untouched. Payload: 32 MiB of identical
+// 64-byte lines (repeated-line corpus style, deterministic — no seed; the
+// sha256 prefix goes to stderr). Both arms use the no-window full-file
+// read ({ path } only — the closest existing code path, the same call
+// shape measureArm uses); case named full-read-32mib accordingly.
+if (process.argv.includes("--throughput")) {
+  const TP_MIB = 32;
+  const TP_WARMUP = 5;
+  const TP_N = 10;
+  const line = Buffer.from(`${"l".repeat(63)}\n`, "utf8"); // 64 bytes
+  const payload = Buffer.concat(Array.from({ length: (TP_MIB * 1024 * 1024) / line.length }, () => line));
+  assert.equal(payload.length, TP_MIB * 1024 * 1024);
+  const tpDir = mkdtempSync(join(tmpdir(), "piread-tp-"));
+  const tpPath = join(tpDir, "full-read-32mib.txt");
+  writeFileSync(tpPath, payload);
+  const o = await measureArm(oracle, tpPath, TP_WARMUP, TP_N); // baseline: built-in read, in-process
+  const p = await measureArm(wrapped, tpPath, TP_WARMUP, TP_N); // native: piread daemon dispatch
+  assert.ok(Number.isFinite(o.p50) && Number.isFinite(p.p50), "throughput: non-finite p50");
+  const mbs = (p50Ms) => (Math.round((TP_MIB / (p50Ms / 1000)) * 10) / 10).toFixed(1);
+  const { createHash } = await import("node:crypto");
+  const sha = createHash("sha256").update(payload).digest("hex").slice(0, 16);
+  const version = (await execFileAsync(BIN, ["--version"])).stdout.trim();
+  console.log(
+    [
+      `# piread throughput — ${new Date().toISOString().slice(0, 10)}`,
+      "",
+      `Host ${process.platform} ${process.arch} · node ${process.version} · ${version} · N=${TP_N}/arm (${TP_WARMUP} warmup) · MB/s = ${TP_MIB} MiB ÷ p50 s.`,
+      "",
+      "## Throughput (MB/s)",
+      "",
+      "| case | payload | baseline MB/s | native MB/s | N |",
+      "| --- | --- | ---: | ---: | ---: |",
+      `| full-read-32mib | ${TP_MIB} MiB | ${mbs(o.p50)} | ${mbs(p.p50)} | ${TP_N} |`,
+      "",
+    ].join("\n"),
+  );
+  console.error(
+    `facts: payload sha256:${sha}… · baseline(built-in) p50 ${fmt(o.p50)} ms · native(piread daemon) p50 ${fmt(p.p50)} ms`,
+  );
+  rmSync(tpDir, { recursive: true, force: true });
+  process.exit(0);
 }
 
 // ---- run: corpus × arms, spawn loop ----

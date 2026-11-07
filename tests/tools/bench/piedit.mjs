@@ -113,15 +113,15 @@ const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sor
 const fmt = (ms) => ms.toFixed(3);
 
 /** Edits are destructive; each iteration runs on a fresh copy of the body. */
-async function measureArm(tool, dir, name, body, edit) {
+async function measureArm(tool, dir, name, body, edit, n = N, warmup = WARMUP) {
   const runOnce = async (tag) => {
     const path = join(dir, `${name}.${tag}`);
     writeFileSync(path, body);
     await tool.execute(`m${tag}`, { path, edits: [{ ...edit }] });
   };
-  for (let i = 0; i < WARMUP; i++) await runOnce(`w${i}`);
+  for (let i = 0; i < warmup; i++) await runOnce(`w${i}`);
   const samples = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < n; i++) {
     const path = join(dir, `${name}.m${i}`);
     writeFileSync(path, body);
     const a = process.hrtime.bigint();
@@ -130,6 +130,44 @@ async function measureArm(tool, dir, name, body, edit) {
   }
   samples.sort((x, y) => x - y);
   return { p50: pct(samples, 0.5), p95: pct(samples, 0.95) };
+}
+
+// ---- throughput mode: --throughput runs ONLY the 32 MiB rewrite pair ----
+if (process.argv.includes("--throughput")) {
+  const MIB = 32;
+  const TP_N = 10;
+  const TP_WARMUP = 5;
+  // 64-byte lines ("line" + 59-digit zero-padded index + "\n") x 524288 = exactly 32 MiB
+  const tpLines = (MIB * 1024 * 1024) / 64;
+  const tpBody =
+    Array.from({ length: tpLines }, (_, i) => `line${String(i).padStart(59, "0")}`).join("\n") + "\n";
+  // exact-match single edit on the last line (destructive; fresh copy per op in measureArm)
+  const tpEdit = { oldText: `line${String(tpLines - 1).padStart(59, "0")}`, newText: "REWRITTEN-END" };
+  const tpDir = mkdtempSync(join(tmpdir(), "piedit-tp-"));
+  // sanity: the edit must actually apply through the native arm
+  const checkPath = join(tpDir, "rewrite-32mib.check");
+  writeFileSync(checkPath, tpBody);
+  await wrapped.execute("tp-check", { path: checkPath, edits: [{ ...tpEdit }] });
+  assert.ok(readFileSync(checkPath, "utf8").endsWith("REWRITTEN-END\n"), "throughput: edit must apply");
+  const mbps = (p50ms) => (MIB / (p50ms / 1000)).toFixed(1);
+  const o = await measureArm(oracle, tpDir, "rewrite-32mib", tpBody, tpEdit, TP_N, TP_WARMUP);
+  const p = await measureArm(wrapped, tpDir, "rewrite-32mib", tpBody, tpEdit, TP_N, TP_WARMUP);
+  rmSync(tpDir, { recursive: true, force: true });
+  const version = (await execFileAsync(BIN, ["--version"])).stdout.trim();
+  console.log(
+    [
+      `# piedit throughput — ${new Date().toISOString().slice(0, 10)}`,
+      "",
+      `Host ${process.platform} ${process.arch} · node ${process.version} · ${version} · N=${TP_N}/arm (${TP_WARMUP} warmup) · MB/s = ${MIB} MiB ÷ p50 s.`,
+      "",
+      "## Throughput (MB/s)",
+      "",
+      "| case | payload | baseline MB/s | native MB/s | N |",
+      "| --- | --- | ---: | ---: | ---: |",
+      `| rewrite-32mib | ${MIB} MiB | ${mbps(o.p50)} | ${mbps(p.p50)} | ${TP_N} |`,
+    ].join("\n"),
+  );
+  process.exit(0);
 }
 
 // ---- run: corpus × arms, spawn loop ----

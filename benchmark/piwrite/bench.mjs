@@ -60,7 +60,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { performance } from "node:perf_hooks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ---------- constants ----------
@@ -101,10 +101,12 @@ function sizeLabel(n) {
 function usage() {
   process.stderr.write(
     [
-      "usage: node bench.mjs --selftest | --smoke | --full [--tag <name>]",
+      "usage: node bench.mjs --selftest | --smoke | --full | --throughput [--tag <name>]",
       "  --selftest  validate harness against shim/piwrite-shim.mjs (no piwrite binary needed)",
       "  --smoke     quick run: 4KB only, 2 measured rounds, all arms",
       "  --full      4KB/1MB/16MB/100MB; 3 warmup + 10 measured rounds (100MB: 1 + 2)",
+      "  --throughput 32 MiB fresh-file writes only: node-builtin vs piwrite-oneshot;",
+      "              5 warmup + 10 measured ops/arm; prints the md table to stdout",
       "  --tag NAME  suffix results/summary files with -NAME; rows gain a tag field",
       "              (resume skips on mode+arm+size+tag; default: untagged file names)",
       "env: PI_WRITE_BIN (default <repo>/bin/piwrite), PI_WRITE_BUILTIN (baseline write.js)",
@@ -906,6 +908,95 @@ async function selftest() {
   return failed ? 1 : 0;
 }
 
+// ---------- throughput mode (README panel): 32 MiB fresh-file writes ----------
+// One arm pair only, printed to stdout; default modes and their tables are
+// untouched. Payload: contentBytes(32 MiB) — this harness's deterministic
+// xorshift32 printable-ASCII generator (seed state 0x12345678). Every op
+// targets a FRESH file (base-<k>/native-<k>) so no truncate-in-place
+// shortcut; the native arm is the one-shot spawn (matches the existing
+// README throughput-panel semantics, not the daemon arm).
+function piwriteVersion(bin) {
+  return new Promise((resolve) => {
+    const child = spawn(bin.cmd, [...bin.args, "--version"], { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    let settled = false;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+      done("piwrite version-unknown");
+    }, 5000);
+    child.stdout.on("data", (d) => {
+      out += d;
+    });
+    child.on("error", () => done("piwrite version-unknown"));
+    child.on("close", () => done(out.trim() || "piwrite version-unknown"));
+  });
+}
+
+async function runThroughput() {
+  const TP_MIB = 32;
+  const TP_SIZE = TP_MIB * MB;
+  const TP_WARMUP = 5;
+  const TP_N = 10;
+  const bin = resolveBin();
+  if (!existsSync(bin.path)) {
+    console.error(`piwrite binary not found: ${bin.path} (PI_WRITE_BIN=${process.env.PI_WRITE_BIN ?? "<unset>"}); native arm cannot run`);
+    return 2;
+  }
+  const builtin = await loadBuiltin();
+  const dir = path.join(TMP_ROOT, "throughput");
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
+  const bytes = contentBytes(TP_SIZE);
+  const str = contentStr(TP_SIZE); // the builtin arm takes a string, like runUnit A1
+  const sha = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+
+  const measure = async (doOp) => {
+    for (let i = 0; i < TP_WARMUP; i++) {
+      await withTimeout(doOp(`w${i}`), OP_TIMEOUT_MS, () => abortErr(`warmup timeout >${OP_TIMEOUT_MS}ms`));
+    }
+    const samples = [];
+    for (let i = 0; i < TP_N; i++) {
+      samples.push(
+        await withTimeout(timeIt(() => doOp(`m${i}`)), OP_TIMEOUT_MS, () => abortErr(`op timeout >${OP_TIMEOUT_MS}ms`)),
+      );
+    }
+    samples.sort((a, b) => a - b);
+    const p50 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.5))];
+    return { p50, mbs: Math.round((TP_MIB / (p50 / 1000)) * 10) / 10 };
+  };
+
+  const base = await measure((k) => builtin.write(path.join(dir, `base-${k}.bin`), str));
+  const native = await measure((k) => runOneShot(bin, path.join(dir, `native-${k}.bin`), bytes));
+  const version = await piwriteVersion(bin);
+  console.log(
+    [
+      `# piwrite throughput — ${todayStr()}`,
+      "",
+      `Host ${process.platform} ${process.arch} · node ${process.version} · ${version} · N=${TP_N}/arm (${TP_WARMUP} warmup) · MB/s = ${TP_MIB} MiB ÷ p50 s.`,
+      "",
+      "## Throughput (MB/s)",
+      "",
+      "| case | payload | baseline MB/s | native MB/s | N |",
+      "| --- | --- | ---: | ---: | ---: |",
+      `| one-shot-write-32mib | ${TP_MIB} MiB | ${base.mbs.toFixed(1)} | ${native.mbs.toFixed(1)} | ${TP_N} |`,
+      "",
+    ].join("\n"),
+  );
+  console.error(
+    `facts: baseline(${builtin.label}) p50 ${base.p50.toFixed(3)} ms · native(piwrite-oneshot) p50 ${native.p50.toFixed(3)} ms · payload sha256:${sha}… · dir=${dir}`,
+  );
+  await rm(dir, { recursive: true, force: true });
+  return 0;
+}
+
 // ---------- bench modes ----------
 async function runBench(mode, tag) {
   const cfg =
@@ -967,7 +1058,7 @@ function parseArgs(argv) {
   let tag = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--selftest" || a === "--smoke" || a === "--full") {
+    if (a === "--selftest" || a === "--smoke" || a === "--full" || a === "--throughput") {
       if (mode) throw new Error("multiple mode flags given");
       mode = a;
     } else if (a === "--tag") {
@@ -979,7 +1070,7 @@ function parseArgs(argv) {
       throw new Error(`unknown argument: ${a}`);
     }
   }
-  if (!mode) throw new Error("missing mode flag (--selftest | --smoke | --full)");
+  if (!mode) throw new Error("missing mode flag (--selftest | --smoke | --full | --throughput)");
   return { mode, tag };
 }
 
@@ -993,6 +1084,7 @@ async function main() {
     return 2;
   }
   if (args.mode === "--selftest") return await selftest();
+  if (args.mode === "--throughput") return await runThroughput();
   return await runBench(args.mode, args.tag);
 }
 

@@ -24,6 +24,7 @@ import { execFile, execFileSync, spawn as spawnChild } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import assert from "node:assert/strict";
 
@@ -129,16 +130,55 @@ if (probe) {
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 const fmt = (ms) => ms.toFixed(3);
 
-async function measureArm(tool, command) {
-  for (let i = 0; i < WARMUP; i++) await tool.execute(`w${i}`, { command }, undefined, undefined, ctx);
+async function measureArm(tool, command, n = N, warmup = WARMUP) {
+  for (let i = 0; i < warmup; i++) await tool.execute(`w${i}`, { command }, undefined, undefined, ctx);
   const samples = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < n; i++) {
     const a = process.hrtime.bigint();
     await tool.execute(`m${i}`, { command }, undefined, undefined, ctx);
     samples.push(Number(process.hrtime.bigint() - a) / 1e6);
   }
   samples.sort((x, y) => x - y);
   return { p50: pct(samples, 0.5), p95: pct(samples, 0.95) };
+}
+
+// ---- throughput mode: --throughput runs ONLY the 32 MiB pipe-through pair ----
+if (process.argv.includes("--throughput")) {
+  const MIB = 32;
+  const TP_N = 10;
+  const TP_WARMUP = 5;
+  const work = mkdtempSync(join(tmpdir(), "pibash-tp-"));
+  const tpFile = join(work, "pipe-through-32mib.txt");
+  // 64-byte lines (63 payload chars + "\n") x 524288 = exactly 32 MiB
+  writeFileSync(tpFile, `${"x".repeat(63)}\n`.repeat((MIB * 1024 * 1024) / 64));
+  const command = `cat ${tpFile}`;
+  // the op must materialize the capture, not discard it: both arms return the
+  // policy-truncated envelope (truncated=true, full output spilled) built from
+  // the complete 32 MiB read
+  for (const tool of [oracle, wrapped]) {
+    const r = await tool.execute("tp-check", { command }, undefined, undefined, ctx);
+    assert.ok((r?.content?.[0]?.text ?? "").length > 0, "throughput: output must be materialized");
+    assert.ok(r?.structuredContent?.truncated === true, "throughput: the full 32 MiB must flow through the arm");
+  }
+  const mbps = (p50ms) => (MIB / (p50ms / 1000)).toFixed(1);
+  const o = await measureArm(oracle, command, TP_N, TP_WARMUP);
+  const p = await measureArm(wrapped, command, TP_N, TP_WARMUP);
+  rmSync(work, { recursive: true, force: true });
+  const version = (await execFileAsync(BIN, ["--version"])).stdout.trim();
+  console.log(
+    [
+      `# pibash throughput — ${new Date().toISOString().slice(0, 10)}`,
+      "",
+      `Host ${process.platform} ${process.arch} · node ${process.version} · ${version} · N=${TP_N}/arm (${TP_WARMUP} warmup) · MB/s = ${MIB} MiB ÷ p50 s.`,
+      "",
+      "## Throughput (MB/s)",
+      "",
+      "| case | payload | baseline MB/s | native MB/s | N |",
+      "| --- | --- | ---: | ---: | ---: |",
+      `| pipe-through-32mib | ${MIB} MiB | ${mbps(o.p50)} | ${mbps(p.p50)} | ${TP_N} |`,
+    ].join("\n"),
+  );
+  process.exit(0);
 }
 
 // ---- run: corpus x arms ----
