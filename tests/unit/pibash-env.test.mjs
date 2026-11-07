@@ -26,7 +26,16 @@ test("env.sh sources twice silently (idempotent bootstrap)", () => {
   assert.equal(r.stderr, "", "bootstrap must stay silent on stderr");
 });
 
-test("scrubbed shell resolves node only through BASH_ENV", { skip: !existsSync(NVM_SH) ? "nvm not installed" : false }, () => {
+// nvm.sh alone is not enough: runner images ship an nvm stub with no default
+// node installed. The test pins nvm-managed machines only.
+const NVM_DEFAULT_NODE =
+  spawnSync(
+    "/bin/bash",
+    ["-c", `. ${JSON.stringify(NVM_SH)} >/dev/null 2>&1; command -v node >/dev/null`],
+    { encoding: "utf8" },
+  ).status === 0;
+
+test("scrubbed shell resolves node only through BASH_ENV", { skip: NVM_DEFAULT_NODE ? false : "nvm default node not installed" }, () => {
   const run = (env) =>
     spawnSync("/bin/bash", ["-c", "command -v node || true"], {
       encoding: "utf8",

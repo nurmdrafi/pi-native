@@ -18,6 +18,7 @@ jobs:
       - run: npm ci
       - name: Build and install native tools
         run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ripgrep
           cargo build --release --manifest-path rust-tools/Cargo.toml
           mkdir -p bin "$HOME/.pi/agent/bin"
           for b in docheck pibash piread piwrite piedit pidx outline; do
