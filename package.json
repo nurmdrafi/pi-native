@@ -24,7 +24,8 @@
     "check": "npm run typecheck && npm run lint:agents && npm run doc:check && npm test",
     "audit:session": "node tests/tools/audit/session-blocks.mjs",
     "audit:bin-diff": "node tests/tools/audit/bin-diff.mjs",
-    "dashboard": "node dashboard/scripts/dashboard.mjs"
+    "dashboard": "node dashboard/scripts/dashboard.mjs",
+    "release:notes": "node scripts/release-notes.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",
