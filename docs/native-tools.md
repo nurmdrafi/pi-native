@@ -1,6 +1,6 @@
 # Native tools
 
-Five Rust crates in `rust-tools/` register as their own first-class tools, so the TUI shows `piread` / `piedit` / `pibash` / `piwrite` / `pidx` instead of shadowing the built-ins. Parameters match the built-in tool verbatim; dispatch goes through a persistent `--serve` daemon (no per-call process spawn), falling back to a one-shot CLI spawn and then the built-in implementation — `piwrite` excepted: it dispatches one-shot per call, because a write is one process lifetime of work and a daemon would amortize nothing. Every failure path falls back rather than breaking the session.
+Five Rust crates in `rust-tools/` register as their own first-class tools, so the TUI shows `piread` / `piedit` / `pibash` / `piwrite` / `pidx` instead of shadowing the built-ins. Parameters match the built-in tool verbatim; dispatch goes through a persistent `--serve` daemon (no per-call process spawn), falling back to a one-shot CLI spawn when the daemon transport fails — there is no third rung and no built-in fallback: a terminal failure is a thrown tool error plus one stderr line. Choosing a built-in instead is explicit configuration, never a silent fallback.
 
 | Tool     | Replaces                       | Notes                                                             |
 | -------- | ------------------------------ | ---------------------------------------------------------------- |
