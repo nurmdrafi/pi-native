@@ -23,6 +23,11 @@ const identityTheme = {
   bold: (text) => text,
 };
 
+/** Strip OSC-8 hyperlinks (path wrapping from the real renderToolPath chain);
+ *  the parity test locks the exact wire bytes, so plain-text assertions
+ *  compare against the unlinked form. */
+const stripOsc8 = (s) => s.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "");
+
 /** Capture what the renderer pushes into the component it reuses. */
 function fakeComponent() {
   const state = { text: "", cleared: false };
@@ -65,9 +70,11 @@ const content = `${source.join("\r\n")}\r\n\r\n\r\n`;
 const PLAIN_PATH = "out.zzzq9"; // extension with no language mapping
 
 const renderCallText = (args, context = makeContext()) => {
-  const sink = fakeComponent();
-  def.renderCall(args, identityTheme, { ...context, lastComponent: sink });
-  return sink.state.text;
+  // The TUI renders the first frame with no lastComponent and reuses the
+  // returned component (which carries the highlight state) afterwards.
+  // Read the text back from the returned component, like the TUI does.
+  const component = def.renderCall(args, identityTheme, { ...context, lastComponent: undefined });
+  return component.text;
 };
 
 test("registration keeps tool identity and adds renderResult", () => {
@@ -77,9 +84,9 @@ test("registration keeps tool identity and adds renderResult", () => {
   assert.equal(typeof def.renderResult, "function");
 });
 
-test("renderCall title: bold toolTitle name + accent path", () => {
+test("renderCall title: the built-in write label + accent path", () => {
   const text = renderCallText({ path: PLAIN_PATH, content: "x" });
-  assert.ok(text.startsWith(`piwrite ${PLAIN_PATH}`), `title in: ${text}`);
+  assert.ok(stripOsc8(text).startsWith(`write ${PLAIN_PATH}`), `title in: ${text}`);
 });
 
 test("collapsed preview: first 10 lines, CRLF normalized, tabs to 3 spaces", () => {
@@ -136,7 +143,7 @@ test("non-string content arg renders the invalid-content marker", () => {
 
 test("empty string content renders the bare title", () => {
   const text = renderCallText({ path: PLAIN_PATH, content: "" });
-  assert.equal(text, `piwrite ${PLAIN_PATH}`);
+  assert.equal(stripOsc8(text), `write ${PLAIN_PATH}`);
 });
 
 test("non-string path arg renders the invalid-arg marker", () => {

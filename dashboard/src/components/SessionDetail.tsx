@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { sortedSkillRows } from "@/lib/burn";
+import { cacheCostAudit } from "@/lib/cache-cost";
 import { basename, fmtCount, fmtLatency, fmtMoney } from "@/lib/format";
 import type { SessionDetail } from "@/types";
 import type {
@@ -204,6 +205,7 @@ export function SessionDetailPanel({
     cacheWrite: t.cacheWrite,
     totalTokens: t.totalTokens,
   }));
+  const cacheAudit = cacheCostAudit(detail.turns);
   const toolCounts = new Map<string, number>();
   for (const c of detail.calls) toolCounts.set(c.name, (toolCounts.get(c.name) ?? 0) + 1);
   const tools = [...toolCounts.entries()]
@@ -252,6 +254,16 @@ export function SessionDetailPanel({
           <span>{detail.summary.turns} turns</span>
           <span>{fmtMoney(detail.summary.cost, 2)} total</span>
           <span>cache {detail.summary.cacheHitRate}%</span>
+          {cacheAudit.refreshes > 0 && (
+            <span title="prompt-prefix refreshes billed at the cache-write rate">
+              {cacheAudit.refreshes} cache refresh{cacheAudit.refreshes > 1 ? "es" : ""}
+            </span>
+          )}
+          {cacheAudit.misses > 0 && (
+            <span title="approximate tokens re-billed uncached across cache misses">
+              {cacheAudit.misses} cache miss{cacheAudit.misses > 1 ? "es" : ""} · {fmtCount(cacheAudit.missTokens)} re-billed
+            </span>
+          )}
           {typeof detail.summary.tokensPerTurn === "number" && detail.summary.tokensPerTurn > 0 && (
             <span>{fmtCount(detail.summary.tokensPerTurn)} tokens/turn</span>
           )}
@@ -302,6 +314,7 @@ export function SessionDetailPanel({
               <TabsTrigger value="subagents">subagents ({subagents.spawns})</TabsTrigger>
             )}
             <TabsTrigger value="gate">gate ({gate.blocks})</TabsTrigger>
+            <TabsTrigger value="audit">audit ({cacheAudit.lines.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="charts" className="mt-3 min-h-0 flex-1">
@@ -589,6 +602,30 @@ export function SessionDetailPanel({
                 )}
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="audit" className="mt-3 min-h-0 flex-1">
+            <div className="mb-1 text-xs text-muted-foreground">
+              cache-cost audit trail — refresh warnings · miss notices
+            </div>
+            {cacheAudit.lines.length === 0 ? (
+              <div className="text-xs text-muted-foreground">no cache-cost events in this session</div>
+            ) : (
+              <ScrollArea className="h-44 rounded border">
+                <div className="space-y-1 p-2">
+                  {cacheAudit.lines.map((l) => (
+                    <div
+                      key={`${l.level}-${l.turn}`}
+                      className={`font-mono text-xs ${
+                        l.level === "warn" ? "text-warn-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {l.text}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
           </TabsContent>
 
           {!isSubagent && (

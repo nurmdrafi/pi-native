@@ -16,9 +16,9 @@
  */
 import { spawn } from "node:child_process";
 
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   getLanguageFromPath,
   highlightCode,
@@ -26,7 +26,7 @@ import {
   type ExtensionAPI,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Container, getCapabilities, hyperlink, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 const extDir = dirname(fileURLToPath(import.meta.url));
@@ -277,8 +277,28 @@ export default function piwriteExtension(pi: ExtensionAPI): void {
     }),
     execute,
     renderCall(args, theme, context) {
-      const component = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      component.setText(formatPiwriteCall(args, { expanded: context.expanded }, theme));
+      // write.js renderCall verbatim: reuse the call component, keep the
+      // streaming highlight cache while args are incomplete, drop it once
+      // they complete, and hand cache + highlighter + cwd to the formatter.
+      const component =
+        (context.lastComponent as PiwriteCallRenderComponent | undefined) ?? new PiwriteCallRenderComponent();
+      const renderArgs = args as { file_path?: unknown; path?: unknown; content?: unknown };
+      const rawPath = str(renderArgs?.file_path ?? renderArgs?.path);
+      const fileContent = str(renderArgs?.content);
+      component.cache =
+        fileContent !== null && !context.argsComplete
+          ? updateWriteHighlightCacheIncremental(component.cache, rawPath, fileContent, component.highlighter)
+          : undefined;
+      component.setText(
+        formatPiwriteCall(
+          renderArgs,
+          { expanded: context.expanded, isPartial: context.isPartial },
+          theme,
+          component.cache,
+          component.highlighter,
+          context.cwd,
+        ),
+      );
       return component;
     },
     renderResult(result, _options, theme, context) {
@@ -296,18 +316,22 @@ export default function piwriteExtension(pi: ExtensionAPI): void {
 }
 
 /* ------------------------------------------------------------------ *
- * Interactive display — parity with the built-in write tool's
- * writeRenderers (pi's dist/core/tools/renderers/write.js). Preview and
- * counting expressions below are copied from that file, not reinvented.
+ * Interactive display — byte-for-byte parity with the built-in write
+ * tool's writeRenderers (pi's dist/core/tools/renderers/write.js),
+ * locked by tests/extensions/piwrite-render-parity.test.mjs against the
+ * real renderers. The expressions below are copied from that file (plus
+ * render-utils.js's `renderToolPath` chain), not reinvented; the title
+ * keeps the built-in's literal `write` label so a rendered row is
+ * indistinguishable from the built-in tool's.
  *
- * Degraded vs the built-in, because the package root exports neither:
- * - `renderToolPath` (home-shortened, hyperlinked path): the title shows
- *   the verbatim path in the same accent color, same null/empty fallbacks.
- * - `CodeHighlighter` + the streaming highlight cache: every render
- *   recomputes the full highlight via the public `highlightCode` — the
- *   same function `CodeHighlighter.highlight` delegates to on a miss, so
- *   complete calls render identically (a >50-line streaming partial may
- *   differ transiently: the built-in highlights its tail line-by-line).
+ * Copied locally because the package root exports neither:
+ * - `renderToolPath` -> `linkPath` -> `shortenHomePath`/`resolvePath`
+ *   (utils/paths.js, POSIX shape): home-shortened, OSC8-hyperlinked path
+ *   with the same null/empty fallbacks.
+ * - `CodeHighlighter` (theme.js): a one-entry memo of the public
+ *   `highlightCode` keyed on code, lang, and theme — a memo cannot change
+ *   output, so the local highlighter calls `highlightCode` directly and
+ *   renders the same bytes.
  * ------------------------------------------------------------------ */
 
 /** render-utils.js `str`: string passthrough, nullish → "", other → null. */
@@ -336,25 +360,185 @@ function trimTrailingEmptyLines(lines: string[]): string[] {
   return lines.slice(0, end);
 }
 
-/** Degraded `renderToolPath` (render-utils.js) — see block comment. */
-function renderPiwritePath(rawPath: string | null, theme: Theme): string {
-  if (rawPath === null) return theme.fg("error", "[invalid arg]");
-  if (!rawPath) return theme.fg("toolOutput", "...");
-  return theme.fg("accent", rawPath);
+/* ---- renderToolPath chain (render-utils.js + utils/paths.js) ---- */
+
+/** utils/paths.js `isPathWithin` (POSIX shape): child is parent or inside it. */
+function isPathWithin(parent: string, child: string): boolean {
+  const parentKey = resolve(parent);
+  const childKey = resolve(child);
+  if (childKey === parentKey) return true;
+  return childKey.startsWith(parentKey.endsWith(sep) ? parentKey : `${parentKey}${sep}`);
 }
 
-/** write.js `formatWriteCall`, name and degraded path aside. */
-function formatPiwriteCall(args: unknown, options: { expanded?: boolean }, theme: Theme): string {
+/** utils/paths.js `shortenHomePath` (POSIX shape): leading home → `~`. */
+function shortenHomePath(path: string, homeDir = homedir()): string {
+  if (!homeDir || !isAbsolute(path) || !isPathWithin(homeDir, path)) return path;
+  const relativePath = relative(homeDir, path);
+  return relativePath ? `~${sep}${relativePath}` : "~";
+}
+
+/**
+ * utils/paths.js `normalizePath` with render-side defaults: tilde
+ * expansion and `file://` URLs, no `@`-strip or unicode-space fold (those
+ * belong to the executor's `resolveToCwd`, mirrored above as
+ * `resolveToolPath`). POSIX shape.
+ */
+function normalizeDisplayPath(input: string): string {
+  const home = homedir();
+  if (input === "~") return home;
+  if (input.startsWith("~/")) return join(home, input.slice(2));
+  if (/^file:\/\//.test(input)) return fileURLToPath(input);
+  return input;
+}
+
+/** utils/paths.js `resolvePath` (POSIX shape) for the display link href. */
+function resolveDisplayPath(input: string, baseDir: string): string {
+  const normalized = normalizeDisplayPath(input);
+  const normalizedBaseDir = normalizeDisplayPath(baseDir);
+  return isAbsolute(normalized) ? resolve(normalized) : resolve(normalizedBaseDir, normalized);
+}
+
+/** render-utils.js `linkPath`: OSC8 hyperlink when the terminal supports it. */
+function linkPath(styledText: string, rawPath: string, cwd: string | undefined): string {
+  if (!getCapabilities().hyperlinks) return styledText;
+  const absolutePath = resolveDisplayPath(rawPath, cwd ?? process.cwd());
+  return hyperlink(styledText, pathToFileURL(absolutePath).href);
+}
+
+/** render-utils.js `renderToolPath` (write.js passes no options). */
+function renderToolPath(rawPath: string | null, theme: Theme, cwd: string | undefined): string {
+  if (rawPath === null) return theme.fg("error", "[invalid arg]");
+  const value = rawPath || undefined;
+  if (!value) return theme.fg("toolOutput", "...");
+  return linkPath(theme.fg("accent", shortenHomePath(value)), value, cwd);
+}
+
+/* ---- streaming highlight cache (write.js) ---- */
+
+/** write.js `WRITE_PARTIAL_FULL_HIGHLIGHT_LINES`. */
+const WRITE_PARTIAL_FULL_HIGHLIGHT_LINES = 50;
+
+/** write.js `highlightSingleLine`: first line of a single-line highlight. */
+function highlightSingleLine(line: string, lang: string): string {
+  const highlighted = highlightCode(line, lang);
+  return highlighted[0] ?? "";
+}
+
+/**
+ * The built-in's per-component `CodeHighlighter` is a one-entry memo of
+ * the public `highlightCode` keyed on code, lang, and theme; a memo
+ * cannot change output, so this calls `highlightCode` directly.
+ */
+class PiwriteHighlighter {
+  highlight(code: string, lang: string): string[] {
+    return highlightCode(code, lang);
+  }
+}
+
+/** write.js `WriteHighlightCache`: the incremental streaming state. */
+type WriteHighlightCache = {
+  rawPath: string;
+  lang: string;
+  rawContent: string;
+  normalizedLines: string[];
+  highlightedLines: string[];
+};
+
+/** write.js `refreshWriteHighlightPrefix`. */
+function refreshWriteHighlightPrefix(cache: WriteHighlightCache, highlighter: PiwriteHighlighter): void {
+  const prefixCount = Math.min(WRITE_PARTIAL_FULL_HIGHLIGHT_LINES, cache.normalizedLines.length);
+  if (prefixCount === 0) return;
+  const prefixSource = cache.normalizedLines.slice(0, prefixCount).join("\n");
+  const prefixHighlighted = highlighter.highlight(prefixSource, cache.lang);
+  for (let i = 0; i < prefixCount; i++) {
+    cache.highlightedLines[i] =
+      prefixHighlighted[i] ?? highlightSingleLine(cache.normalizedLines[i] ?? "", cache.lang);
+  }
+}
+
+/** write.js `rebuildWriteHighlightCacheFull` (null path is no-language). */
+function rebuildWriteHighlightCacheFull(rawPath: string | null, fileContent: string): WriteHighlightCache | undefined {
+  if (!rawPath) return undefined;
+  const lang = getLanguageFromPath(rawPath);
+  if (!lang) return undefined;
+  const displayContent = normalizeDisplayText(fileContent);
+  const normalized = replaceTabs(displayContent);
+  return {
+    rawPath,
+    lang,
+    rawContent: fileContent,
+    normalizedLines: normalized.split("\n"),
+    highlightedLines: highlightCode(normalized, lang),
+  };
+}
+
+/** write.js `updateWriteHighlightCacheIncremental`. */
+function updateWriteHighlightCacheIncremental(
+  cache: WriteHighlightCache | undefined,
+  rawPath: string | null,
+  fileContent: string,
+  highlighter: PiwriteHighlighter,
+): WriteHighlightCache | undefined {
+  const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
+  if (!lang) return undefined;
+  if (!cache) return rebuildWriteHighlightCacheFull(rawPath, fileContent);
+  if (cache.lang !== lang || cache.rawPath !== rawPath || !fileContent.startsWith(cache.rawContent)) {
+    return rebuildWriteHighlightCacheFull(rawPath, fileContent);
+  }
+  if (fileContent.length === cache.rawContent.length) return cache;
+  const deltaRaw = fileContent.slice(cache.rawContent.length);
+  const deltaDisplay = normalizeDisplayText(deltaRaw);
+  const deltaNormalized = replaceTabs(deltaDisplay);
+  cache.rawContent = fileContent;
+  if (cache.normalizedLines.length === 0) {
+    cache.normalizedLines.push("");
+    cache.highlightedLines.push("");
+  }
+  const segments = deltaNormalized.split("\n");
+  const lastIndex = cache.normalizedLines.length - 1;
+  cache.normalizedLines[lastIndex] += segments[0];
+  cache.highlightedLines[lastIndex] = highlightSingleLine(cache.normalizedLines[lastIndex], cache.lang);
+  for (let i = 1; i < segments.length; i++) {
+    cache.normalizedLines.push(segments[i]);
+    cache.highlightedLines.push(highlightSingleLine(segments[i], cache.lang));
+  }
+  refreshWriteHighlightPrefix(cache, highlighter);
+  return cache;
+}
+
+/**
+ * write.js `WriteCallRenderComponent`: a `Text` carrying the streaming
+ * highlight cache and the highlighter — the component the TUI reuses
+ * across partial updates of one call.
+ */
+class PiwriteCallRenderComponent extends Text {
+  cache: WriteHighlightCache | undefined;
+  highlighter = new PiwriteHighlighter();
+  constructor() {
+    super("", 0, 0);
+  }
+}
+
+/** write.js `formatWriteCall` verbatim (title keeps the `write` label). */
+function formatPiwriteCall(
+  args: unknown,
+  options: { expanded?: boolean; isPartial?: boolean },
+  theme: Theme,
+  cache: WriteHighlightCache | undefined,
+  highlighter: PiwriteHighlighter,
+  cwd: string | undefined,
+): string {
   const renderArgs = args as { file_path?: unknown; path?: unknown; content?: unknown };
   const rawPath = str(renderArgs?.file_path ?? renderArgs?.path);
   const fileContent = str(renderArgs?.content);
-  let text = `${theme.fg("toolTitle", theme.bold("piwrite"))} ${renderPiwritePath(rawPath, theme)}`;
+  const pathDisplay = renderToolPath(rawPath, theme, cwd);
+  let text = `${theme.fg("toolTitle", theme.bold("write"))} ${pathDisplay}`;
   if (fileContent === null) {
     text += `\n\n${theme.fg("error", "[invalid content arg - expected string]")}`;
   } else if (fileContent) {
     const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
     const renderedLines = lang
-      ? highlightCode(replaceTabs(normalizeDisplayText(fileContent)), lang)
+      ? (cache?.highlightedLines ?? highlighter.highlight(replaceTabs(normalizeDisplayText(fileContent)), lang))
       : normalizeDisplayText(fileContent).split("\n");
     const lines = trimTrailingEmptyLines(renderedLines);
     const totalLines = lines.length;
