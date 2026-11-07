@@ -321,8 +321,8 @@ export default function piwriteExtension(pi: ExtensionAPI): void {
  * locked by tests/extensions/piwrite-render-parity.test.mjs against the
  * real renderers. The expressions below are copied from that file (plus
  * render-utils.js's `renderToolPath` chain), not reinvented; the title
- * keeps the built-in's literal `write` label so a rendered row is
- * indistinguishable from the built-in tool's.
+ * carries the tool's own `piwrite` label — the one deliberate divergence
+ * from the built-in's rendering, so a rendered row names its engine.
  *
  * Copied locally because the package root exports neither:
  * - `renderToolPath` -> `linkPath` -> `shortenHomePath`/`resolvePath`
@@ -519,7 +519,7 @@ class PiwriteCallRenderComponent extends Text {
   }
 }
 
-/** write.js `formatWriteCall` verbatim (title keeps the `write` label). */
+/** write.js `formatWriteCall` verbatim, except the title is `piwrite`. */
 function formatPiwriteCall(
   args: unknown,
   options: { expanded?: boolean; isPartial?: boolean },
@@ -532,7 +532,7 @@ function formatPiwriteCall(
   const rawPath = str(renderArgs?.file_path ?? renderArgs?.path);
   const fileContent = str(renderArgs?.content);
   const pathDisplay = renderToolPath(rawPath, theme, cwd);
-  let text = `${theme.fg("toolTitle", theme.bold("write"))} ${pathDisplay}`;
+  let text = `${theme.fg("toolTitle", theme.bold("piwrite"))} ${pathDisplay}`;
   if (fileContent === null) {
     text += `\n\n${theme.fg("error", "[invalid content arg - expected string]")}`;
   } else if (fileContent) {

@@ -11,8 +11,9 @@ initTheme();
 
 /**
  * Renderer parity tests: piwrite's interactive display must match the
- * built-in write tool's writeRenderers (dist/core/tools/renderers/write.js):
- * title line, 10-line collapsed preview (expanded shows all), trailing-empty
+ * built-in write tool's writeRenderers (dist/core/tools/renderers/write.js)
+ * byte-for-byte, except the title token which is the tool's own `piwrite`
+ * label: title line, 10-line collapsed preview (expanded shows all), trailing-empty
  * trim, `... (N more lines, M total,` expand hint, error-color results, and a
  * cleared (empty) result component on success.
  */
@@ -84,9 +85,9 @@ test("registration keeps tool identity and adds renderResult", () => {
   assert.equal(typeof def.renderResult, "function");
 });
 
-test("renderCall title: the built-in write label + accent path", () => {
+test("renderCall title: the piwrite label + accent path", () => {
   const text = renderCallText({ path: PLAIN_PATH, content: "x" });
-  assert.ok(stripOsc8(text).startsWith(`write ${PLAIN_PATH}`), `title in: ${text}`);
+  assert.ok(stripOsc8(text).startsWith(`piwrite ${PLAIN_PATH}`), `title in: ${text}`);
 });
 
 test("collapsed preview: first 10 lines, CRLF normalized, tabs to 3 spaces", () => {
@@ -143,7 +144,7 @@ test("non-string content arg renders the invalid-content marker", () => {
 
 test("empty string content renders the bare title", () => {
   const text = renderCallText({ path: PLAIN_PATH, content: "" });
-  assert.equal(stripOsc8(text), `write ${PLAIN_PATH}`);
+  assert.equal(stripOsc8(text), `piwrite ${PLAIN_PATH}`);
 });
 
 test("non-string path arg renders the invalid-arg marker", () => {

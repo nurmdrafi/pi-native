@@ -143,6 +143,11 @@ const streamFrames = [
   { args: { path: "src/example.ts", content: big }, context: { argsComplete: true, isPartial: false } },
 ];
 
+/** The one deliberate divergence: rows are titled `piwrite`, not the built-in
+ * `write`. Applied to the built-in's text so everything else must still match
+ * byte-for-byte. */
+const asPiwrite = (t) => t.replace(/^write /, "piwrite ");
+
 test("streaming + completion + expand frames match byte-for-byte", () => {
   const ourTexts = driveCall(ours, streamFrames);
   const theirTexts = driveCall(theirs, streamFrames);
@@ -150,7 +155,7 @@ test("streaming + completion + expand frames match byte-for-byte", () => {
     assert.ok(ourTexts[i] !== undefined || theirTexts[i] === undefined, "frame rendered");
     assert.equal(
       ourTexts[i],
-      theirTexts[i],
+      asPiwrite(theirTexts[i]),
       `frame ${i} (${JSON.stringify(streamFrames[i].args?.path)}, len ${streamFrames[i].args?.content?.length}) diverged`,
     );
   }
@@ -166,7 +171,7 @@ test("no-language path streams identically (plain toolOutput lines)", () => {
   const ourTexts = driveCall(ours, frames);
   const theirTexts = driveCall(theirs, frames);
   for (let i = 0; i < frames.length; i++) {
-    assert.equal(ourTexts[i], theirTexts[i], `frame ${i} diverged`);
+    assert.equal(ourTexts[i], asPiwrite(theirTexts[i]), `frame ${i} diverged`);
   }
 });
 
@@ -181,7 +186,7 @@ test("invalid args render identically (content, path, empty path)", () => {
   const ourTexts = driveCall(ours, frames);
   const theirTexts = driveCall(theirs, frames);
   for (let i = 0; i < frames.length; i++) {
-    assert.equal(ourTexts[i], theirTexts[i], `frame ${i} diverged`);
+    assert.equal(ourTexts[i], asPiwrite(theirTexts[i]), `frame ${i} diverged`);
   }
 });
 
@@ -193,8 +198,8 @@ test("home-dir path shortens to ~/ exactly like the built-in", () => {
   ];
   const ourTexts = driveCall(ours, frames);
   const theirTexts = driveCall(theirs, frames);
-  assert.equal(ourTexts[0], theirTexts[0]);
-  assert.equal(ourTexts[1], theirTexts[1]);
+  assert.equal(ourTexts[0], asPiwrite(theirTexts[0]));
+  assert.equal(ourTexts[1], asPiwrite(theirTexts[1]));
   assert.ok(ourTexts[0].includes("~/proj/deep/x.ts"), `shortened title in: ${ourTexts[0].split("\n")[0]}`);
 });
 
@@ -208,8 +213,8 @@ test("OSC8 hyperlink capability wraps both renderers identically", () => {
     ];
     const ourTexts = driveCall(ours, frames);
     const theirTexts = driveCall(theirs, frames);
-    assert.equal(ourTexts[0], theirTexts[0]);
-    assert.equal(ourTexts[1], theirTexts[1]);
+    assert.equal(ourTexts[0], asPiwrite(theirTexts[0]));
+    assert.equal(ourTexts[1], asPiwrite(theirTexts[1]));
     assert.ok(ourTexts[0].includes("file:///tmp/abs.ts"), `href in: ${ourTexts[0].split("\n")[0]}`);
   } finally {
     setCapabilityOverrides({});
@@ -218,11 +223,11 @@ test("OSC8 hyperlink capability wraps both renderers identically", () => {
   }
 });
 
-test("fresh component (no lastComponent) renders the built-in's title", () => {
+test("fresh component (no lastComponent) renders the piwrite title", () => {
   const ourTitle = freshCallText(ours, { path: "src/fresh.ts", content: "" });
   const theirTitle = freshCallText(theirs, { path: "src/fresh.ts", content: "" });
-  assert.equal(ourTitle, theirTitle);
-  assert.ok(ourTitle.startsWith("write "), `built-in title in: ${JSON.stringify(ourTitle)}`);
+  assert.equal(ourTitle, asPiwrite(theirTitle));
+  assert.ok(ourTitle.startsWith("piwrite "), `piwrite title in: ${JSON.stringify(ourTitle)}`);
 });
 
 /* ------------------------------------------------------------------ *
