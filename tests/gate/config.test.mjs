@@ -126,9 +126,10 @@ test("rule IDs are unique", () => {
 
 // Tracked-policy allowlist: rules the shipped config.json deliberately
 // turns off (user direction — teaching layers whose block tier the user
-// disabled). Everything else ships warn/error; an off outside this list is
+// disabled, and locate-first certification disabled 2026-11-04 c4eaa82).
+// Everything else ships warn/error; an off outside this list is
 // config drift the test below catches.
-const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "writeBindingGuard"];
+const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "writeBindingGuard", "locateFirst"];
 
 test("tracked config.json loads every rule at warn or error (explicit off allowlist)", () => {
   const { config } = loadConfig();

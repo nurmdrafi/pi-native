@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const { gateTagCounts, gateSummary, aggregateSessions, GATE_RULE_META } = await import(
+const { gateTagCounts, gateSummary, aggregateSessions, GATE_RULE_META, canonicalRuleKey } = await import(
   join(ROOT, "dashboard/scripts/data.mjs")
 );
 const { RULE_IDS } = await import(join(ROOT, "extensions/permission-gate/loader.ts"));
@@ -73,8 +73,10 @@ function fixture() {
 }
 
 test("every configured rule has a human name, its id and a group", () => {
-  const keys = Object.keys(gateConfig.rules);
-  assert.equal(keys.length, 29, "the gate ships 29 rules");
+  // config.json lists rules by ID ("AG2") since 2d20d22; meta and RULE_IDS
+  // key on the canonical names, so normalize before checking.
+  const keys = Object.keys(gateConfig.rules).map(canonicalRuleKey);
+  assert.equal(keys.length, 31, "the gate ships 31 rules");
   const missing = keys.filter((k) => !GATE_RULE_META[k]);
   assert.deepEqual(missing, [], `no dashboard meta for: ${missing.join(", ")}`);
   const drifted = keys.filter((k) => GATE_RULE_META[k].code !== RULE_IDS[k]);

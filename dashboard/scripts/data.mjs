@@ -521,6 +521,7 @@ export function gateTagCounts(sessionFile) {
 export const GATE_RULE_META = {
   editAnchorGuard: { code: "AG", group: "anchor", label: "Edits anchor on lines already in context" },
   editRegionGuard: { code: "AG2", group: "anchor", label: "Edit batch reads every target region first" },
+  writeBindingGuard: { code: "WB", group: "anchor", label: "Overwriting an existing file binds like an edit" },
   reReadGuard: { code: "R1", group: "tokens", label: "No re-read of lines fully in context" },
   reReadConsume: { code: "R1x", group: "tokens", label: "Partial re-read (half the lines known)" },
   largeReadGuard: { code: "R1b", group: "tokens", label: "No whole-file read of a big file" },
@@ -550,6 +551,14 @@ export const GATE_RULE_META = {
   phaseNudge: { code: "PH1", group: "advisory", label: "Phase label nudge" },
   cadenceNudge: { code: "CN", group: "advisory", label: "Cadence nudge (turns / context)" },
 };
+
+/** Rule-ID spellings ("AG2", "R1c") resolve to their canonical keys —
+ * config.json may use either spelling, and gateSummary's rows and tag
+ * splits key on the canonical one. */
+const RULE_KEY_BY_CODE = new Map(
+  Object.entries(GATE_RULE_META).map(([key, meta]) => [meta.code, key]),
+);
+export const canonicalRuleKey = (key) => RULE_KEY_BY_CODE.get(key) ?? key;
 
 /** Inverted tag map: for each rule id, the transcript tags whose counts land
  * on its row. First entry is the live tag — the string the gate prints in the
@@ -1131,7 +1140,7 @@ export function sessionTimeline(extract, bucketMs = 300_000) {
  * severity is joined at family granularity: worst severity among the rules.
  */
 const FAMILY_RULES = {
-  anchor: ["editAnchorGuard", "editRegionGuard"],
+  anchor: ["editAnchorGuard", "editRegionGuard", "writeBindingGuard"],
   tokens: [
     "reReadGuard",
     "reReadConsume",
@@ -1157,6 +1166,9 @@ const RULE_FAMILY = new Map(
 );
 
 export function gateSummary(blocksByFamily = {}, rules = {}, extra = {}) {
+  // Accept either spelling for the severity map: the shipped config.json
+  // lists rules by ID ("AG2"), tag splits and meta lookups key on names.
+  rules = Object.fromEntries(Object.entries(rules).map(([k, v]) => [canonicalRuleKey(k), v]));
   const byFamily = { ...blocksByFamily };
   let total = 0;
   for (const n of Object.values(byFamily)) total += n;

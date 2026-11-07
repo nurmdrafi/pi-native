@@ -547,6 +547,12 @@ add("daemon: pre-aborted signal rejects like the one-shot path", async () => {
 // output, and a protected-path (node_modules) read blocked at tool_call
 // before any execution.
 
+// Pin the anchor-family tiers this parity contract asserts: the shipped
+// config turned editAnchorGuard/editRegionGuard off by user direction
+// (151786a), which would leave every note/block assertion below vacuous.
+// Same pin-at-module-top convention as tests/gate/region-warn.test.mjs.
+process.env.PGATE_EDIT_ANCHOR_GUARD = "warn";
+process.env.PGATE_EDIT_REGION_GUARD = "error";
 const { freshGate } = await import("../gate/harness/stub.mjs");
 const GATE_CTX = { hasUI: true, mode: "tui", ui: { confirm: async () => true } };
 
