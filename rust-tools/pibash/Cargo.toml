@@ -1,6 +1,6 @@
 [package]
 name = "pibash"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Native shell-output pipeline for the pi agent — parity-tested against the built-in bash tool"
 

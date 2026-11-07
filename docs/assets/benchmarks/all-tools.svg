@@ -71,12 +71,12 @@
 <text x="215.3" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">1982.8 MB/s</text>
 <text x="181.8" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">piread: full-read</text>
 <text x="181.8" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x18.0</text>
-<rect x="289.5" y="572.0" width="60.9" height="218.0" fill="#6e7681"/>
-<text x="319.9" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">177.9 MB/s</text>
-<rect x="356.4" y="593.7" width="60.9" height="196.3" fill="#58a6ff"/>
-<text x="386.9" y="587.7" font-size="11" fill="#e6edf3" text-anchor="middle">160.2 MB/s</text>
+<rect x="289.5" y="614.7" width="60.9" height="175.3" fill="#6e7681"/>
+<text x="319.9" y="608.7" font-size="11" fill="#e6edf3" text-anchor="middle">158.9 MB/s</text>
+<rect x="356.4" y="572.0" width="60.9" height="218.0" fill="#58a6ff"/>
+<text x="386.9" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">197.6 MB/s</text>
 <text x="353.4" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">pibash: pipe-through</text>
-<text x="353.4" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x0.9</text>
+<text x="353.4" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x1.2</text>
 <rect x="461.1" y="692.1" width="60.9" height="97.9" fill="#6e7681"/>
 <text x="491.5" y="686.1" font-size="11" fill="#e6edf3" text-anchor="middle">10.1 MB/s</text>
 <rect x="528.0" y="572.0" width="60.9" height="218.0" fill="#58a6ff"/>

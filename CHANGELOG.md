@@ -37,11 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **README sharpened for pre-release.** Original tagline restored byte-exact, the Why-block removed, What-it-does rewritten as six plain bullets with deep-dive links, orchestration trimmed to three sentences, the broken demo embed removed, and piwrite added to the tools table and bin inventory. Benchmarks now leads with numbers-in-text beside the chart plus reproduce commands linking raw results.
 
+- **pibash 0.2.0: the full-stream pass is borrow-only.** `Compressed.content` is a `Cow`, so the Strategy::None path moves the cleaned stream instead of copying it (`into_owned()` on 32 MiB cost ~50 ms of a ~205 ms run); omission windows detach by move, never copy. The 32 MiB pipe-throughput arm moves from x0.90 to x1.2-1.3 over the built-in baseline in clean windows (160.2 → 197.6 MB/s); output stays byte-identical (parity suite green, 144/144 unit tests).
+
 ### Fixed
 
 - **Benchmark chart honesty pass** (`scripts/bench-charts.mjs`, `docs/assets/benchmarks/all-tools.svg`): panel A dropped its log10 scale for per-row linear bars — bar heights are now exactly proportional to values within each row (a regression test pins height ratio to value ratio within 2%); every latency label carries an explicit ms/s unit; the four-line footer paragraph collapsed to one short line with full citations kept in the SVG desc; the left axis now carries a 0–100% of-row-max measurement with gridlines and bars keep 22 px label headroom so value labels no longer overlap the panel header. Deterministic regeneration preserved (byte-identical rerun).
 
-## [1.71.1] - 05-11-2026
+- **README benchmark ratios now match the pinned sources.** piedit 1 MiB edit 2.7x → 3.0x (102.714/34.406 ms) and piread small reads ~3.4x → ~3.5x (0.302/0.086 ms), matching the microbench docs and the chart beside them.
+
+## [Unreleased]
+
+## [1.72.0] - 11-11-2026
 
 ### Fixed
 

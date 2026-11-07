@@ -177,8 +177,8 @@ fn classify_segment(segment: &str) -> Option<CommandKind> {
 }
 
 /// Result of a compression pass: the visible text plus what was dropped.
-pub struct Compressed {
-    pub content: String,
+pub struct Compressed<'a> {
+    pub content: Cow<'a, str>,
     pub strategy: Strategy,
     /// Characters omitted (always 0 when `strategy == Strategy::None`).
     pub omitted_chars: usize,
@@ -188,10 +188,10 @@ pub struct Compressed {
     pub partial: bool,
 }
 
-impl Compressed {
-    fn verbatim(text: &str) -> Self {
+impl<'a> Compressed<'a> {
+    fn verbatim(text: &'a str) -> Self {
         Compressed {
-            content: text.to_string(),
+            content: Cow::Borrowed(text),
             strategy: Strategy::None,
             omitted_chars: 0,
             partial: false,
@@ -223,17 +223,17 @@ pub fn omission_marker(omitted_chars: usize, omitted_lines: usize) -> String {
 /// budget is cut head+tail on a UTF-8 boundary. Always emits an omission marker
 /// when it drops anything.
 #[must_use]
-pub fn head_tail(text: &str, max_lines: usize, max_bytes: usize, success: bool) -> Compressed {
+pub fn head_tail(text: &str, max_lines: usize, max_bytes: usize, success: bool) -> Compressed<'_> {
     head_tail_lines(text, &split_lines(text), max_lines, max_bytes, success)
 }
 
-fn head_tail_lines(
-    text: &str,
+fn head_tail_lines<'a>(
+    text: &'a str,
     lines: &[&str],
     max_lines: usize,
     max_bytes: usize,
     success: bool,
-) -> Compressed {
+) -> Compressed<'a> {
     if fits(text, max_lines, max_bytes) {
         return Compressed::verbatim(text);
     }
@@ -271,7 +271,7 @@ fn head_tail_lines(
     let marker = omission_marker(omitted_chars, omitted_lines);
     let content = format!("{}\n\n{marker}\n\n{}", head.text, tail.text);
     Compressed {
-        content,
+        content: Cow::Owned(content),
         strategy: Strategy::HeadTail,
         omitted_chars,
         partial: head.partial || tail.partial,
@@ -305,7 +305,7 @@ fn head_tail_windowed(
     max_lines: usize,
     max_bytes: usize,
     success: bool,
-) -> Option<Compressed> {
+) -> Option<Compressed<'_>> {
     // Budget arithmetic mirrored from `head_tail_lines` (requirement 2).
     let (head_share, tail_share): (usize, usize) = if success { (2, 1) } else { (1, 2) };
     let content_lines = max_lines.saturating_sub(3);
@@ -395,7 +395,7 @@ fn head_tail_windowed(
     let marker = omission_marker(omitted_chars, omitted_lines);
     let content = format!("{}\n\n{marker}\n\n{}", head_slice.text, tail_slice.text);
     Some(Compressed {
-        content,
+        content: Cow::Owned(content),
         strategy: Strategy::HeadTail,
         omitted_chars,
         partial: head_slice.partial || tail_slice.partial,
@@ -508,11 +508,11 @@ fn trim_overlap(lines: &[&str], head_kept: usize, tail: Slice) -> Slice {
 /// of identical or progress-shaped lines collapse to one representative line
 /// plus a count. Always emits an omission marker when it drops anything.
 #[must_use]
-pub fn error_priority(text: &str, max_lines: usize, max_bytes: usize) -> Compressed {
+pub fn error_priority(text: &str, max_lines: usize, max_bytes: usize) -> Compressed<'_> {
     error_priority_lines(text, &split_lines(text), max_lines, max_bytes)
 }
 
-fn error_priority_lines(text: &str, lines: &[&str], max_lines: usize, max_bytes: usize) -> Compressed {
+fn error_priority_lines<'a>(text: &'a str, lines: &[&str], max_lines: usize, max_bytes: usize) -> Compressed<'a> {
     if js_byte_length(text) <= max_bytes && lines.len() <= max_lines {
         return Compressed::verbatim(text);
     }
@@ -611,7 +611,7 @@ fn error_priority_lines(text: &str, lines: &[&str], max_lines: usize, max_bytes:
 
     let content = out.join("\n");
     Compressed {
-        content,
+        content: Cow::Owned(content),
         strategy: Strategy::ErrorPriority,
         omitted_chars,
         partial: false,
@@ -912,7 +912,7 @@ pub fn compress_output(
     success: bool,
     max_lines: usize,
     max_bytes: usize,
-) -> Compressed {
+) -> Compressed<'_> {
     // Within the model budget: nothing to compress, stay byte-identical.
     if js_byte_length(text) <= max_bytes && line_count(text) <= max_lines {
         return Compressed::verbatim(text);
@@ -944,7 +944,14 @@ pub fn compress_output(
             Cow::Owned(rebuilt) => error_priority(rebuilt, max_lines, max_bytes),
         };
         if c.strategy == Strategy::ErrorPriority {
-            return c;
+            // ErrorPriority content is always an owned window; detaching it
+            // from the local `cleaned`/`deduped` borrows is a move, not a copy.
+            return Compressed {
+                content: Cow::Owned(c.content.into_owned()),
+                strategy: c.strategy,
+                omitted_chars: c.omitted_chars,
+                partial: c.partial,
+            };
         }
         // error-priority found nothing to drop; fall through to head-tail.
     }
@@ -958,13 +965,27 @@ pub fn compress_output(
         // omission — the visible content is complete), so it stays
         // Strategy::None with the cleaned body.
         return Compressed {
-            content: cleaned.into_owned(),
+            content: cleaned,
             strategy: Strategy::None,
             omitted_chars: 0,
             partial: false,
         };
     }
-    c
+    // An omission strategy fired: `c.content` is a small owned window (never
+    // the verbatim borrow), so detaching it from the local borrows above is a
+    // move, not a copy.
+    let Compressed {
+        content,
+        strategy,
+        omitted_chars,
+        partial,
+    } = c;
+    Compressed {
+        content: Cow::Owned(content.into_owned()),
+        strategy,
+        omitted_chars,
+        partial,
+    }
 }
 
 #[cfg(test)]
@@ -992,7 +1013,7 @@ mod tests {
         (0..lines).map(|i| format!("r{i}\r\n")).collect()
     }
 
-    fn materialized(body: &str, success: bool) -> Compressed {
+    fn materialized(body: &str, success: bool) -> Compressed<'_> {
         head_tail_lines(body, &split_lines(body), 40, 2048, success)
     }
 
@@ -1232,8 +1253,9 @@ mod tests {
     fn omission_marker_detection_matches_the_wire_signal() {
         assert!(!has_omission_marker("plain output"));
         assert!(has_omission_marker("[... omitted 10 chars / 2 lines ...]"));
+        let body = (0..200).map(|i| format!("line{i}\n")).collect::<String>();
         let c = compress_output(
-            &(0..200).map(|i| format!("line{i}\n")).collect::<String>(),
+            &body,
             CommandKind::Generic,
             true,
             COMPRESS_MAX_LINES,
