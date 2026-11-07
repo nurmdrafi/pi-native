@@ -1,11 +1,18 @@
 # pi-native
 
-A performance-focused Pi coding-agent harness with native Rust tools, fail-closed permission gates, and token-efficient context management.
+Fail-closed trust and a measured token economy: a Pi harness with native Rust tools.
+
+Why:
+
+- Fail-closed native gates — every tool call crosses an explicit permission gate before it runs ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
+- Measurable token economy — the `pi sessions` dashboard tracks token spend per session and run ([dashboard/PRODUCT.md](dashboard/PRODUCT.md))
+- Drop-in pi harness compatibility — native tools match the pi built-ins' parameters verbatim, so existing setups work unchanged ([docs/native-tools.md](docs/native-tools.md))
 
 ![pi-native logo](docs/assets/pi-native-logo.jpg)
 
 [![stars](https://img.shields.io/github/stars/nurmdrafi/pi-native?label=stars&logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/stargazers)
 [![release CI](https://img.shields.io/github/actions/workflow/status/nurmdrafi/pi-native/release.yml?label=release%20CI&logo=githubactions&logoColor=2088FF&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/actions/workflows/release.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/nurmdrafi/pi-native/ci.yml?label=CI&logo=githubactions&logoColor=2088FF&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/nurmdrafi/pi-native?logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/releases)
 [![license](https://img.shields.io/badge/license-MIT-2ea44f?logo=opensourceinitiative&logoColor=white&labelColor=24292f&style=flat-square)](LICENSE)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/nurmdrafi/badge.svg)](https://hub.xerj.org/contributors/nurmdrafi)
@@ -15,12 +22,29 @@ A performance-focused Pi coding-agent harness with native Rust tools, fail-close
 [![tmux](https://img.shields.io/badge/tmux-optional-6e7681?logo=tmux&logoColor=1BB91F&labelColor=24292f&style=flat-square)](docs/subagents.md)
 [![skills](https://img.shields.io/badge/skills-manual-2563eb?logo=readthedocs&logoColor=8CA1AF&labelColor=24292f&style=flat-square)](docs/skills.md)
 [![extensions](https://img.shields.io/badge/extensions-ts-2563eb?labelColor=24292f&style=flat-square)](extensions/README.md)
+[![issues](https://img.shields.io/github/issues/nurmdrafi/pi-native?label=issues&logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/issues)
+[![contributors](https://img.shields.io/github/contributors/nurmdrafi/pi-native?labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/graphs/contributors)
+[![last commit](https://img.shields.io/github/last-commit/nurmdrafi/pi-native?label=last%20commit&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/commits/dev)
 <br>
 [![node](https://img.shields.io/badge/node_%E2%A5%BC_22.19_%C2%B7_.nvmrc_24-339933?logo=nodedotjs&logoColor=5FA04E&labelColor=24292f&style=flat-square)](#requirements)
 
 ## Why this exists
 
 Coding-agent configs rot — they accumulate always-on prompt bloat, machine-specific paths, and undocumented setup rituals. This harness treats the config as an engineered product: one `~/.pi/agent/` directory that turns any macOS or Linux machine into a fully configured coding-agent workstation in minutes, with a lean behavioral core, progressive-disclosure skills, always-on extensions that enforce discipline at the tool-call level, and a permanent prefix small enough to measure in fractions of a kilotoken. Every harness change ships with a before/after number.
+
+## Trust
+
+- Fail-closed permission gates — every tool call crosses a gate before it runs ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
+- No silent fallback — a terminal native-tool failure is a thrown error plus one stderr line, never a masked built-in; built-in selection is explicit configuration ([Daemon → One-Shot Ladder](#daemon--one-shot-ladder), [docs/native-tools.md](docs/native-tools.md))
+- MCP runs disabled by default — the built-in extension is off and native tools replace `bash`, `read`, and `edit` ([docs/development.md](docs/development.md))
+- Subagents gated and sandboxed — spawn tools are gated, children run in isolated panes under hard conduct bans ([docs/subagent-orchestration.md](docs/subagent-orchestration.md), [docs/subagents.md](docs/subagents.md))
+- Supported platforms: macOS and Linux — portability rules are enforced ([docs/design-rules.md](docs/design-rules.md#portability))
+
+## Demo
+
+![Terminal session: a pibash call paused at the permission gate, then a dashboard card rendering session token spend](docs/assets/demo.gif)
+
+One gated native tool call and one dashboard render, about 15 seconds. The recording is pending — [docs/assets/demo-placeholder.md](docs/assets/demo-placeholder.md) defines what it must show (asciinema or GIF, at most 3 MiB).
 
 ## What it does
 
@@ -38,7 +62,7 @@ Each native utility runs the same **two-rung ladder**: a **persistent background
 
 ### Stream Compression and Permission Interception Loops
 *   **Deterministic Head-Tail Output Compaction:** Clamps streaming console blocks and reading inputs at a hard **40-line / 2 KB** ceiling using a **deterministic head-tail compaction algorithm**. It compresses **273 KB** of raw log data down to **15.6 KB** of high-density, model-visible context, yielding a **94.3%** reduction in overall token footprints while keeping errors, exit codes, and a certified **omission map** intact.
-*   **Fail-Closed Tool-Call Interception Gate:** Evaluates tool execution parameters synchronously against **23** granular safety rules, guarding against path traversal, runaway prompt loops, and destructive shell payloads. Rather than failing the process hard, the gate intercepts violations and employs a **Block + Targeted Fix design** that injects synthetic remediation context straight to the model turn, keeping **92** fixtures green at **93%** one-shot block recovery.
+*   **Fail-Closed Tool-Call Interception Gate:** Evaluates tool execution parameters synchronously against **31** granular safety rules, guarding against path traversal, runaway prompt loops, and destructive shell payloads. Rather than failing the process hard, the gate intercepts violations and employs a **Block + Targeted Fix design** that injects synthetic remediation context straight to the model turn, keeping **92** fixtures green at **93%** one-shot block recovery.
 *   **Sandboxed tmux Subagent Sandboxing:** Allocates background worker context within dedicated, **sandboxed tmux workspaces**. Internal **parent-to-child plumbing environment keys** pass tracking values and identity metrics dynamically, keeping subagent context requirements at **zero** tokens until a task is explicitly delegated.
 
 ## Quick start
@@ -97,13 +121,16 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 
 Native tools register unconditionally and always execute the Rust binary; no env switch turns one off or hands the work to a built-in. Choosing pi's built-in `read`/`bash`/`edit` is configuration: do not load that extension, or flip the permission-gate rule that steers calls to it (`nativeReadFirst` / `nativeBashFirst` in `extensions/permission-gate/config.json`, or `PGATE_CONFIG`).
 
+## Benchmarks
+
+![Chart: native-tool latency versus built-in baselines (panel A) and piwrite 100 MB one-shot write throughput (panel B)](docs/assets/benchmarks/all-tools.svg)
+
+Methodology: tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs; p50 per op, one representative case per tool — raw data in [benchmark/](benchmark/), [benchmark/runs/](benchmark/runs/), and [results NDJSON](benchmark/piwrite/results/results-2026-11-05-rawframe3.ndjson).
+
 ## Architecture
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/pi-native-architecture-dark.png" />
-    <img src="docs/assets/diagrams/pi-native-architecture-light.png" alt="pi-native architecture" width="960" />
-  </picture>
+  <img src="docs/assets/diagrams/pi-native-architecture-dark.png" alt="pi-native architecture" width="960" />
 </p>
 
 ▶ Explore the interactive view: [pi-native architecture](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pi-native-architecture.html)
