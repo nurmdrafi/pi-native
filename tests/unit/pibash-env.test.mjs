@@ -32,7 +32,9 @@ const NVM_DEFAULT_NODE =
   spawnSync(
     "/bin/bash",
     ["-c", `. ${JSON.stringify(NVM_SH)} >/dev/null 2>&1; command -v node >/dev/null`],
-    { encoding: "utf8" },
+    // Same scrubbed PATH as the test body: with the inherited PATH the
+    // runner's toolcache node satisfies the probe without any nvm default.
+    { encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: homedir(), SHLVL: "1" } },
   ).status === 0;
 
 test("scrubbed shell resolves node only through BASH_ENV", { skip: NVM_DEFAULT_NODE ? false : "nvm default node not installed" }, () => {
