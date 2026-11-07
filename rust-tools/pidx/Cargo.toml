@@ -7,4 +7,4 @@ description = "Incremental index/extract for pi session logs — feeds session-a
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
-sha1 = "0.10"
+sha1 = "0.11"
