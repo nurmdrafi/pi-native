@@ -31,13 +31,18 @@ fn run(args: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn piwrite");
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(input)
-        .expect("write stdin");
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    // The tool exits without draining stdin on usage/error paths; a broken
+    // pipe here is the child rejecting input, not a transport failure.
+    if let Err(e) = stdin.write_all(input) {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "write stdin: {e}"
+        );
+    }
     // The taken stdin drops here: the pipe closes and the tool sees EOF.
+    drop(stdin);
     child.wait_with_output().expect("wait for piwrite")
 }
 

@@ -7,7 +7,7 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.73.0] - 12-11-2026
 
 ### Added
 
@@ -44,8 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Benchmark chart honesty pass** (`scripts/bench-charts.mjs`, `docs/assets/benchmarks/all-tools.svg`): panel A dropped its log10 scale for per-row linear bars — bar heights are now exactly proportional to values within each row (a regression test pins height ratio to value ratio within 2%); every latency label carries an explicit ms/s unit; the four-line footer paragraph collapsed to one short line with full citations kept in the SVG desc; the left axis now carries a 0–100% of-row-max measurement with gridlines and bars keep 22 px label headroom so value labels no longer overlap the panel header. Deterministic regeneration preserved (byte-identical rerun).
 
 - **README benchmark ratios now match the pinned sources.** piedit 1 MiB edit 2.7x → 3.0x (102.714/34.406 ms) and piread small reads ~3.4x → ~3.5x (0.302/0.086 ms), matching the microbench docs and the chart beside them.
-
-## [Unreleased]
 
 ## [1.72.0] - 11-11-2026
 
