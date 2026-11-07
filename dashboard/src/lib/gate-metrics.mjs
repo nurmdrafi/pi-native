@@ -9,7 +9,7 @@
  *
  * Usage:
  *   pidx --sessions-dir ~/.pi/agent/sessions --out /tmp/px.jsonl --force
- *   node tests/tools/audit/gate-metrics.mjs --in /tmp/px.jsonl [--project PATH] [--json]
+ *   node dashboard/src/lib/gate-metrics.mjs --in /tmp/px.jsonl [--project PATH] [--json]
  *
  * `--out` is required: without it pidx writes the extract to stdout. The `pidx`
  * tool's own cache (`~/.pi/agent/.cache/pidx-extracts.jsonl`) holds only the

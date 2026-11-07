@@ -7,7 +7,7 @@
  */
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename } from "node:path";
-import { metrics as gateMetrics } from "../../tests/tools/audit/gate-metrics.mjs";
+import { metrics as gateMetrics } from "../src/lib/gate-metrics.mjs";
 
 // ── Pure data layer ────────────────────────────────────────────────────────
 

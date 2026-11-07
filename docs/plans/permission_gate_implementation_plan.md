@@ -336,7 +336,7 @@ An earlier draft of this section reported 399 (2.4%) from a lossy signature (too
 count) that conflated different edits to the same file; the hash-based count supersedes it.
 
 Both figures are now reproducible rather than thrown away: `pidx` emits `results[].blk` (gate
-family) and `tests/tools/audit/gate-metrics.mjs` prints this table from its extract. Parsing all
+family) and `dashboard/src/lib/gate-metrics.mjs` prints this table from its extract. Parsing all
 507 sessions takes 675 ms.
 
 Anchor Guard blocks audited individually (346 blocks): 189 (55%) are **unread** anchors — the
