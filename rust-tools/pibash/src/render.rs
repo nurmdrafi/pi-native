@@ -39,6 +39,17 @@ pub fn format_output(
     snapshot: Snapshot,
     empty_text: &str,
 ) -> (String, Option<Truncation>) {
+    format_snapshot(snapshot, accumulator.last_line_bytes(), empty_text)
+}
+
+/// `format_output` over an already-known `last_line_bytes` — used when the
+/// snapshot comes from `window_snapshot` and no accumulator instance exists.
+#[must_use]
+pub fn format_snapshot(
+    snapshot: Snapshot,
+    last_line_bytes: usize,
+    empty_text: &str,
+) -> (String, Option<Truncation>) {
     let truncation = &snapshot.truncation;
     // Move the snapshot's content into the display text instead of cloning it;
     // the snapshot is consumed here and the caller reads the other fields first.
@@ -61,7 +72,7 @@ pub fn format_output(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     if truncation.last_line_partial {
-        let last_line_size = format_size(accumulator.last_line_bytes());
+        let last_line_size = format_size(last_line_bytes);
         text.push_str(&format!(
             "\n\n[Showing last {} of line {end_line} (line is {last_line_size}). Full output: {full_output}]",
             format_size(truncation.output_bytes)

@@ -311,11 +311,16 @@ fn param_hash(name: &str, input: &Value) -> String {
         }
     };
     let mut h = Sha1::new();
-    h.update(format!("{name}{norm}").as_bytes());
+    // name and norm fed separately — same digest as hashing the concatenation,
+    // without building it. Hot path: one hash per toolCall.
+    h.update(name.as_bytes());
+    h.update(norm.as_bytes());
     let dig = h.finalize();
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(12);
     for b in dig.iter().take(6) {
-        out.push_str(&format!("{b:02x}"));
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0xf) as usize] as char);
     }
     out
 }
@@ -700,7 +705,7 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
         Ok(f) => f,
         Err(_) => return empty_extract(path, project_fallback),
     };
-    let mut reader = io::BufReader::new(f);
+    let mut reader = io::BufReader::with_capacity(64 * 1024, f);
     let mut cwd: Option<String> = None;
 
     // turns: dedupe by rid, LAST occurrence wins (apiTurns parity); entries
@@ -737,17 +742,19 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
             Ok(v) => v,
             Err(_) => continue,
         };
-        if e.get("type").and_then(Value::as_str) == Some("session") {
+        // one map lookup and no per-line String allocation for the type test
+        let ty = e.get("type").and_then(Value::as_str);
+        if ty == Some("session") {
             if let Some(c) = e.get("cwd").and_then(Value::as_str) {
                 cwd = Some(c.to_string());
             }
             continue;
         }
-        if e.get("type").and_then(Value::as_str) == Some("compaction") {
+        if ty == Some("compaction") {
             compactions += 1;
             continue;
         }
-        if e.get("type") != Some(&Value::String("message".into())) {
+        if ty != Some("message") {
             continue;
         }
         let msg = match e.get("message") {
@@ -1032,19 +1039,21 @@ fn save_store(path: &Path, files: &HashMap<String, Entry>, data: &[u8]) -> Resul
     // future cache on their content.
     let ordered: BTreeMap<&String, &Entry> = files.iter().collect();
     let header = serde_json::to_vec(&ordered)?;
-    let mut buf = Vec::with_capacity(STORE_PREFIX + header.len() + data.len());
-    buf.extend_from_slice(&STORE_MAGIC);
-    buf.extend_from_slice(&STORE_VERSION.to_le_bytes());
-    buf.extend_from_slice(&(header.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&header);
-    buf.extend_from_slice(data);
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&dir)?;
     let tmp = dir.join(format!(
         ".{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("pidx-state")
     ));
-    fs::write(&tmp, &buf)?;
+    // stream prefix + header + data: no whole-store buffer copy in memory
+    let mut w = io::BufWriter::new(fs::File::create(&tmp)?);
+    w.write_all(&STORE_MAGIC)?;
+    w.write_all(&STORE_VERSION.to_le_bytes())?;
+    w.write_all(&(header.len() as u32).to_le_bytes())?;
+    w.write_all(&header)?;
+    w.write_all(data)?;
+    w.flush()?;
+    drop(w);
     fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -1188,9 +1197,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // parse changed files on N threads
+    // parse changed files on N threads; without a report request the extract
+    // is also serialized on the worker (parallel), so the main thread only
+    // appends bytes and writes files
+    let want_values = report.is_some();
     let chunks = split_chunks(to_parse, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
-    let mut parsed: Vec<(String, FileId, Value)> = Vec::new();
+    let mut parsed: Vec<(String, FileId, Option<Value>, Vec<u8>)> = Vec::new();
     std::thread::scope(|scope| {
         let handles: Vec<_> = chunks
             .into_iter()
@@ -1198,7 +1210,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 scope.spawn(move || {
                     chunk
                         .into_iter()
-                        .map(|(key, path, proj, id)| (key, id, extract_file(&path, &proj)))
+                        .map(|(key, path, proj, id)| {
+                            let v = extract_file(&path, &proj);
+                            let bytes = if want_values {
+                                Vec::new()
+                            } else {
+                                // Value -> compact JSON is infallible in practice
+                                serde_json::to_vec(&v).unwrap_or_default()
+                            };
+                            (key, id, if want_values { Some(v) } else { None }, bytes)
+                        })
                         .collect::<Vec<_>>()
                 })
             })
@@ -1207,8 +1228,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             parsed.extend(h.join().unwrap_or_default());
         }
     });
-    let parsed_map: HashMap<String, (FileId, Value)> =
-        parsed.into_iter().map(|(k, i, v)| (k, (i, v))).collect();
+    let mut parsed_map: HashMap<String, (FileId, Value)> = HashMap::new();
+    let mut bytes_map: HashMap<String, (FileId, Vec<u8>)> = HashMap::new();
+    for (k, i, v, b) in parsed {
+        match v {
+            Some(v) => {
+                parsed_map.insert(k, (i, v));
+            }
+            None => {
+                bytes_map.insert(k, (i, b));
+            }
+        }
+    }
 
     // Analysis reports read the same extracts and print a summary instead of the
     // JSONL stream, so the skill scripts that used to re-walk every session file
@@ -1224,7 +1255,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // When every found session is fresh and the store holds no extra keys, the
     // stored data is already exactly what we emit — skip rebuilding and rewriting.
-    let needs_write = !parsed_map.is_empty() || reused != found.len() || store.files.len() != found.len();
+    let needs_write = !bytes_map.is_empty() || reused != found.len() || store.files.len() != found.len();
 
     // A warm run with nothing to parse emits byte-for-byte what the store
     // already contains, so an up-to-date extract file needs no rewrite. That
@@ -1243,7 +1274,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         None
     } else {
         Some(match &out_path {
-            Some(p) => Box::new(io::BufWriter::new(fs::File::create(p)?)),
+            Some(p) => Box::new(io::BufWriter::with_capacity(256 * 1024, fs::File::create(p)?)),
             None => Box::new(io::BufWriter::new(io::stdout().lock())),
         })
     };
@@ -1257,12 +1288,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut emitted = 0usize;
     for (path, _, _) in &found {
         let key = path.to_string_lossy().to_string();
-        if let Some((fid, extract)) = parsed_map.get(&key) {
-            // serialize once; same bytes go to output and to the store
+        if let Some((fid, bytes)) = bytes_map.get(&key) {
+            // serialized once on the parse threads; same bytes go to output and store
             let off = new_data.len() as u64;
-            serde_json::to_writer(&mut new_data, extract)?;
+            new_data.extend_from_slice(bytes);
             let len = new_data.len() as u64 - off;
-            emit_line(&mut out_writer, &new_data[off as usize..])?;
+            emit_line(&mut out_writer, bytes)?;
             new_files.insert(key, Entry { size: fid.size, mtime_ns: fid.mtime_ns, off, len });
             emitted += 1;
         } else if let Some(e) = store.files.get(&key).copied() {

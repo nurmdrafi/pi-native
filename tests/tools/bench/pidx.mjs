@@ -12,6 +12,11 @@
  *                 arm also does; not a full extractor reimplementation)
  *   pidx-cold   — bin/pidx full cold index of the corpus dir, extracts
  *                 written into the workdir via --out
+ *   oracle-rerun — the oracle sweep again with a fresh tag (node has no
+ *                 state cache; the honest baseline counterpart for warm)
+ *   pidx-warm  — bin/pidx rerun over the unchanged corpus with the state
+ *                store left in place (cache hit: reused == FILES, no
+ *                reparse, no rewrite)
  *
  * Corpus: 40 JSONL files x ~800 KiB in <workdir>/corpus/<project>/,
  * deterministic mulberry32 content (seed below), session-log record shapes
@@ -23,8 +28,9 @@
  * `--throughput` prints the md to stdout.
  *
  * Self-assertions: every sample finite, pidx exit 0 with parsed == FILES
- * and reused == 0 each run (proof of cold), extract line count == FILES,
- * both MB/s >= 0.1, report file written non-empty.
+ * and reused == 0 each cold run (proof of cold), warm runs reuse == FILES
+ * and parsed == 0 (proof of cache hit), extract line count == FILES, all
+ * MB/s >= 0.1, report file written non-empty.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -44,6 +50,7 @@ const MIB = 32;
 const FILES = 40;
 const PER_FILE = Math.floor((MIB * 1024 * 1024) / FILES); // ~819 KiB
 const CASE = "cold-index";
+const WARM_CASE = "warm-rerun";
 
 if (!existsSync(BIN)) {
   console.error("FATAL  bin/pidx missing — run scripts/bootstrap.sh (or the cargo build) first");
@@ -199,6 +206,21 @@ function pidxCold(tag) {
   return { summary, outLines };
 }
 
+/** one-time warm-state setup: cold run with FIXED state + out paths */
+function pidxWarmPrep() {
+  const r = spawnSync(BIN, ["--sessions-dir", sessionsDir, "--state", join(work, "warm-state.bin"), "--out", join(work, "warm-out.jsonl")], { encoding: "utf8" });
+  assert.equal(r.status, 0, `pidx warm prep exited ${r.status}: ${r.stderr}`);
+}
+
+/** one warm pidx rerun: same fixed state + out, unchanged corpus */
+function pidxWarm() {
+  const r = spawnSync(BIN, ["--sessions-dir", sessionsDir, "--state", join(work, "warm-state.bin"), "--out", join(work, "warm-out.jsonl")], { encoding: "utf8" });
+  assert.equal(r.status, 0, `pidx warm exited ${r.status}: ${r.stderr}`);
+  const summary = JSON.parse(r.stderr.trim().split("\n").pop());
+  const outLines = readFileSync(join(work, "warm-out.jsonl"), "utf8").trim().split("\n").length;
+  return { summary, outLines };
+}
+
 function measureArm(fn) {
   for (let i = 0; i < WARMUP; i++) fn(`w${i}`);
   const samples = [];
@@ -227,13 +249,33 @@ const pidxP50 = measureArm((tag) => {
   }
 });
 
+// ---- warm arm: existing state over unchanged corpus (the state store's
+// payoff) with the oracle rerun — no cache, full redo — as its baseline ----
+pidxWarmPrep();
+let warmChecked = false;
+const pidxWarmP50 = measureArm(() => {
+  const { summary, outLines } = pidxWarm();
+  if (!warmChecked) {
+    assert.equal(summary.reused, FILES, `warm run reused ${summary.reused}, want ${FILES}`);
+    assert.equal(summary.parsed, 0, `warm run parsed ${summary.parsed}, want 0 (state not reused)`);
+    assert.equal(outLines, FILES, `warm extract lines ${outLines}, want ${FILES}`);
+    warmChecked = true;
+  }
+});
+const rerunP50 = measureArm((tag) => { const n = oracleSweep(tag); assert.equal(n, totalLines, "oracle rerun line count"); });
+
 const mbs = (p50ms) => MIB / (p50ms / 1000);
 const baselineMbs = mbs(naiveP50);
 const nativeMbs = mbs(pidxP50);
+const rerunMbs = mbs(rerunP50);
+const warmMbs = mbs(pidxWarmP50);
 assert.ok(baselineMbs >= 0.1 && nativeMbs >= 0.1, "throughput below 0.1 MB/s — refusing to report");
+assert.ok(rerunMbs >= 0.1 && warmMbs >= 0.1, "warm throughput below 0.1 MB/s — refusing to report");
 
 console.log(`oracle-write p50 ${naiveP50.toFixed(1)} ms → ${baselineMbs.toFixed(1)} MB/s`);
 console.log(`pidx-cold   p50 ${pidxP50.toFixed(1)} ms → ${nativeMbs.toFixed(1)} MB/s (ratio ${(nativeMbs / baselineMbs).toFixed(2)}x baseline)`);
+console.log(`oracle-rerun p50 ${rerunP50.toFixed(1)} ms → ${rerunMbs.toFixed(1)} MB/s`);
+console.log(`pidx-warm   p50 ${pidxWarmP50.toFixed(1)} ms → ${warmMbs.toFixed(1)} MB/s (ratio ${(warmMbs / rerunMbs).toFixed(2)}x oracle rerun)`);
 
 // ---- report (chart generator parses this verbatim) ----
 const nodeV = process.version;
@@ -252,8 +294,11 @@ const md = [
   "| case | payload | baseline MB/s | native MB/s | N |",
   "| --- | --- | ---: | ---: | ---: |",
   `| ${CASE} | ${MIB} MiB | ${baselineMbs.toFixed(1)} | ${nativeMbs.toFixed(1)} | ${N} |`,
+  `| ${WARM_CASE} | ${MIB} MiB | ${rerunMbs.toFixed(1)} | ${warmMbs.toFixed(1)} | ${N} |`,
   "",
   "baseline = parse + build + write per-file summaries; native = full extracts + state store.",
+  "",
+  "warm-rerun: baseline = oracle rerun (node has no state cache — full reparse + rewrite); native = pidx rerun with the existing state store over the unchanged corpus (cache hit — no reparse, no rewrite). Warm speed is the state store paying off, not a like-for-like parse race.",
   "",
   `Corpus: ${FILES} synthetic session-log JSONL files (${corpusMib.toFixed(1)} MiB, mulberry32 seed ${SEED}) in a temp workdir; baseline = node oracle that parses every line and writes one JSONL summary per file, native = full cold index (\`bin/pidx --sessions-dir <corpus> --state <fresh> --out <workdir>\`) writing full per-session extracts — the state-store write is pidx-only extra work.`,
   "",

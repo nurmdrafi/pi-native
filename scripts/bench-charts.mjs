@@ -145,11 +145,14 @@ function parsePidx(text) {
 // Throughput arms (2026-11-07): one '## Throughput (MB/s)' table per tool,
 // first data row is the representative case; columns 'baseline MB/s' /
 // 'native MB/s'. Numbers are MB/s = 32 MiB ÷ p50 s, one decimal.
-function parseThroughput(text, tool) {
+function parseThroughput(text, tool, wantCase) {
   const table = parseTables(text).find((t) => t.header.includes('baseline MB/s'));
   if (!table) throw new Error(`no throughput table for ${tool}`);
-  const r = rowMaps(table)[0];
-  if (!r) throw new Error(`no throughput row for ${tool}`);
+  const rows = rowMaps(table);
+  const r = wantCase
+    ? rows.find((x) => x.case.replace(/-32mib$/, '') === wantCase)
+    : rows[0];
+  if (!r) throw new Error(`no throughput row ${wantCase ?? '[0]'} for ${tool}`);
   return {
     caseName: r.case.replace(/-32mib$/, ''), // payload stated once, in the panel header
     baseline: cell(r['baseline MB/s']),
@@ -178,12 +181,13 @@ const pireadOne = pickCase(parseMicrobench(read(SRC_PIREAD), 'piread'), 'one-lin
 const pibashSeq = pickCase(parseMicrobench(read(SRC_PIBASH), 'pibash'), 'seq50000', SRC_PIBASH);
 const pieditBig = pickCase(parseMicrobench(read(SRC_PIEDIT), 'piedit'), 'large-1mib', SRC_PIEDIT);
 const pidx = parsePidx(read(SRC_NATIVE_TOOLS));
-const tp = (src, tool) => parseThroughput(read(src), tool);
+const tp = (src, tool, wantCase) => parseThroughput(read(src), tool, wantCase);
 const tpPiread = tp(SRC_TP_PIREAD, 'piread');
 const tpPibash = tp(SRC_TP_PIBASH, 'pibash');
 const tpPiedit = tp(SRC_TP_PIEDIT, 'piedit');
 const tpPiwrite = tp(SRC_TP_PIWRITE, 'piwrite');
 const tpPidx = tp(SRC_TP_PIDX, 'pidx');
+const tpPidxWarm = tp(SRC_TP_PIDX, 'pidx', 'warm-rerun');
 
 const SERIES = [
   { key: 'baseline', name: 'built-in baseline (oracle / node-builtin / cold parse)', color: C.base },
@@ -214,12 +218,13 @@ const panelB = {
     { label: `piedit: ${tpPiedit.caseName}`, cells: { baseline: tpPiedit.baseline, native: tpPiedit.native } },
     { label: `piwrite: ${tpPiwrite.caseName}`, cells: { baseline: tpPiwrite.baseline, native: tpPiwrite.native } },
     { label: `pidx: ${tpPidx.caseName}`, cells: { baseline: tpPidx.baseline, native: tpPidx.native } },
+    { label: `pidx: ${tpPidxWarm.caseName}`, cells: { baseline: tpPidxWarm.baseline, native: tpPidxWarm.native } },
   ],
 };
 
 const TITLE = 'pi-native: native tools vs built-in baselines — latency & throughput';
 const SUBTITLE =
-  'tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · one representative case per tool';
+  'tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · representative cases per tool';
 
 const caveat = `caveat: piwrite serve p50 trails built-in at 1–100 MB in-bench (1 MB: ${s1.arms['piwrite-serve'].p50.raw} vs ${s1.arms['node-builtin'].p50.raw} ms/op); large serves = kernel dirty-page throttling (${SRC_RUST_OPT})`;
 

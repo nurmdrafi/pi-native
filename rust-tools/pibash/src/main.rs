@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use accumulator::{cap_full_output, OutputAccumulator};
 use cli::{Mode, Request};
 use envelope::Success;
-use render::{format_output, structured_limit};
+use render::{format_output, format_snapshot, structured_limit};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -55,7 +55,10 @@ fn main() -> ExitCode {
 /// (even a non-zero shell exit — the caller reads `exit_code`), 3 on a
 /// spawn/IO failure.
 fn one_shot(request: &Request) -> ExitCode {
-    let response = execute(request);
+    // Same wire dedup as the daemon: `truncation.content` is an exact prefix
+    // of `text`, and the extension restores it on parse, so the one-shot line
+    // ships each byte once instead of serializing the display text twice.
+    let response = execute_with(request, true);
     let (json, ok) = match &response {
         Ok(success) => (serde_json::to_string(success).unwrap_or_default(), true),
         Err(failure) => (serde_json::to_string(failure).unwrap_or_default(), false),
@@ -150,28 +153,50 @@ pub fn execute_observed(
         compress::COMPRESS_MAX_BYTES,
     );
 
-    // Parity-shaped display + truncation over the (cleaned/pruned) stream, using
-    // a scratch accumulator so the original's spill writer/raw stay intact.
-    let mut scratch = OutputAccumulator::new("pi-bash-shadow");
-    scratch.append(compressed.content.as_bytes());
-    scratch.finish();
-    let snapshot = scratch.snapshot(false);
-    let truncated = snapshot.truncation.truncated;
-    let (text, mut truncation) = format_output(&mut scratch, snapshot, "(no output)");
+    // Parity-shaped display + truncation over the (cleaned/pruned) stream.
+    // When compression kept the stream whole (Strategy::None) the shadow
+    // accumulator would re-copy the entire stream and spill it to a SECOND
+    // temp file just to recover the tail window (measured: 68 ms of a 298 ms
+    // 32 MiB run) — and its spill path leaked into the display note, naming a
+    // file deleted immediately after. Compute the same tail-window snapshot
+    // directly from the compressed text instead; the note then names the
+    // ORIGINAL spill, which holds the untouched stream. When an omission
+    // strategy fired the compressed text is tiny, so the scratch accumulator
+    // stays the cheap path for it.
+    let (text, mut truncation, truncated) = if compressed.strategy == compress::Strategy::None {
+        let snapshot =
+            OutputAccumulator::window_snapshot(&compressed.content, structured_output_path.clone());
+        // Bytes of the trailing open line, as scratch.last_line_bytes() gave.
+        let open_line = compressed
+            .content
+            .rfind('\n')
+            .map_or(compressed.content.len(), |idx| compressed.content.len() - idx - 1);
+        let truncated = snapshot.truncation.truncated;
+        let (text, truncation) = format_snapshot(snapshot, open_line, "(no output)");
+        (text, truncation, truncated)
+    } else {
+        let mut scratch = OutputAccumulator::new("pi-bash-shadow");
+        scratch.append(compressed.content.as_bytes());
+        scratch.finish();
+        let snapshot = scratch.snapshot(false);
+        let truncated = snapshot.truncation.truncated;
+        let (text, truncation) = format_output(&mut scratch, snapshot, "(no output)");
+        // If the shadow pre-pass still overflows, the scratch accumulator wrote
+        // its OWN spill; the model-visible reference must point at the ORIGINAL
+        // full spill (which holds the untouched stream), not the scratch copy.
+        let shadow_spill = scratch.temp_output_path();
+        drop(scratch);
+        if let Some(path) = shadow_spill {
+            let _ = std::fs::remove_file(path);
+        }
+        (text, truncation, truncated)
+    };
     // `truncation.content` duplicates `text` on the wire; drop it for the daemon
     // exactly as before (the extension restores it from `text`).
     if omit_truncation_content
         && let Some(t) = truncation.as_mut()
     {
         t.content = String::new();
-    }
-    // If the shadow pre-pass still overflows, the scratch accumulator wrote its
-    // OWN spill; the model-visible reference must point at the ORIGINAL full
-    // spill (which holds the untouched stream), not the scratch copy.
-    let shadow_spill = scratch.temp_output_path();
-    drop(scratch);
-    if let Some(path) = shadow_spill {
-        let _ = std::fs::remove_file(path);
     }
 
     // `truncated`, `truncation`, and `fullOutputPath` mirror the built-in oracle

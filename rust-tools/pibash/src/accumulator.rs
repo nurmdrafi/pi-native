@@ -235,6 +235,66 @@ impl OutputAccumulator {
         }
     }
 
+    /// Tail-window snapshot computed directly over an already-materialized
+    /// stream — byte-identical to `append(full)` + `finish()` +
+    /// `snapshot(false)` on a scratch accumulator, minus the full-stream spill
+    /// that copy would write (and its caller would delete unread). Same rolling
+    /// window, same counters, same `truncate_tail`; `full_output_path` is
+    /// supplied by the caller so the display note names the ORIGINAL spill,
+    /// not the scratch copy the shadow path deleted right after rendering it.
+    #[must_use]
+    pub fn window_snapshot(full: &str, full_output_path: Option<PathBuf>) -> Snapshot {
+        let max_lines = DEFAULT_MAX_LINES;
+        let max_bytes = DEFAULT_MAX_BYTES;
+        // Counters over the complete stream: one newline scan, no line Vec.
+        let mut total_lines = full.matches('\n').count();
+        if !full.is_empty() && !full.ends_with('\n') {
+            total_lines += 1;
+        }
+        let total_bytes = full.len();
+
+        // Rolling window = trim_tail_bytes + trim_tail_lines + snapshot_text:
+        // the last `max_bytes * 2` bytes, char-aligned, cut forward past any
+        // partial first line. truncate_tail only reads the last max_lines /
+        // max_bytes of its input, so skipping the separate line-count trim
+        // yields the identical truncation.
+        let window_bytes = max_bytes * 2;
+        let bytes = full.as_bytes();
+        let mut start = bytes.len().saturating_sub(window_bytes);
+        while start < bytes.len() && (bytes[start] & 0xc0) == 0x80 {
+            start += 1;
+        }
+        let mut window = &full[start..];
+        if start > 0 && bytes[start - 1] != b'\n'
+            && let Some(idx) = window.find('\n')
+        {
+            window = &window[idx + 1..];
+        }
+
+        let mut truncation = truncate_tail(window, max_lines, max_bytes);
+        let truncated = total_lines > max_lines || total_bytes > max_bytes;
+        truncation.truncated = truncated;
+        truncation.truncated_by = if truncated {
+            truncation.truncated_by.or(Some(if total_bytes > max_bytes {
+                "bytes"
+            } else {
+                "lines"
+            }))
+        } else {
+            None
+        };
+        truncation.total_lines = total_lines;
+        truncation.total_bytes = total_bytes;
+        truncation.max_lines = max_lines;
+        truncation.max_bytes = max_bytes;
+
+        Snapshot {
+            content: truncation.content.clone(),
+            truncation,
+            full_output_path,
+        }
+    }
+
     /// Bytes on the currently open (last, newline-free) line — the oracle's
     /// `getLastLineBytes()`, used by the partial-last-line note.
     #[must_use]
