@@ -4,7 +4,7 @@ on:
   push:
     branches: [dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   test-node:
@@ -14,7 +14,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - name: Build and install native tools
+        run: |
+          cargo build --release --manifest-path rust-tools/Cargo.toml
+          mkdir -p bin "$HOME/.pi/agent/bin"
+          for b in docheck pibash piread piwrite piedit pidx outline; do
+            cp "rust-tools/target/release/$b" "bin/$b"
+            cp "rust-tools/target/release/$b" "$HOME/.pi/agent/bin/$b"
+          done
       - run: npm test
       - run: npm run typecheck
       - run: npm run lint:agents
