@@ -158,8 +158,15 @@ const DESTRUCTIVE_BASH = new RegExp(
     String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)` +
     // S4 fix 6 (§6.6): pipe-to-interpreter — unanchored on purpose (matches
     // anywhere in the segment, incl. inside sh -c "…" payloads); `bash
-    // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed
+    // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed.
+    // 2026-11-07 HIGH fix: the family after the pipe extends past sh — a
+    // decoded payload piped into any script interpreter (`echo <b64> |
+    // base64 -d | node`) is the same unscannable-exec lane as curl|sh. The
+    // new words require whitespace BEFORE the bar: real shell pipes leave
+    // one, while a quoted pattern's alternation inside a word
+    // (`rg "node -e|python3 -c"`, 16.3 pin) does not.
     String.raw`|\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
+    String.raw`|(?<=\s)\|\s*(?:node(?:js)?|python3?|perl|ruby|php|deno|bun)\b(?![\w-])` +
     String.raw`|\b(?:DROP\s+(?:TABLE|DATABASE)|DELETE\s+FROM)\b|\bfind\b[^|;&]*\s-[a-zA-Z]*delete\b`,
   "i",
 );
@@ -258,6 +265,14 @@ const scratchWriteOnly = (seg: string): boolean => {
   );
 };
 
+/** 2026-11-07 HIGH fix: the scratch exemption above is only for payloads
+ * that merely WRITE throwaway data. An inline-interpreter body that itself
+ * deletes (node fs rmSync, python shutil.rmtree/os.remove, an embedded
+ * `rm -r…`) is destructive no matter where stdout lands — the destination
+ * of the print never sanitizes the code that runs. */
+const INTERP_BODY_DESTRUCTIVE =
+  /\b(?:rmSync|rmdirSync|unlinkSync|shutil\.rmtree|os\.remove)\b|\brm\s+-[a-zA-Z]*[rRf]/;
+
 export const segmentDestructive = (seg: string): boolean => {
   // S4 fix 9 (2026-10-18): NFKC fold first — homoglyph command words (ｒｍ) match
   const s = seg.normalize("NFKC");
@@ -274,7 +289,11 @@ export const segmentDestructive = (seg: string): boolean => {
     ) ||
     (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
     // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
-    (INTERP_INLINE.test(s) && !scratchWriteOnly(s)) ||
+    // 2026-11-07 HIGH fix: scratch destinations exempt only benign bodies —
+    // a destructive interpreter payload confirms regardless of where its
+    // redirects or tees land.
+    (INTERP_INLINE.test(s) &&
+      (!scratchWriteOnly(s) || INTERP_BODY_DESTRUCTIVE.test(s))) ||
     EVAL_ENCODED.test(s) ||
     (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s))
   );
@@ -303,6 +322,13 @@ const heredocOf = (seg: string) => {
   return tag ? { tag, stripTabs: m[1] === "-" } : undefined;
 };
 
+/** 2026-11-07 HIGH fix: a heredoc feeding a shell runs its body —
+ * `sh <<EOF … rm -rf …` hid the destructive line as "data". A body line
+ * that STARTS with a confirm-set command word is re-emitted as a segment
+ * so the destructive analyzers judge it; mid-line prose mentions
+ * (`cost = $5; rm -rf / is quoted prose`) stay data per the 16.1 pins. */
+const HEREDOC_BODY_CMD = new RegExp(`^\\s*(?:${DESTRUCTIVE_CORE_SRC})`, "i");
+
 export function splitSegments(cmd: string): string[] {
   const out: string[] = [];
   let cur = "";
@@ -330,6 +356,10 @@ export function splitSegments(cmd: string): string[] {
           "",
         );
         if (raw === heredoc.tag) heredoc = undefined;
+        // 2026-11-07 HIGH fix: a destructive body line is re-emitted as its
+        // own segment — heredoc-fed shells must not launder `rm -rf` past
+        // the confirm. Prose mid-line mentions stay dropped (16.1 pins).
+        else if (HEREDOC_BODY_CMD.test(raw)) out.push(raw);
         line = "";
       } else {
         line += ch;
