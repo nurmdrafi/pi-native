@@ -2,6 +2,12 @@
 /**
  * A8 (brief §6): AGENTS.md lint — flags duplicated rules and contradictory
  * directives so shrinks/dedupes are evidence-driven, not vibes.
+ * Also regenerates the roster tables (Agents table in docs/subagent-
+ * orchestration.md, Skills table in docs/skills.md) from agents/<name>.md and
+ * skills/<dir>/SKILL.md frontmatter so the docs cannot drift from source: only
+ * the rows between the header separator and the next non-table line are
+ * rewritten, sorted by name; everything else stays byte-identical and a
+ * table already in sync produces no write.
  * Heuristic, no deps. Output: one JSON line.
  *   { bullets, dup_pairs, contradictions, details: [...] }
  * Contradiction checks (extensible):
@@ -10,7 +16,7 @@
  *   - style-rule count: >1 bullet governing reply style (concise/caveman/etc.)
  * Duplication: word-set Jaccard > 0.55 between bullet pairs.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -129,4 +135,85 @@ for (const { file, md: text } of SOURCES) {
       scope_leaks.push({ file, line: i + 1, text: line.trim().slice(0, 90) });
 }
 
-console.log(JSON.stringify({ bullets: bullets.length, dup_pairs: dupPairs, contradictions, missing, scope_leaks, details }));
+// Roster generation (2026-11-07): the Agents and Skills tables were
+// hand-maintained copies of agents/*.md and skills/*/SKILL.md frontmatter,
+// and drift was silent. Both table bodies are now rebuilt from source on
+// every run: only the rows between the header separator and the first
+// non-table line are replaced; prose, headers and separators stay
+// byte-identical, rows are sorted by name, a table already in sync produces
+// no write, and a cell containing a pipe fails the run instead of silently
+// breaking the table.
+const frontmatter = (md) => {
+  const lines = md.split('\n');
+  const fm = {};
+  if (lines[0] !== '---') return fm;
+  for (let i = 1; i < lines.length && lines[i] !== '---'; i++) {
+    // top-level keys only; nested YAML is indented and skipped
+    const m = lines[i].match(/^([A-Za-z0-9_-]+):\s?(.*)$/);
+    if (m) fm[m[1]] = m[2].trim();
+  }
+  return fm;
+};
+const unquote = (s) => (/^".*"$/s.test(s ?? '') ? s.slice(1, -1) : s ?? '');
+const cellText = (s) => {
+  if ((s ?? '').includes('|')) throw new Error(`roster cell contains a pipe, refusing to break the table: ${s.slice(0, 60)}`);
+  return s ?? '';
+};
+const regenTable = (md, headerTest, renderRows) => {
+  const lines = md.split('\n');
+  const h = lines.findIndex((l) => headerTest.test(l));
+  if (h < 0 || !/^\|[\s-|]+\|$/.test(lines[h + 1] ?? '')) throw new Error(`roster table header not found for ${headerTest}`);
+  let end = h + 2;
+  while (end < lines.length && lines[end].startsWith('|')) end++;
+  const rows = renderRows(lines[h]);
+  return { md: [...lines.slice(0, h + 2), ...rows, ...lines.slice(end)].join('\n'), rowsBefore: end - h - 2, rowsAfter: rows.length };
+};
+
+// Agents table: one row per agents/*.md — name, tools (plus the established
+// `skills`/`subagent_agents` parenthetical), description as the role.
+const agentRows = readdirSync(join(ROOT, 'agents'))
+  .filter((f) => f.endsWith('.md'))
+  .sort()
+  .map((f) => {
+    const fm = frontmatter(readFileSync(join(ROOT, 'agents', f), 'utf8'));
+    const name = cellText(unquote(fm.name ?? f.replace(/\.md$/, '')));
+    let tools = cellText(unquote(fm.tools));
+    if (fm.skills) {
+      const sk = unquote(fm.skills).split(',').map((s) => `\`${s.trim()}\``).join(', ');
+      const sub = fm.subagent_agents ? `; \`subagent_agents: ${unquote(fm.subagent_agents)}\`` : '';
+      tools = cellText(`${tools} (${sk}${sub})`);
+    }
+    return `| ${name} | ${tools} | ${cellText(unquote(fm.description))} |`;
+  });
+
+// Skills table: one row per skills/<dir>/ — name, description verbatim,
+// invocation is always /skill:<name>. Padded to the widest cell per column
+// (header included) to keep the aligned look of the hand-written table.
+const skillCells = readdirSync(join(ROOT, 'skills'), { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .map((d) => d.name)
+  .sort()
+  .map((dir) => {
+    const p = join(ROOT, 'skills', dir, 'SKILL.md');
+    const fm = frontmatter(existsSync(p) ? readFileSync(p, 'utf8') : '');
+    const name = cellText(unquote(fm.name ?? dir));
+    return [name, cellText(unquote(fm.description)), `\`/skill:${name}\``];
+  });
+const padRows = (cells, headerLine) => {
+  const widths = headerLine.split('|').slice(1, -1).map((c, i) => Math.max(c.trim().length, ...cells.map((r) => r[i].length)));
+  return cells.map((r) => `| ${r.map((c, i) => c.padEnd(widths[i])).join(' | ')} |`);
+};
+
+const tables = [];
+for (const spec of [
+  { doc: 'docs/subagent-orchestration.md', header: /^\| Agent\b/, rows: () => agentRows },
+  { doc: 'docs/skills.md', header: /^\| Skill\b/, rows: (h) => padRows(skillCells, h) },
+]) {
+  const path = join(ROOT, spec.doc);
+  const before = readFileSync(path, 'utf8');
+  const { md: after, rowsBefore, rowsAfter } = regenTable(before, spec.header, spec.rows);
+  if (after !== before) writeFileSync(path, after);
+  tables.push({ doc: spec.doc, rows_before: rowsBefore, rows_after: rowsAfter, changed: after !== before });
+}
+
+console.log(JSON.stringify({ bullets: bullets.length, dup_pairs: dupPairs, contradictions, missing, scope_leaks, tables, details }));

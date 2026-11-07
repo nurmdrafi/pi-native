@@ -21,22 +21,22 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 
 | Agent | Tools | Role |
 | ----- | ----- | ---- |
-| architect-reviewer | ls, piread, pibash | architecture review — dependencies, coupling, boundaries |
-| auth-worker | piwrite, piread, piedit, pibash (`auth`) | auth/session implementation — login flows, token refresh, guards, access control |
-| bench-runner | piwrite, piread, pibash | frozen benchmark/eval arms under hard wall budgets; writes only its result file |
-| docs-optimizer | piwrite, piread, piedit, pibash (`documentation-writer`) | optimizes rule/instruction Markdown; drafts README/CHANGELOG proposals |
-| frontend-engineer | piwrite, piread, piedit, pibash (`playwright-tester`) | component/UI implementation with component tests |
-| map-engineer | piwrite, piread, piedit, pibash (`map-integration`) | map rendering — overlays, composite-layer performance, camera/viewport |
-| product-manager | piwrite, piread, pibash (`brainstorming`) | structured product briefs with numbered acceptance criteria |
-| researcher | piwrite, piread, pibash (`web-search`) | web research via the `tvly` CLI |
-| reviewer | ls, piread, pibash (`code-reviewer`) | pre-commit diff review; never commits/pushes |
-| rust-engineer | piwrite, piread, piedit, pibash (`rust-skills`) | Rust implementation; cargo fmt/clippy/test discipline |
-| scout | ls, piread, pibash | recon |
-| security-reviewer | ls, piread, pibash | security pass over trust-boundary diffs — auth, secrets, injection, data loss, guards |
-| session-auditor | ls, piread, pibash, pidx (`session-audit`) | session-history analysis; appends lessons, never edits history |
-| ui-verifier | ls, piread, pibash (`browser-tools`) | drives the running app via headless Chromium + CDP |
-| verifier | ls, piread, pibash | runs the change; per-criterion PASS/FAIL, never fixes |
-| worker | piwrite, piread, piedit, pibash (`systematic-debugging`, `ponytail`; `subagent_agents: scout, researcher`) | general implementer; scoped issue-fixing in worktrees |
+| architect-reviewer | ls, piread, pibash | Architecture reviewer — read-only pass over structural changes and dependency graphs (pattern adherence, SOLID, coupling, boundaries); use instead of reviewer when the question is structure, not correctness |
+| auth-worker | piwrite, piread, piedit, pibash (`auth`) | Auth/session implementer — login flows, token refresh and redirect, cookie-held permissions, route guards and level/hierarchy access control; use instead of worker when the task touches authentication or authorization |
+| bench-runner | piwrite, piread, pibash | Benchmark/eval runner — executes frozen candidates and suite arms under hard wall budgets; writes only its result file, reports numbers |
+| docs-optimizer | piwrite, piread, piedit, pibash (`documentation-writer`) | LLM-instruction and repo-docs optimizer — optimizes rule/instruction Markdown for adherence and token economy; drafts README and CHANGELOG proposals with citation discipline |
+| frontend-engineer | piwrite, piread, piedit, pibash (`playwright-tester`) | Frontend implementer — component/UI work, styling, and component tests; use instead of worker when the task is browser-facing UI |
+| map-engineer | piwrite, piread, piedit, pibash (`map-integration`) | Map rendering implementer — deck.gl/MapLibre overlays, composite-layer performance, real-time plotting, camera and viewport work, map data flow (Redux-fed layers); use instead of frontend-engineer when the task touches map layers, map state, or map rendering |
+| product-manager | piwrite, piread, pibash (`brainstorming`) | Product manager — turns a rough idea or feature request into a structured brief (problem, users, scope, numbered acceptance criteria); use before implementation waves when scope is unsettled |
+| researcher | piwrite, piread, pibash (`web-search`) | Web researcher — searches the web via the Tavily CLI and synthesizes findings |
+| reviewer | ls, piread, pibash (`code-reviewer`) | Pre-commit reviewer — reviews the diff for correctness and races before commit+push; structure goes to architect-reviewer, trust boundaries and guard logic to security-reviewer |
+| rust-engineer | piwrite, piread, piedit, pibash (`rust-skills`) | Rust implementer — cargo-workspace code changes, clippy/fmt cleanups, unsafe discipline; use instead of worker when the task is Rust |
+| scout | ls, piread, pibash | Fast codebase recon — explores files, finds patterns, maps module structure and dependencies |
+| security-reviewer | ls, piread, pibash | Security reviewer — read-only pass over diffs crossing trust boundaries (auth, secrets, injection, data loss) and guard/permission-enforcement logic; use instead of reviewer when the change touches permissions or untrusted input |
+| session-auditor | ls, piread, pibash, pidx (`session-audit`) | Session-history analyst — indexes session logs and extracts turns, tool-call patterns, recurring work, and lessons; use for workflow profiling and post-incident audits |
+| ui-verifier | ls, piread, pibash (`browser-tools`) | UI verification sweep — drives the running app via headless Chromium + CDP; verifies rendered behavior, never restarts the server or browser |
+| verifier | ls, piread, pibash | Acceptance-criteria verifier — runs the change/probe and reports per-criterion PASS/FAIL; verifies behavior, never fixes |
+| worker | piwrite, piread, piedit, pibash (`systematic-debugging`, `ponytail`; `subagent_agents: scout, researcher`) | General-purpose worker — reads, writes, and edits code |
 
 ## Orchestration rules
 - Delegate only when it beats inline on speed, accuracy, or context: 2+ disjoint file-sets, a context-heavy read sweep, or an independent check. Overlapping sets serialize — isolation only, never wall clock. Fresh child context costs many times linear; read-heavy parallel work pays, single-file coding does not.
