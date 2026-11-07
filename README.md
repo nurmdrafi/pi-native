@@ -29,7 +29,7 @@ Coding-agent configs rot — they accumulate always-on prompt bloat, machine-spe
 ## What it does
 
 - Native Rust tools — `piread`, `piedit`, `pibash`, `piwrite`, `pidx` — replace the built-in `read`, `edit`, `bash`, and `write` tools plus session-log parsing, with the same parameters, so a tuned pi setup runs unchanged ([docs/native-tools.md](docs/native-tools.md))
-- Every tool call crosses a permission gate before it runs; a broken native tool is a visible error, never a silent fallback ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
+- Every tool call crosses a permission gate before it runs ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
 - Context stays small by default: windowed reads, bounded diffs, and hard caps on shell output shape what reaches the model ([docs/native-tools.md](docs/native-tools.md))
 - Cost is visible by default: the dashboard shows token spend, cache hit rate, and per-session USD budget alerts ([dashboard/](dashboard/))
 - Subagents run sandboxed with the gate re-enabled inside; each child declares its write scope, so parallel work never clobbers files ([docs/subagents.md](docs/subagents.md))
@@ -90,7 +90,7 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 
 ![Chart: native-tool latency versus built-in baselines (panel A) and per-tool throughput, 32 MiB per op, native versus baseline (panel B)](docs/assets/benchmarks/all-tools.svg)
 
-Numbers in text, beside the chart — representative p50, native vs built-in on matched workloads: `piwrite` 4 KB write **2.1x** faster, `piedit` 1 MiB edit **2.7x**, `piread` small reads **~3.4x**; a warm log re-scan drops 2.1 s to 28 ms. Peak RSS on identical workloads: the built-in path holds **24x-142x** more memory than the native tools — 110,128 KiB vs 2,300 KiB on a windowed read, 410,304 KiB vs 2,888 KiB on a 100 MB write (p50, `/usr/bin/time -v`).
+Numbers in text, beside the chart — representative p50, native vs built-in on matched workloads: `piwrite` 4 KB write **2.1x** faster, `piedit` 1 MiB edit **3.0x**, `piread` small reads **~3.5x**; a warm log re-scan drops 2.1 s to 28 ms. Peak RSS on identical workloads: the built-in path holds **24x-142x** more memory than the native tools — 110,128 KiB vs 2,300 KiB on a windowed read, 410,304 KiB vs 2,888 KiB on a 100 MB write (p50, `/usr/bin/time -v`).
 
 Reproduce every figure: the harness and raw results ship in-tree — [benchmark/runs/](benchmark/runs/), [benchmark/rss-arm/](benchmark/rss-arm/), [piwrite raw frame](benchmark/piwrite/results/results-2026-11-05-rawframe3.ndjson). Regenerate with `npm run bench:piread` / `bench:piedit` / `bench:pibash`; the memory arm runs `node benchmark/rss-arm/bench.mjs --full --tag v1`; the throughput tables behind panel B print from `node tests/tools/bench/{piread,pibash,piedit,pidx}.mjs --throughput` and `node benchmark/piwrite/bench.mjs --throughput`.
 
