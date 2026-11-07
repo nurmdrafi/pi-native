@@ -22,10 +22,6 @@ A performance-focused Pi coding-agent harness with native Rust tools, fail-close
 <br>
 [![node](https://img.shields.io/github/badge/node_%E2%A5%BC_22.19_%C2%B7_.nvmrc_24-339933?logo=nodedotjs&logoColor=5FA04E&labelColor=24292f&style=flat-square)](#requirements)
 
-## Demo
-
-![Live session dashboard: sessions overview, per-session cost detail, live tool and spend cards](docs/assets/demo.gif)
-
 ## Why this exists
 
 Coding-agent configs rot — they accumulate always-on prompt bloat, machine-specific paths, and undocumented setup rituals. This harness treats the config as an engineered product: one `~/.pi/agent/` directory that turns any macOS or Linux machine into a fully configured coding-agent workstation in minutes, with a lean behavioral core, progressive-disclosure skills, always-on extensions that enforce discipline at the tool-call level, and a permanent prefix small enough to measure in fractions of a kilotoken. Every harness change ships with a before/after number.

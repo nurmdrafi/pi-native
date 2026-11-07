@@ -1,6 +1,6 @@
 # Demo recording placeholder
 
-The README `## Demo` section embeds `docs/assets/demo.gif`. That recording is still pending; this file records exactly what it must show so anyone can produce it.
+The README demo embed (`docs/assets/demo.gif`) is currently removed pending faster footage; this file records exactly what it must show so anyone can produce a replacement.
 
 ## Requirements
 
