@@ -4,7 +4,7 @@
   "theme": "dark",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.3",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "max",
   "modelThinkingLevels": {
     "deepseek/deepseek-flash": "off",
     "deepseek/deepseek-v4-pro": "off"
@@ -12,8 +12,9 @@
   "hideThinkingBlock": true,
   "defaultTools": [
     "-read",
-    "-bash",
-    "-edit"
+    "-write",
+    "-edit",
+    "-bash"
   ],
   "packages": [],
   "extensions": [
