@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import piwriteExtension from "../../extensions/piwrite/index.ts";
 import { initTheme } from "@earendil-works/pi-coding-agent";
@@ -11,9 +13,17 @@ import {
   setCapabilityOverrides,
 } from "@earendil-works/pi-tui";
 
-// The REAL built-in write renderers, by absolute path (legal in node tests;
-// the extension itself may only import package roots).
-import { writeRenderers } from "/home/nurmdrafi/.nvm/versions/node/v24.21.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/renderers/write.js";
+// The REAL built-in write renderers, resolved from the repo-installed package
+// (legal in node tests; the extension itself may only import package roots).
+// import.meta.resolve keeps the path machine-independent AND keeps the
+// reference on the repo's pi-tui instance, so instanceof checks see one
+// Container class instead of a second one from a global-install copy.
+const piPkgRoot = dirname(
+    dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))),
+);
+const { writeRenderers } = await import(
+    `${piPkgRoot}/dist/core/tools/renderers/write.js`
+);
 
 // keyHint/highlight read the global theme; the interactive UI initializes it
 // before any render, tests must do the same.

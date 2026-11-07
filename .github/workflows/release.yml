@@ -5,7 +5,7 @@ on:
     branches: ['main']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   prepare:
@@ -16,7 +16,7 @@ jobs:
       release_notes: ${{ steps.release-notes.outputs.notes }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Extract version from changelog
         id: version
@@ -43,34 +43,44 @@ jobs:
 
           VERSION=$(echo "$CHANGELOG_LINE" | cut -d'[' -f2 | cut -d']' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
-          # Validate version format (basic semantic versioning check)
-          if ! echo "$VERSION" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' > /dev/null; then
-            echo "WARNING: Extracted version '$VERSION' doesn't match semantic versioning format (x.y.z)"
+          # Gate: released tag must be strict x.y.z (hard fail, no continue)
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: Extracted version '$VERSION' is not x.y.z"
             echo "CHANGELOG line: $CHANGELOG_LINE"
-            echo "Attempting to continue anyway..."
+            exit 1
+          fi
+
+          # Immutable-tag guard: ask the remote, not the local clone
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q .; then
+            echo "ERROR: tag v$VERSION already exists on the remote"
+            exit 1
           fi
 
           echo "Successfully extracted version from CHANGELOG.md: $VERSION"
           echo "CHANGELOG line: $CHANGELOG_LINE"
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Extract release notes from CHANGELOG
         id: release-notes
         run: |
           VERSION=${{ steps.version.outputs.version }}
           NOTES=$(awk "/^## \\[${VERSION//./\\.}\\]/{flag=1; next} /^## \\[/{if(flag) exit} flag" CHANGELOG.md | sed '1d')
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   release:
     name: Create GitHub Release
     needs: prepare
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
           name: v${{ needs.prepare.outputs.version }}

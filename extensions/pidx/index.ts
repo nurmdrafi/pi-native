@@ -24,7 +24,7 @@ import { resolve, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "@sinclair/typebox";
 import {
   defineTool,
   type ExtensionAPI,
