@@ -5,6 +5,6 @@ edition = "2024"
 description = "Native read pipeline for the pi agent — parity-tested against the built-in read tool"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 memchr = "2"

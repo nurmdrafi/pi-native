@@ -5,8 +5,8 @@ edition = "2024"
 description = "Native edit pipeline for the pi agent — parity-tested against the built-in edit tool"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 unicode-normalization = "0.1"
 
 [dev-dependencies]

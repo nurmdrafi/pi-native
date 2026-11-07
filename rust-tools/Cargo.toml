@@ -12,6 +12,14 @@
 resolver = "2"
 members = ["pidx", "piread", "piedit", "pibash", "piwrite", "docheck", "outline"]
 
+# Shared dependency versions hoisted here so the five pipeline crates (pidx,
+# piread, piedit, pibash, piwrite) cannot drift apart. Members inherit with
+# `workspace = true`; crate-specific extra features (e.g. pidx's
+# serde_json float_roundtrip) are declared additively in the member manifest.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
 # Shared release profile (profiles must live at the workspace root; per-crate
 # copies are ignored). Unified on the piread/piedit settings; pidx now also
 # aborts on panic, which is fine for a short-lived CLI.

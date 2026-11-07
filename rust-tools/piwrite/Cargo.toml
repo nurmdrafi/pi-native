@@ -5,5 +5,5 @@ edition = "2024"
 description = "Native file-write tool for the pi agent — parity-tested against the built-in write tool"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
