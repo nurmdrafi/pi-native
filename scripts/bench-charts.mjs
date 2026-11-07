@@ -186,8 +186,7 @@ const tpPiread = tp(SRC_TP_PIREAD, 'piread');
 const tpPibash = tp(SRC_TP_PIBASH, 'pibash');
 const tpPiedit = tp(SRC_TP_PIEDIT, 'piedit');
 const tpPiwrite = tp(SRC_TP_PIWRITE, 'piwrite');
-const tpPidx = tp(SRC_TP_PIDX, 'pidx');
-const tpPidxWarm = tp(SRC_TP_PIDX, 'pidx', 'warm-rerun');
+const tpPidx = tp(SRC_TP_PIDX, 'pidx', 'warm-rerun');
 
 const SERIES = [
   { key: 'baseline', name: 'built-in baseline (oracle / node-builtin / cold parse)', color: C.base },
@@ -218,13 +217,12 @@ const panelB = {
     { label: `piedit: ${tpPiedit.caseName}`, cells: { baseline: tpPiedit.baseline, native: tpPiedit.native } },
     { label: `piwrite: ${tpPiwrite.caseName}`, cells: { baseline: tpPiwrite.baseline, native: tpPiwrite.native } },
     { label: `pidx: ${tpPidx.caseName}`, cells: { baseline: tpPidx.baseline, native: tpPidx.native } },
-    { label: `pidx: ${tpPidxWarm.caseName}`, cells: { baseline: tpPidxWarm.baseline, native: tpPidxWarm.native } },
   ],
 };
 
 const TITLE = 'pi-native: native tools vs built-in baselines — latency & throughput';
 const SUBTITLE =
-  'tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · representative cases per tool';
+  'tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · one representative case per tool';
 
 const caveat = `caveat: piwrite serve p50 trails built-in at 1–100 MB in-bench (1 MB: ${s1.arms['piwrite-serve'].p50.raw} vs ${s1.arms['node-builtin'].p50.raw} ms/op); large serves = kernel dirty-page throttling (${SRC_RUST_OPT})`;
 

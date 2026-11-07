@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 920" width="980" height="920" role="img" aria-labelledby="chart-title chart-desc">
 <title id="chart-title">pi-native: native tools vs built-in baselines — latency &amp; throughput</title>
-<desc id="chart-desc">pi-native: native tools vs built-in baselines — latency &amp; throughput | tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · representative cases per tool | sources: benchmark/runs/{piread,pibash,piedit}-microbench-2026-10-27.md · benchmark/piwrite/results/summary-2026-11-05-rawframe3.md (mode=--full) | throughput (panel B): benchmark/runs/throughput-{piread,pibash,piedit,piwrite,pidx}-2026-11-07.md · 32 MiB per op · N=10/arm (5 warmup) · MB/s = 32 ÷ p50 s | docs/native-tools.md pidx row: 511 sessions / 110 MB, cold re-parse 2.1 s → warm 28 ms (re-measured 2026-10-28) | caveat: piwrite serve p50 trails built-in at 1–100 MB in-bench (1 MB: 34.674 vs 7.41 ms/op); large serves = kernel dirty-page throttling (docs/rust-tools-optimization.md) | bar labels verbatim from source tables; xN.n sublabels = improvement ratio, computed (latency: baseline/native; throughput: native/baseline); full source paths in the SVG desc element | full paths: benchmark/runs/piread-microbench-2026-10-27.md; benchmark/runs/pibash-microbench-2026-10-27.md; benchmark/runs/piedit-microbench-2026-10-27.md; benchmark/piwrite/results/summary-2026-11-05-rawframe3.md; benchmark/runs/throughput-piread-2026-11-07.md; benchmark/runs/throughput-pibash-2026-11-07.md; benchmark/runs/throughput-piedit-2026-11-07.md; benchmark/runs/throughput-piwrite-2026-11-07.md; benchmark/runs/throughput-pidx-2026-11-07.md; docs/native-tools.md; docs/rust-tools-optimization.md</desc>
+<desc id="chart-desc">pi-native: native tools vs built-in baselines — latency &amp; throughput | tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · one representative case per tool | sources: benchmark/runs/{piread,pibash,piedit}-microbench-2026-10-27.md · benchmark/piwrite/results/summary-2026-11-05-rawframe3.md (mode=--full) | throughput (panel B): benchmark/runs/throughput-{piread,pibash,piedit,piwrite,pidx}-2026-11-07.md · 32 MiB per op · N=10/arm (5 warmup) · MB/s = 32 ÷ p50 s | docs/native-tools.md pidx row: 511 sessions / 110 MB, cold re-parse 2.1 s → warm 28 ms (re-measured 2026-10-28) | caveat: piwrite serve p50 trails built-in at 1–100 MB in-bench (1 MB: 34.674 vs 7.41 ms/op); large serves = kernel dirty-page throttling (docs/rust-tools-optimization.md) | bar labels verbatim from source tables; xN.n sublabels = improvement ratio, computed (latency: baseline/native; throughput: native/baseline); full source paths in the SVG desc element | full paths: benchmark/runs/piread-microbench-2026-10-27.md; benchmark/runs/pibash-microbench-2026-10-27.md; benchmark/runs/piedit-microbench-2026-10-27.md; benchmark/piwrite/results/summary-2026-11-05-rawframe3.md; benchmark/runs/throughput-piread-2026-11-07.md; benchmark/runs/throughput-pibash-2026-11-07.md; benchmark/runs/throughput-piedit-2026-11-07.md; benchmark/runs/throughput-piwrite-2026-11-07.md; benchmark/runs/throughput-pidx-2026-11-07.md; docs/native-tools.md; docs/rust-tools-optimization.md</desc>
 <rect x="0" y="0" width="980" height="920" fill="#0d1117"/>
 <g font-family="sans-serif">
 <text x="96" y="32" font-size="20" font-weight="700" fill="#e6edf3">pi-native: native tools vs built-in baselines — latency &amp; throughput</text>
-<text x="96" y="54" font-size="12" fill="#8b949e">tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · representative cases per tool</text>
+<text x="96" y="54" font-size="12" fill="#8b949e">tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs · p50 per op · one representative case per tool</text>
 <rect x="96.0" y="68" width="14" height="14" fill="#6e7681"/>
 <text x="116.0" y="79" font-size="12" fill="#e6edf3">built-in baseline (oracle / node-builtin / cold parse)</text>
 <rect x="508.0" y="68" width="14" height="14" fill="#58a6ff"/>
@@ -65,41 +65,35 @@
 <text x="86" y="572.0" font-size="11" fill="#8b949e" text-anchor="end" dominant-baseline="middle">100%</text>
 <line x1="96" y1="790" x2="954" y2="790" stroke="#30363d" stroke-width="1"/>
 <text x="24" y="670" font-size="12" fill="#8b949e" text-anchor="middle" transform="rotate(-90 24 670)">throughput — % of row max</text>
-<rect x="114.7" y="777.9" width="49.8" height="12.1" fill="#6e7681"/>
-<text x="139.6" y="771.9" font-size="11" fill="#e6edf3" text-anchor="middle">110.1 MB/s</text>
-<rect x="170.5" y="572.0" width="49.8" height="218.0" fill="#58a6ff"/>
-<text x="195.4" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">1982.8 MB/s</text>
-<text x="167.5" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">piread: full-read</text>
-<text x="167.5" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x18.0</text>
-<rect x="257.7" y="572.0" width="49.8" height="218.0" fill="#6e7681"/>
-<text x="282.6" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">177.9 MB/s</text>
-<rect x="313.5" y="593.7" width="49.8" height="196.3" fill="#58a6ff"/>
-<text x="338.4" y="587.7" font-size="11" fill="#e6edf3" text-anchor="middle">160.2 MB/s</text>
-<text x="310.5" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">pibash: pipe-through</text>
-<text x="310.5" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x0.9</text>
-<rect x="400.7" y="692.1" width="49.8" height="97.9" fill="#6e7681"/>
-<text x="425.6" y="686.1" font-size="11" fill="#e6edf3" text-anchor="middle">10.1 MB/s</text>
-<rect x="456.5" y="572.0" width="49.8" height="218.0" fill="#58a6ff"/>
-<text x="481.4" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">22.5 MB/s</text>
-<text x="453.5" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">piedit: rewrite</text>
-<text x="453.5" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x2.2</text>
-<rect x="543.7" y="643.8" width="49.8" height="146.2" fill="#6e7681"/>
-<text x="568.6" y="637.8" font-size="11" fill="#e6edf3" text-anchor="middle">447.9 MB/s</text>
-<rect x="599.5" y="572.0" width="49.8" height="218.0" fill="#58a6ff"/>
-<text x="624.4" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">667.9 MB/s</text>
-<text x="596.5" y="808" font-size="11" fill="#e6edf3" text-anchor="end" transform="rotate(-35 596.5 808)">piwrite: one-shot-write</text>
-<text x="596.5" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x1.5</text>
-<rect x="686.7" y="572.0" width="49.8" height="218.0" fill="#6e7681"/>
-<text x="711.6" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">215.2 MB/s</text>
-<rect x="742.5" y="641.8" width="49.8" height="148.2" fill="#58a6ff"/>
-<text x="767.4" y="635.8" font-size="11" fill="#e6edf3" text-anchor="middle">146.3 MB/s</text>
-<text x="739.5" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">pidx: cold-index</text>
-<text x="739.5" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x0.7</text>
-<rect x="829.7" y="777.0" width="49.8" height="13.0" fill="#6e7681"/>
-<text x="854.6" y="771.0" font-size="11" fill="#e6edf3" text-anchor="middle">132.0 MB/s</text>
-<rect x="885.5" y="572.0" width="49.8" height="218.0" fill="#58a6ff"/>
-<text x="910.4" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">2210.2 MB/s</text>
-<text x="882.5" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">pidx: warm-rerun</text>
-<text x="882.5" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x16.7</text>
+<rect x="117.9" y="777.9" width="60.9" height="12.1" fill="#6e7681"/>
+<text x="148.3" y="771.9" font-size="11" fill="#e6edf3" text-anchor="middle">110.1 MB/s</text>
+<rect x="184.8" y="572.0" width="60.9" height="218.0" fill="#58a6ff"/>
+<text x="215.3" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">1982.8 MB/s</text>
+<text x="181.8" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">piread: full-read</text>
+<text x="181.8" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x18.0</text>
+<rect x="289.5" y="572.0" width="60.9" height="218.0" fill="#6e7681"/>
+<text x="319.9" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">177.9 MB/s</text>
+<rect x="356.4" y="593.7" width="60.9" height="196.3" fill="#58a6ff"/>
+<text x="386.9" y="587.7" font-size="11" fill="#e6edf3" text-anchor="middle">160.2 MB/s</text>
+<text x="353.4" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">pibash: pipe-through</text>
+<text x="353.4" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x0.9</text>
+<rect x="461.1" y="692.1" width="60.9" height="97.9" fill="#6e7681"/>
+<text x="491.5" y="686.1" font-size="11" fill="#e6edf3" text-anchor="middle">10.1 MB/s</text>
+<rect x="528.0" y="572.0" width="60.9" height="218.0" fill="#58a6ff"/>
+<text x="558.5" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">22.5 MB/s</text>
+<text x="525.0" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">piedit: rewrite</text>
+<text x="525.0" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x2.2</text>
+<rect x="632.7" y="643.8" width="60.9" height="146.2" fill="#6e7681"/>
+<text x="663.1" y="637.8" font-size="11" fill="#e6edf3" text-anchor="middle">447.9 MB/s</text>
+<rect x="699.6" y="572.0" width="60.9" height="218.0" fill="#58a6ff"/>
+<text x="730.1" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">667.9 MB/s</text>
+<text x="696.6" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">piwrite: one-shot-write</text>
+<text x="696.6" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x1.5</text>
+<rect x="804.3" y="777.0" width="60.9" height="13.0" fill="#6e7681"/>
+<text x="834.7" y="771.0" font-size="11" fill="#e6edf3" text-anchor="middle">132.0 MB/s</text>
+<rect x="871.2" y="572.0" width="60.9" height="218.0" fill="#58a6ff"/>
+<text x="901.7" y="566.0" font-size="11" fill="#e6edf3" text-anchor="middle">2210.2 MB/s</text>
+<text x="868.2" y="808" font-size="11" fill="#e6edf3" text-anchor="middle">pidx: warm-rerun</text>
+<text x="868.2" y="823" font-size="10" fill="#8b949e" text-anchor="middle">x16.7</text>
 <text x="96" y="846" font-size="10" fill="#8b949e">sources: benchmark/runs · benchmark/piwrite · docs/native-tools.md · bars scaled per row — citations in the SVG desc</text>
 </g></svg>
