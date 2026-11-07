@@ -12,7 +12,7 @@ A performance-focused Pi coding-agent harness with native Rust tools, fail-close
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/nurmdrafi/badge.svg)](https://hub.xerj.org/contributors/nurmdrafi)
 [![pi coding agent](https://img.shields.io/badge/pi-coding_agent-8A2BE2?logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/earendil-works/pi-coding-agent)
 [![macOS](https://img.shields.io/badge/macOS-6e7681?logo=apple&logoColor=A2AAAD&labelColor=24292f&style=flat-square)](docs/design-rules.md#portability)[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=FCC624&labelColor=24292f&style=flat-square)](docs/design-rules.md#portability)
-[![rust](https://img.shields.io/badge/rust-default-DEA584?logo=rust&logoColor=white&labelColor=24292f&style=flat-square)](#requirements)
+[![rust](https://img.shields.io/badge/rust-default-DEA584?logo=rust&logoColor=white&labelColor=24292f&style=flat-square)](#quick-start)
 [![tmux](https://img.shields.io/badge/tmux-optional-6e7681?logo=tmux&logoColor=1BB91F&labelColor=24292f&style=flat-square)](docs/subagents.md)
 [![skills](https://img.shields.io/badge/skills-manual-2563eb?logo=readthedocs&logoColor=8CA1AF&labelColor=24292f&style=flat-square)](docs/skills.md)
 [![extensions](https://img.shields.io/badge/extensions-ts-2563eb?labelColor=24292f&style=flat-square)](extensions/README.md)
@@ -20,19 +20,11 @@ A performance-focused Pi coding-agent harness with native Rust tools, fail-close
 [![contributors](https://img.shields.io/github/contributors/nurmdrafi/pi-native?labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/graphs/contributors)
 [![last commit](https://img.shields.io/github/last-commit/nurmdrafi/pi-native?label=last%20commit&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/commits/dev)
 <br>
-[![node](https://img.shields.io/github/badge/node_%E2%A5%BC_22.19_%C2%B7_.nvmrc_24-339933?logo=nodedotjs&logoColor=5FA04E&labelColor=24292f&style=flat-square)](#requirements)
+[![node](https://img.shields.io/github/badge/node_%E2%A5%BC_22.19_%C2%B7_.nvmrc_24-339933?logo=nodedotjs&logoColor=5FA04E&labelColor=24292f&style=flat-square)](#quick-start)
 
 ## Why this exists
 
 Coding-agent configs rot — they accumulate always-on prompt bloat, machine-specific paths, and undocumented setup rituals. This harness treats the config as an engineered product: one `~/.pi/agent/` directory that turns any macOS or Linux machine into a fully configured coding-agent workstation in minutes, with a lean behavioral core, progressive-disclosure skills, always-on extensions that enforce discipline at the tool-call level, and a permanent prefix small enough to measure in fractions of a kilotoken. Every harness change ships with a before/after number.
-
-## Trust
-
-- Fail-closed permission gates — every tool call crosses a gate before it runs ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
-- No silent fallback — a terminal native-tool failure is a thrown error plus one stderr line, never a masked built-in; built-in selection is explicit configuration ([Daemon → One-Shot Ladder](#daemon--one-shot-ladder), [docs/native-tools.md](docs/native-tools.md))
-- MCP runs disabled by default — the built-in extension is off and native tools replace `bash`, `read`, and `edit` ([docs/development.md](docs/development.md))
-- Subagents gated and sandboxed — spawn tools are gated, children run in isolated panes under hard conduct bans ([docs/subagent-orchestration.md](docs/subagent-orchestration.md), [docs/subagents.md](docs/subagents.md))
-- Supported platforms: macOS and Linux — portability rules are enforced ([docs/design-rules.md](docs/design-rules.md#portability))
 
 ## What it does
 
@@ -46,9 +38,16 @@ Coding-agent configs rot — they accumulate always-on prompt bloat, machine-spe
 ### Daemon → One-Shot Ladder
 Each native utility runs the same **two-rung ladder**: a **persistent background daemon process (`--serve`)** over NDJSON stdio, then a **one-shot CLI spawn** when the daemon transport fails. There is no third rung and no functional fallback: a terminal failure — missing binary, unhandled panic, unparseable output — is a thrown tool error plus one stderr line, so a broken binary is visible instead of silently masked. Choosing pi's built-in tool instead is configuration: leave the extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`.
 
+## Trust
+
+- No silent fallback — a terminal native-tool failure is a thrown error plus one stderr line, never a masked built-in; built-in selection is explicit configuration ([Daemon → One-Shot Ladder](#daemon--one-shot-ladder), [docs/native-tools.md](docs/native-tools.md))
+- MCP runs disabled by default — the built-in extension is off and native tools replace `bash`, `read`, and `edit` ([docs/development.md](docs/development.md))
+- Subagents gated and sandboxed — spawn tools are gated, children run in isolated panes under hard conduct bans ([docs/subagent-orchestration.md](docs/subagent-orchestration.md), [docs/subagents.md](docs/subagents.md))
+- Supported platforms: macOS and Linux — portability rules are enforced ([docs/design-rules.md](docs/design-rules.md#portability))
+
 ## Quick start
 
-Node, pi, the repo — then bootstrap. Prereqs: git; tmux only for subagents.
+Node, pi, the repo — then bootstrap. Prereqs: git; Rust (cargo) for the native tools; macOS or Linux; tmux only for subagents.
 
 ```sh
 # 1. Node ≥ 22.19 (`.nvmrc` pins 24)
@@ -87,18 +86,6 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 
 `bin/` is gitignored and regenerated. It holds `rg` (built with PCRE2), `piread`, `piedit`, `pibash`, `piwrite`, `pidx`, `fd`, and `pidoc`. `pidoc` verifies all of them — look for the `rg-pcre2`, `piread`, and `shell-path` rows.
 
-## Requirements
-
-| Requirement  | Detail                                                |
-| ------------ | ----------------------------------------------------- |
-| Node.js      | ≥ 22.19 (`.nvmrc` pins 24, the current LTS)           |
-| OS           | macOS or Linux                                        |
-| Rust (cargo) | Builds the native tools                               |
-| tmux         | Only for subagents — [docs/subagent-orchestration.md](docs/subagent-orchestration.md) |
-| Git          | For sync; `~/.pi/agent` is itself a repo              |
-
-Native tools register unconditionally and always execute the Rust binary; no env switch turns one off or hands the work to a built-in. Choosing pi's built-in `read`/`bash`/`edit` is configuration: do not load that extension, or flip the permission-gate rule that steers calls to it (`nativeReadFirst` / `nativeBashFirst` in `extensions/permission-gate/config.json`, or `PGATE_CONFIG`).
-
 ## Benchmarks
 
 ![Chart: native-tool latency versus built-in baselines (panel A) and per-tool throughput, 32 MiB per op, native versus baseline (panel B)](docs/assets/benchmarks/all-tools.svg)
@@ -131,13 +118,13 @@ Every rung byte-matches the one below it (parity-pinned by tests); `details.via`
 
 Tools, env keys, benchmarks, and context-shaping tables: [docs/native-tools.md](docs/native-tools.md).
 
-## Subagent orchestration
-
-A built-in runtime for parallel children: each spawn declares its write scope, an overlapping spawn queues FIFO behind the owner, and disjoint work stays fully parallel — no more hand-planning around file collisions. Per-child budgets (wall-clock, turns, USD) are enforced with stops, only summaries return to the parent, and the dashboard tracks each child's health and cost live. Deep dives: [docs/subagents.md](docs/subagents.md) · [docs/subagent-orchestration.md](docs/subagent-orchestration.md) · [extensions/subagents/README.md](extensions/subagents/README.md)
+Native tools register unconditionally and always execute the Rust binary; no env switch turns one off or hands the work to a built-in. Choosing pi's built-in `read`/`bash`/`edit` is configuration: do not load that extension, or flip the permission-gate rule that steers calls to it (`nativeReadFirst` / `nativeBashFirst` in `extensions/permission-gate/config.json`, or `PGATE_CONFIG`).
 
 ## Skills & subagents
 
-All skills are manual (`/skill:<name>`) and validator-enforced; bodies enter context only when invoked — [docs/skills.md](docs/skills.md). Subagents run on tmux, are gated off by default, and spawn sandboxed with the permission-gate re-enabled inside — [docs/subagents.md](docs/subagents.md).
+All skills are manual (`/skill:<name>`) and validator-enforced; bodies enter context only when invoked — [docs/skills.md](docs/skills.md).
+
+A built-in runtime for parallel children: each spawn declares its write scope, an overlapping spawn queues FIFO behind the owner, and disjoint work stays fully parallel — no more hand-planning around file collisions. Subagents run on tmux, gated off by default, and sandboxed with the permission-gate re-enabled inside. Per-child budgets (wall-clock, turns, USD) are enforced with stops, only summaries return to the parent, and the dashboard tracks each child's health and cost live. Deep dives: [docs/subagents.md](docs/subagents.md) · [docs/subagent-orchestration.md](docs/subagent-orchestration.md) · [extensions/subagents/README.md](extensions/subagents/README.md)
 
 ## Environment keys
 
@@ -159,6 +146,20 @@ Every native-tool spawn re-sets the session keys from the live tool context (`ex
 | `PI_DASH_SESSION_BUDGET` | user  | dashboard per-session cost budget in USD for alerts (0 disables) |
 
 Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`, `PI_SUBAGENT_SESSION`, `PI_SUBAGENT_ID`, `PI_SUBAGENT_ALLOWED`, `PI_SUBAGENT_ACTIVITY_FILE`, `PI_SUBAGENT_SURFACE`, `PI_SUBAGENT_AUTO_EXIT`), classified in the env-var allowlist in [rust-tools/docheck/src/main.rs](rust-tools/docheck/src/main.rs).
+
+## Status
+
+Active solo development on the `dev` branch — every change lands in [CHANGELOG.md](CHANGELOG.md) with a measured before/after number. Supported platforms: macOS and Linux ([docs/design-rules.md](docs/design-rules.md#portability)); building the native tools needs Rust, and without cargo they reject loudly — never a silent fallback to built-ins. Known, measured tradeoffs: `pibash` 32 MiB pipe-through sits at parity rather than a win; `pidx` cold indexing trails a bare parse-and-summarize oracle because it also writes full extracts and a state store — a warm rerun pays that back at ~17x; `piwrite` serve trails the built-in on 1–100 MB writes in-bench. Raw data: [benchmark/runs/](benchmark/runs/).
+
+## How you can help
+
+- **small** — run any benchmark arm in [benchmark/runs/](benchmark/runs/) on your hardware and file the numbers; host-noise bounds get sharper with every report.
+- **small** — docs fixes: broken anchors, stale numbers, clearer quick-start steps.
+- **medium** — new skills under [skills/](skills/): one skill, one job, validator-clean (`npm run check`).
+- **medium** — portability reports: shells and package managers beyond the tested set (zsh, bash; brew, apt).
+- **larger** — pick a losing or parity row in the [benchmarks panel](#benchmarks) and attack it; the harness, corpus generator, and raw results are all in-tree.
+
+Issues and PRs welcome: [issue tracker](https://github.com/nurmdrafi/pi-native/issues).
 
 ## Docs
 
