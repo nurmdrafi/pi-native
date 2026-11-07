@@ -17,11 +17,12 @@
     { "id": "da", "lane": "ext", "col": 2, "type": "backend", "label": "Rung 1, daemon", "sublabel": "bin/piread --serve" },
     { "id": "os", "lane": "ext", "col": 3, "type": "backend", "label": "Rung 2, one-shot", "sublabel": "bin/piread per call" },
     { "id": "err", "lane": "ext", "col": 4, "type": "database", "label": "Terminal failure", "sublabel": "thrown tool error + one stderr line" },
-    { "id": "cli", "lane": "core", "col": 1, "type": "backend", "label": "cli.rs", "sublabel": "--path/--offset/--limit, limit >= 1" },
+    { "id": "cli", "lane": "core", "col": 1, "type": "backend", "label": "cli.rs", "sublabel": "--path/--offset/--limit/--hits/--line-cap, limit >= 1" },
     { "id": "main", "lane": "core", "col": 2, "type": "backend", "label": "main.rs" },
     { "id": "pipe", "lane": "core", "col": 3, "type": "backend", "label": "pipeline.rs", "sublabel": "streaming Segmenter + HeadTruncator" },
     { "id": "comp", "lane": "core", "col": 4, "type": "backend", "label": "compress.rs", "sublabel": "head-tail to 40 lines / 2 KB" },
     { "id": "env", "lane": "core", "col": 5, "type": "backend", "label": "envelope.rs", "sublabel": "Success / Failure + Node-style errors", "width": 176 },
+    { "id": "loc", "lane": "core", "col": 5, "type": "backend", "label": "locate.rs", "sublabel": "fused locate+read, merged windows around hits", "width": 176, "yOffset": 110 },
     { "id": "out", "lane": "model", "col": 5, "type": "backend", "label": "Envelope to model", "width": 176 }
   ],
   "edges": [
@@ -36,7 +37,9 @@
     { "id": "r9", "from": "pipe", "to": "comp", "variant": "emphasis" },
     { "id": "r10", "from": "comp", "to": "env", "variant": "emphasis", "toSide": "top" },
     { "id": "r11", "from": "env", "to": "out", "label": "envelope JSON", "variant": "emphasis" },
-    { "id": "r12", "from": "os", "to": "out", "variant": "dashed" }
+    { "id": "r12", "from": "os", "to": "out", "variant": "dashed" },
+    { "id": "r13", "from": "cli", "to": "loc", "label": "--hits: locate, no offset/limit", "variant": "dashed" },
+    { "id": "r14", "from": "loc", "to": "env", "label": "merged context windows", "variant": "dashed" }
   ],
   "mainPath": ["d", "cli", "main", "pipe", "comp", "env", "out"]
 }

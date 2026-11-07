@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "7dc37271-a63a-482c-9101-e3ae0d0da5d5",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+  "specification": {
+    "sha256": "441a4632bca55e97b9828cd6c8591e7901240be343b048f8dbdc330e43931911",
+    "bytes": 2916
+  },
+  "artifact": {
+    "sha256": "55e7e53bbe4449eb01520c67b595d9c66de2a91d9b11c7cbb33b59e1f05d4f81",
+    "bytes": 843409
+  }
+}

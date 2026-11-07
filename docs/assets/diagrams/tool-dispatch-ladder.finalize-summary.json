@@ -7,13 +7,13 @@
   "quality": "showcase",
   "specification": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
-    "sha256": "9022d541d170878f6556cea492af4b335ebc2ded0a11035599f5f0216cf8a7e6",
-    "bytes": 2175
+    "sha256": "8db7a40df004d80fa01f13d269ab93d45cc60fa3846dab7f63b31e0cba0a3d88",
+    "bytes": 2208
   },
   "artifact": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
-    "sha256": "58782e14ba3ceb2fe50d96b39d21715971657b86c78700af1094df9ec461b106",
-    "bytes": 840284
+    "sha256": "775c4a1bb302f51f5ac7b68c036f794259ae459f6e5e4bf430f53d04be5690f9",
+    "bytes": 840439
   },
   "gates": {
     "validate": "pass",
@@ -28,22 +28,22 @@
     "truncated": false
   },
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.browser-check.json"
+    "receipt": "/tmp/tool-dispatch-ladder-review/tool-dispatch-ladder.finalize.json",
+    "summaryReceipt": "/tmp/tool-dispatch-ladder-review/tool-dispatch-ladder.finalize-summary.json",
+    "browserCheckReceipt": "/tmp/tool-dispatch-ladder-review/tool-dispatch-ladder.browser-check.json"
   },
   "update": {
     "status": "current",
     "installedVersion": "3.2.0",
     "availableVersion": "3.2.0",
     "releaseNotes": null,
-    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "checkedAt": "2026-11-07T15:53:44.388Z",
     "source": "cache",
     "noticeRequired": false,
     "noticeText": null
   },
   "visualReview": "not-requested",
-  "durationMs": 6082,
+  "durationMs": 6850,
   "browserCheck": {
     "requested": true,
     "ran": true

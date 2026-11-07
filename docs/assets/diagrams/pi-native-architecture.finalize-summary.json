@@ -7,13 +7,13 @@
   "quality": "showcase",
   "specification": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
-    "sha256": "687eaa19c68e48629509a16eb6ea58f2dbd53c8d15077970845c53c627c86a25",
-    "bytes": 3013
+    "sha256": "5ee048131e16480548daee5f698ea7f1861ee6ffaeb3871b02fd5f42e6f080c0",
+    "bytes": 3034
   },
   "artifact": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
-    "sha256": "71d160d994f7cb7c2ff49b5ad774ef84da37c792dfda3ee842593bffd01b8f87",
-    "bytes": 849576
+    "sha256": "6b7faceea3c604c5b26c6a1a3dbc463d81825b6b2ad575636a92331613b0e990",
+    "bytes": 849638
   },
   "gates": {
     "validate": "pass",
@@ -28,24 +28,64 @@
     "truncated": false
   },
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.browser-check.json"
+    "receipt": "/tmp/pi-native-architecture-review/pi-native-architecture.finalize.json",
+    "summaryReceipt": "/tmp/pi-native-architecture-review/pi-native-architecture.finalize-summary.json",
+    "browserCheckReceipt": "/tmp/pi-native-architecture-review/pi-native-architecture.browser-check.json"
   },
   "update": {
     "status": "current",
     "installedVersion": "3.2.0",
     "availableVersion": "3.2.0",
     "releaseNotes": null,
-    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "checkedAt": "2026-11-07T15:53:44.388Z",
     "source": "cache",
     "noticeRequired": false,
     "noticeText": null
   },
   "visualReview": "not-requested",
-  "durationMs": 6725,
+  "durationMs": 5360,
   "browserCheck": {
     "requested": true,
     "ran": true
+  },
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 1
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "c-s1",
+            "from": "rung1",
+            "to": "shape",
+            "label": "served",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "right": {
+            "id": "c-s2",
+            "from": "rung2",
+            "to": "shape",
+            "label": "served",
+            "collectionIndex": 7,
+            "artifactIndex": 8
+          },
+          "point": [
+            784,
+            406
+          ],
+          "sharedNode": "shape"
+        }
+      ],
+      "detours": [],
+      "truncated": false
+    },
+    "hints": [
+      "rung1 → shape and rung2 → shape cross next to shape: move node rung1 or rung2 so the two reach shape from different sides (for example one level with it, one directly above or below it)."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
   }
 }

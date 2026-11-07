@@ -5204,7 +5204,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / PLATE 04">
-      <svg viewBox="0 0 1117 528" data-layout-contract="readable-v2" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="standard" data-node-ui="">
+      <svg viewBox="0 0 1188 734" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="standard" data-node-ui="">
         <title id="archify-diagram-title">piread — native windowed read pipeline</title>
         <desc id="archify-diagram-description">Daemon → one-shot, windowed segment, head-tail compaction, envelope</desc>
         <!-- Definitions -->
@@ -5251,14 +5251,14 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Swimlanes -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1053" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1065" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="74" class="t-muted" font-size="10" font-weight="600">01 / extensions/piread/index.ts</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1053" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1065" height="310" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / rust-tools/piread/src</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1053" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="322" class="t-muted" font-size="10" font-weight="600">03 / Result</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="506" width="1065" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="528" class="t-muted" font-size="10" font-weight="600">03 / Result</text>
 
         <!-- Phase headers -->
 
@@ -5267,18 +5267,20 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 
         <!-- Edge paths -->
-        <path data-edge-from="d" data-edge-to="da" data-edge-label="yes" data-edge-key="0" data-edge-id="r1" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="288,119;334,119" d="M 288 119 L 334 119" class="a-emphasis" data-animate="edge" style="--step:7" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="comp" data-edge-to="env" data-edge-key="1" data-edge-id="r10" data-edge-role="" data-composition-points="804.8,217;804.8,201;996.8,201;996.8,217" d="M 804.8 217 L 804.8 209 Q 804.8 201 812.8 201 L 988.8 201 Q 996.8 201 996.8 209 L 996.8 217" class="a-emphasis" data-animate="edge" style="--step:4" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="env" data-edge-to="out" data-edge-label="envelope JSON" data-edge-key="2" data-edge-id="r11" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="996.8,269;996.8,341" d="M 996.8 269 L 996.8 341" class="a-emphasis" data-animate="edge" style="--step:5" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="os" data-edge-to="out" data-edge-key="3" data-edge-id="r12" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="546,93;546,36;1100.8,36;1100.8,367;1084.8,367" d="M 546 93 L 546 44 Q 546 36 554 36 L 1092.8 36 Q 1100.8 36 1100.8 44 L 1100.8 359 Q 1100.8 367 1092.8 367 L 1084.8 367" class="a-dashed" data-animate="edge" style="--step:10" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="d" data-edge-to="cli" data-edge-label="cold start" data-edge-key="4" data-edge-id="r2" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="214,145;214,166;318,166;318,236;302,236" d="M 214 145 L 214 158 Q 214 166 222 166 L 310 166 Q 318 166 318 174 L 318 228 Q 318 236 310 236 L 302 236" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="d" data-edge-to="os" data-edge-label="no / transport fails" data-edge-key="5" data-edge-id="r3" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="288,124.8;320,124.8;320,172;546,172;546,145" d="M 288 124.8 L 312 124.8 Q 320 124.8 320 132.8 L 320 164 Q 320 172 328 172 L 538 172 Q 546 172 546 164 L 546 145" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="os" data-edge-to="err" data-edge-label="spawn / parse failure" data-edge-key="6" data-edge-id="r4" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="598,119;716.8,119" d="M 598 119 L 716.8 119" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="da" data-edge-to="os" data-edge-label="spawn / timeout parity failure" data-edge-key="7" data-edge-id="r5" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="380,93;380,77;522,77;522,93" d="M 380 93 L 380 85 Q 380 77 388 77 L 514 77 Q 522 77 522 85 L 522 93" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="cli" data-edge-to="main" data-edge-key="8" data-edge-id="r6" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="302,243;334,243" d="M 302 243 L 334 243" class="a-emphasis" data-animate="edge" style="--step:1" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="main" data-edge-to="pipe" data-edge-key="9" data-edge-id="r7" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="426,243;458,243" d="M 426 243 L 458 243" class="a-emphasis" data-animate="edge" style="--step:2" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="pipe" data-edge-to="env" data-edge-label="open errors, NUL sniff, offset beyond EOF" data-edge-key="10" data-edge-id="r8" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="546,217;546,184;1020.8,184;1020.8,217" d="M 546 217 L 546 192 Q 546 184 554 184 L 1012.8 184 Q 1020.8 184 1020.8 192 L 1020.8 217" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipe" data-edge-to="comp" data-edge-key="11" data-edge-id="r9" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="634,243;732.8,243" d="M 634 243 L 732.8 243" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="d" data-edge-to="da" data-edge-label="yes" data-edge-key="0" data-edge-id="r1" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="288,119;346,119" d="M 288 119 L 346 119" class="a-emphasis" data-animate="edge" style="--step:7" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="comp" data-edge-to="env" data-edge-key="1" data-edge-id="r10" data-edge-role="" data-composition-points="816.8,320;816.8,304;1008.8,304;1008.8,320" d="M 816.8 320 L 816.8 312 Q 816.8 304 824.8 304 L 1000.8 304 Q 1008.8 304 1008.8 312 L 1008.8 320" class="a-emphasis" data-animate="edge" style="--step:4" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="env" data-edge-to="out" data-edge-label="envelope JSON" data-edge-key="2" data-edge-id="r11" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="1096.8,346;1165.2,346;1165.2,573;1096.8,573" d="M 1096.8 346 L 1157.2 346 Q 1165.2 346 1165.2 354 L 1165.2 565 Q 1165.2 573 1157.2 573 L 1096.8 573" class="a-emphasis" data-animate="edge" style="--step:5" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="os" data-edge-to="out" data-edge-key="3" data-edge-id="r12" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="558,93;558,77;1171.2,77;1171.2,615;1008.8,615;1008.8,599" d="M 558 93 L 558 85 Q 558 77 566 77 L 1163.2 77 Q 1171.2 77 1171.2 85 L 1171.2 607 Q 1171.2 615 1163.2 615 L 1016.8 615 Q 1008.8 615 1008.8 607 L 1008.8 599" class="a-dashed" data-animate="edge" style="--step:10" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="cli" data-edge-to="loc" data-edge-label="--hits: locate, no offset/limit" data-edge-key="4" data-edge-id="r13" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="214,372;214,456;920.8,456" d="M 214 372 L 214 448 Q 214 456 222 456 L 920.8 456" class="a-dashed" data-animate="edge" style="--step:11" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="loc" data-edge-to="env" data-edge-label="merged context windows" data-edge-key="5" data-edge-id="r14" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="1008.8,430;1008.8,372" d="M 1008.8 430 L 1008.8 372" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="d" data-edge-to="cli" data-edge-label="cold start" data-edge-key="6" data-edge-id="r2" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="140,119;20,119;20,346;114,346" d="M 140 119 L 28 119 Q 20 119 20 127 L 20 338 Q 20 346 28 346 L 114 346" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="d" data-edge-to="os" data-edge-label="no / transport fails" data-edge-key="7" data-edge-id="r3" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="214,145;214,172;558,172;558,145" d="M 214 145 L 214 164 Q 214 172 222 172 L 550 172 Q 558 172 558 164 L 558 145" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="os" data-edge-to="err" data-edge-label="spawn / parse failure" data-edge-key="8" data-edge-id="r4" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="610,119;728.8,119" d="M 610 119 L 728.8 119" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="da" data-edge-to="os" data-edge-label="spawn / timeout parity failure" data-edge-key="9" data-edge-id="r5" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="392,93;392,77;534,77;534,93" d="M 392 93 L 392 85 Q 392 77 400 77 L 526 77 Q 534 77 534 85 L 534 93" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="cli" data-edge-to="main" data-edge-key="10" data-edge-id="r6" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="314,346;346,346" d="M 314 346 L 346 346" class="a-emphasis" data-animate="edge" style="--step:1" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="main" data-edge-to="pipe" data-edge-key="11" data-edge-id="r7" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="438,346;470,346" d="M 438 346 L 470 346" class="a-emphasis" data-animate="edge" style="--step:2" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="pipe" data-edge-to="env" data-edge-label="open errors, NUL sniff, offset beyond EOF" data-edge-key="12" data-edge-id="r8" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="558,320;558,184;1032.8,184;1032.8,320" d="M 558 320 L 558 192 Q 558 184 566 184 L 1024.8 184 Q 1032.8 184 1032.8 192 L 1032.8 320" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipe" data-edge-to="comp" data-edge-key="13" data-edge-id="r9" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="646,346;744.8,346" d="M 646 346 L 744.8 346" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
         <g id="node-d" data-node-id="d" data-node-label="Daemon alive?" tabindex="0" role="button" aria-label="Focus Daemon alive?, native only, no built-in rung, extensions/piread/index.ts" aria-pressed="false" data-node-kind="security" data-node-sublabel="native only, no built-in rung" data-node-context="extensions/piread/index.ts">
@@ -5295,151 +5297,170 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         <g id="node-da" data-node-id="da" data-node-label="Rung 1, daemon" tabindex="0" role="button" aria-label="Focus Rung 1, daemon, bin/piread --serve, extensions/piread/index.ts" aria-pressed="false" data-node-kind="backend" data-node-sublabel="bin/piread --serve" data-node-context="extensions/piread/index.ts">
           <title>Rung 1, daemon · bin/piread --serve · extensions/piread/index.ts</title>
-          <rect x="334" y="93" width="92" height="52" rx="8" class="c-mask"/>
-          <rect x="334" y="93" width="92" height="52" rx="8" class="c-backend" data-animate="node" style="--step:8" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(340 99) scale(0.6875)">
+          <rect x="346" y="93" width="92" height="52" rx="8" class="c-mask"/>
+          <rect x="346" y="93" width="92" height="52" rx="8" class="c-backend" data-animate="node" style="--step:8" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(352 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="380" y="124" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Rung 1, daemon</text>
-          <text data-detail="context" x="380" y="138.3" class="t-muted" font-size="7.7" text-anchor="middle">bin/piread --serve</text>
+          <text data-node-label="" data-detail-anchor="" x="392" y="124" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Rung 1, daemon</text>
+          <text data-detail="context" x="392" y="138.3" class="t-muted" font-size="7.7" text-anchor="middle">bin/piread --serve</text>
         </g>
 
         <g id="node-os" data-node-id="os" data-node-label="Rung 2, one-shot" tabindex="0" role="button" aria-label="Focus Rung 2, one-shot, bin/piread per call, extensions/piread/index.ts" aria-pressed="false" data-node-kind="backend" data-node-sublabel="bin/piread per call" data-node-context="extensions/piread/index.ts">
           <title>Rung 2, one-shot · bin/piread per call · extensions/piread/index.ts</title>
-          <rect x="494" y="93" width="104" height="52" rx="8" class="c-mask"/>
-          <rect x="494" y="93" width="104" height="52" rx="8" class="c-backend" data-animate="node" style="--step:9" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(500 99) scale(0.6875)">
+          <rect x="506" y="93" width="104" height="52" rx="8" class="c-mask"/>
+          <rect x="506" y="93" width="104" height="52" rx="8" class="c-backend" data-animate="node" style="--step:9" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(512 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="546" y="124" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Rung 2, one-shot</text>
-          <text data-detail="context" x="546" y="138.6" class="t-muted" font-size="8" text-anchor="middle">bin/piread per call</text>
+          <text data-node-label="" data-detail-anchor="" x="558" y="124" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Rung 2, one-shot</text>
+          <text data-detail="context" x="558" y="138.6" class="t-muted" font-size="8" text-anchor="middle">bin/piread per call</text>
         </g>
 
         <g id="node-err" data-node-id="err" data-node-label="Terminal failure" tabindex="0" role="button" aria-label="Focus Terminal failure, thrown tool error + one stderr line, extensions/piread/index.ts" aria-pressed="false" data-node-kind="database" data-node-sublabel="thrown tool error + one stderr line" data-node-context="extensions/piread/index.ts">
           <title>Terminal failure · thrown tool error + one stderr line · extensions/piread/index.ts</title>
-          <rect x="716.8" y="93" width="176" height="52" rx="8" class="c-mask"/>
-          <rect x="716.8" y="93" width="176" height="52" rx="8" class="c-database" data-animate="node" style="--step:10" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(722.8 99) scale(0.6875)">
+          <rect x="728.8" y="93" width="176" height="52" rx="8" class="c-mask"/>
+          <rect x="728.8" y="93" width="176" height="52" rx="8" class="c-database" data-animate="node" style="--step:10" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(734.8 99) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="804.8" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Terminal failure</text>
-          <text data-detail="context" x="804.8" y="131" class="t-muted" font-size="8" text-anchor="middle">thrown tool error + one stderr line</text>
+          <text data-node-label="" data-detail-anchor="" x="816.8" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Terminal failure</text>
+          <text data-detail="context" x="816.8" y="131" class="t-muted" font-size="8" text-anchor="middle">thrown tool error + one stderr line</text>
         </g>
 
-        <g id="node-cli" data-node-id="cli" data-node-label="cli.rs" tabindex="0" role="button" aria-label="Focus cli.rs, --path/--offset/--limit, limit &gt;= 1, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-sublabel="--path/--offset/--limit, limit &gt;= 1" data-node-context="rust-tools/piread/src">
-          <title>cli.rs · --path/--offset/--limit, limit &gt;= 1 · rust-tools/piread/src</title>
-          <rect x="126" y="217" width="176" height="52" rx="8" class="c-mask"/>
-          <rect x="126" y="217" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(132 223) scale(0.6875)">
+        <g id="node-cli" data-node-id="cli" data-node-label="cli.rs" tabindex="0" role="button" aria-label="Focus cli.rs, --path/--offset/--limit/--hits/--line-cap, limit &gt;= 1, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-sublabel="--path/--offset/--limit/--hits/--line-cap, limit &gt;= 1" data-node-context="rust-tools/piread/src">
+          <title>cli.rs · --path/--offset/--limit/--hits/--line-cap, limit &gt;= 1 · rust-tools/piread/src</title>
+          <rect x="114" y="320" width="200" height="52" rx="8" class="c-mask"/>
+          <rect x="114" y="320" width="200" height="52" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(120 326) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="214" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">cli.rs</text>
-          <text data-detail="context" x="214" y="255" class="t-muted" font-size="8" text-anchor="middle">--path/--offset/--limit, limit &gt;= 1</text>
+          <text data-node-label="" data-detail-anchor="" x="214" y="341" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">cli.rs</text>
+          <text data-detail="context" x="214" y="358" class="t-muted" font-size="6" text-anchor="middle">--path/--offset/--limit/--hits/--line-cap, limit &gt;= 1</text>
         </g>
 
         <g id="node-main" data-node-id="main" data-node-label="main.rs" tabindex="0" role="button" aria-label="Focus main.rs, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-context="rust-tools/piread/src">
           <title>main.rs · rust-tools/piread/src</title>
-          <rect x="334" y="217" width="92" height="52" rx="8" class="c-mask"/>
-          <rect x="334" y="217" width="92" height="52" rx="8" class="c-backend" data-animate="node" style="--step:2" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(340 223) scale(0.6875)">
+          <rect x="346" y="320" width="92" height="52" rx="8" class="c-mask"/>
+          <rect x="346" y="320" width="92" height="52" rx="8" class="c-backend" data-animate="node" style="--step:2" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(352 326) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="380" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">main.rs</text>
+          <text data-node-label="" x="392" y="341" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">main.rs</text>
         </g>
 
         <g id="node-pipe" data-node-id="pipe" data-node-label="pipeline.rs" tabindex="0" role="button" aria-label="Focus pipeline.rs, streaming Segmenter + HeadTruncator, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-sublabel="streaming Segmenter + HeadTruncator" data-node-context="rust-tools/piread/src">
           <title>pipeline.rs · streaming Segmenter + HeadTruncator · rust-tools/piread/src</title>
-          <rect x="458" y="217" width="176" height="52" rx="8" class="c-mask"/>
-          <rect x="458" y="217" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:3" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(464 223) scale(0.6875)">
+          <rect x="470" y="320" width="176" height="52" rx="8" class="c-mask"/>
+          <rect x="470" y="320" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:3" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(476 326) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="546" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">pipeline.rs</text>
-          <text data-detail="context" x="546" y="255" class="t-muted" font-size="8" text-anchor="middle">streaming Segmenter + HeadTruncator</text>
+          <text data-node-label="" data-detail-anchor="" x="558" y="341" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">pipeline.rs</text>
+          <text data-detail="context" x="558" y="358" class="t-muted" font-size="8" text-anchor="middle">streaming Segmenter + HeadTruncator</text>
         </g>
 
         <g id="node-comp" data-node-id="comp" data-node-label="compress.rs" tabindex="0" role="button" aria-label="Focus compress.rs, head-tail to 40 lines / 2 KB, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-sublabel="head-tail to 40 lines / 2 KB" data-node-context="rust-tools/piread/src">
           <title>compress.rs · head-tail to 40 lines / 2 KB · rust-tools/piread/src</title>
-          <rect x="732.8" y="217" width="144" height="52" rx="8" class="c-mask"/>
-          <rect x="732.8" y="217" width="144" height="52" rx="8" class="c-backend" data-animate="node" style="--step:4" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(738.8 223) scale(0.6875)">
+          <rect x="744.8" y="320" width="144" height="52" rx="8" class="c-mask"/>
+          <rect x="744.8" y="320" width="144" height="52" rx="8" class="c-backend" data-animate="node" style="--step:4" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(750.8 326) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="804.8" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">compress.rs</text>
-          <text data-detail="context" x="804.8" y="255" class="t-muted" font-size="8" text-anchor="middle">head-tail to 40 lines / 2 KB</text>
+          <text data-node-label="" data-detail-anchor="" x="816.8" y="341" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">compress.rs</text>
+          <text data-detail="context" x="816.8" y="358" class="t-muted" font-size="8" text-anchor="middle">head-tail to 40 lines / 2 KB</text>
         </g>
 
         <g id="node-env" data-node-id="env" data-node-label="envelope.rs" tabindex="0" role="button" aria-label="Focus envelope.rs, Success / Failure + Node-style errors, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Success / Failure + Node-style errors" data-node-context="rust-tools/piread/src">
           <title>envelope.rs · Success / Failure + Node-style errors · rust-tools/piread/src</title>
-          <rect x="908.8" y="217" width="176" height="52" rx="8" class="c-mask"/>
-          <rect x="908.8" y="217" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(914.8 223) scale(0.6875)">
+          <rect x="920.8" y="320" width="176" height="52" rx="8" class="c-mask"/>
+          <rect x="920.8" y="320" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(926.8 326) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="996.8" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">envelope.rs</text>
-          <text data-detail="context" x="996.8" y="255" class="t-muted" font-size="7.5" text-anchor="middle">Success / Failure + Node-style errors</text>
+          <text data-node-label="" data-detail-anchor="" x="1008.8" y="341" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">envelope.rs</text>
+          <text data-detail="context" x="1008.8" y="358" class="t-muted" font-size="7.5" text-anchor="middle">Success / Failure + Node-style errors</text>
+        </g>
+
+        <g id="node-loc" data-node-id="loc" data-node-label="locate.rs" tabindex="0" role="button" aria-label="Focus locate.rs, fused locate+read, merged windows around hits, rust-tools/piread/src" aria-pressed="false" data-node-kind="backend" data-node-sublabel="fused locate+read, merged windows around hits" data-node-context="rust-tools/piread/src">
+          <title>locate.rs · fused locate+read, merged windows around hits · rust-tools/piread/src</title>
+          <rect x="920.8" y="430" width="176" height="52" rx="8" class="c-mask"/>
+          <rect x="920.8" y="430" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(926.8 436) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1008.8" y="451" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">locate.rs</text>
+          <text data-detail="context" x="1008.8" y="468" class="t-muted" font-size="6.2" text-anchor="middle">fused locate+read, merged windows around hits</text>
         </g>
 
         <g id="node-out" data-node-id="out" data-node-label="Envelope to model" tabindex="0" role="button" aria-label="Focus Envelope to model, Result" aria-pressed="false" data-node-kind="backend" data-node-context="Result">
           <title>Envelope to model · Result</title>
-          <rect x="908.8" y="341" width="176" height="52" rx="8" class="c-mask"/>
-          <rect x="908.8" y="341" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:6" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(914.8 347) scale(0.6875)">
+          <rect x="920.8" y="547" width="176" height="52" rx="8" class="c-mask"/>
+          <rect x="920.8" y="547" width="176" height="52" rx="8" class="c-backend" data-animate="node" style="--step:6" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(926.8 553) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="996.8" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Envelope to model</text>
+          <text data-node-label="" x="1008.8" y="568" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Envelope to model</text>
         </g>
 
         <!-- Edge labels -->
         <g data-detail="context" data-edge-from="d" data-edge-to="da" data-edge-label="yes" data-edge-key="0" data-edge-id="r1">
-          <rect x="296" y="99" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="311" y="109" class="t-edge-emphasis" font-size="8" text-anchor="middle">yes</text>
+          <rect x="302" y="99" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="317" y="109" class="t-edge-emphasis" font-size="8" text-anchor="middle">yes</text>
         </g>
 
         <g data-detail="context" data-edge-from="env" data-edge-to="out" data-edge-label="envelope JSON" data-edge-key="2" data-edge-id="r11">
-          <rect x="960.5999999999999" y="295" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="996.8" y="305" class="t-edge-emphasis" font-size="8" text-anchor="middle">envelope JSON</text>
+          <rect x="1094.8" y="326" width="72.4" height="14" rx="3" class="c-mask"/>
+          <text x="1131" y="336" class="t-edge-emphasis" font-size="8" text-anchor="middle">envelope JSON</text>
         </g>
 
-        <g data-detail="context" data-edge-from="d" data-edge-to="cli" data-edge-label="cold start" data-edge-key="4" data-edge-id="r2">
-          <rect x="237" y="146" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="266" y="156" class="t-edge-emphasis" font-size="8" text-anchor="middle">cold start</text>
+        <g data-detail="context" data-edge-from="cli" data-edge-to="loc" data-edge-label="--hits: locate, no offset/limit" data-edge-key="4" data-edge-id="r13">
+          <rect x="488" y="436" width="158.79999999999998" height="14" rx="3" class="c-mask"/>
+          <text x="567.4" y="446" class="t-edge-dashed" font-size="8" text-anchor="middle">--hits: locate, no offset/limit</text>
         </g>
-        <g data-detail="context" data-edge-from="d" data-edge-to="os" data-edge-label="no / transport fails" data-edge-key="5" data-edge-id="r3">
-          <rect x="380" y="152" width="106" height="14" rx="3" class="c-mask"/>
-          <text x="433" y="162" class="t-edge-dashed" font-size="8" text-anchor="middle">no / transport fails</text>
+        <g data-detail="context" data-edge-from="loc" data-edge-to="env" data-edge-label="merged context windows" data-edge-key="5" data-edge-id="r14">
+          <rect x="951" y="391" width="115.6" height="14" rx="3" class="c-mask"/>
+          <text x="1008.8" y="401" class="t-edge-dashed" font-size="8" text-anchor="middle">merged context windows</text>
         </g>
-        <g data-detail="context" data-edge-from="os" data-edge-to="err" data-edge-label="spawn / parse failure" data-edge-key="6" data-edge-id="r4">
-          <rect x="602" y="99" width="110.8" height="14" rx="3" class="c-mask"/>
-          <text x="657.4" y="109" class="t-edge-dashed" font-size="8" text-anchor="middle">spawn / parse failure</text>
+        <g data-detail="context" data-edge-from="d" data-edge-to="cli" data-edge-label="cold start" data-edge-key="6" data-edge-id="r2">
+          <rect x="51" y="99" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="80" y="109" class="t-edge-emphasis" font-size="8" text-anchor="middle">cold start</text>
         </g>
-        <g data-detail="context" data-edge-from="da" data-edge-to="os" data-edge-label="spawn / timeout parity failure" data-edge-key="7" data-edge-id="r5">
-          <rect x="374" y="57" width="154" height="14" rx="3" class="c-mask"/>
-          <text x="451" y="67" class="t-edge-dashed" font-size="8" text-anchor="middle">spawn / timeout parity failure</text>
+        <g data-detail="context" data-edge-from="d" data-edge-to="os" data-edge-label="no / transport fails" data-edge-key="7" data-edge-id="r3">
+          <rect x="333" y="152" width="106" height="14" rx="3" class="c-mask"/>
+          <text x="386" y="162" class="t-edge-dashed" font-size="8" text-anchor="middle">no / transport fails</text>
+        </g>
+        <g data-detail="context" data-edge-from="os" data-edge-to="err" data-edge-label="spawn / parse failure" data-edge-key="8" data-edge-id="r4">
+          <rect x="614" y="99" width="110.8" height="14" rx="3" class="c-mask"/>
+          <text x="669.4" y="109" class="t-edge-dashed" font-size="8" text-anchor="middle">spawn / parse failure</text>
+        </g>
+        <g data-detail="context" data-edge-from="da" data-edge-to="os" data-edge-label="spawn / timeout parity failure" data-edge-key="9" data-edge-id="r5">
+          <rect x="386" y="57" width="154" height="14" rx="3" class="c-mask"/>
+          <text x="463" y="67" class="t-edge-dashed" font-size="8" text-anchor="middle">spawn / timeout parity failure</text>
         </g>
 
 
-        <g data-detail="context" data-edge-from="pipe" data-edge-to="env" data-edge-label="open errors, NUL sniff, offset beyond EOF" data-edge-key="10" data-edge-id="r8">
-          <rect x="680" y="164" width="206.79999999999998" height="14" rx="3" class="c-mask"/>
-          <text x="783.4" y="174" class="t-edge-dashed" font-size="8" text-anchor="middle">open errors, NUL sniff, offset beyond EOF</text>
+        <g data-detail="context" data-edge-from="pipe" data-edge-to="env" data-edge-label="open errors, NUL sniff, offset beyond EOF" data-edge-key="12" data-edge-id="r8">
+          <rect x="692" y="164" width="206.79999999999998" height="14" rx="3" class="c-mask"/>
+          <text x="795.4" y="174" class="t-edge-dashed" font-size="8" text-anchor="middle">open errors, NUL sniff, offset beyond EOF</text>
         </g>
 
 
         <!-- Legend -->
         <g data-legend="" data-legend-bridge="">
-          <text x="20" y="428" class="t-primary" font-size="12" font-weight="650">Legend</text>
-          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Agent logic" data-legend-x="20" data-legend-baseline="448" data-legend-width="95">
-            <rect x="20" y="440" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
-            <text x="42" y="448" class="t-muted" font-size="7.5" font-weight="500">Agent logic</text>
+          <text x="20" y="634" class="t-primary" font-size="12" font-weight="650">Legend</text>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Agent logic" data-legend-x="20" data-legend-baseline="654" data-legend-width="95">
+            <rect x="20" y="646" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
+            <text x="42" y="654" class="t-muted" font-size="7.5" font-weight="500">Agent logic</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="Policy" data-legend-x="122" data-legend-baseline="448" data-legend-width="71">
-            <rect x="122" y="440" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
-            <text x="144" y="448" class="t-muted" font-size="7.5" font-weight="500">Policy</text>
+          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="Policy" data-legend-x="122" data-legend-baseline="654" data-legend-width="71">
+            <rect x="122" y="646" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
+            <text x="144" y="654" class="t-muted" font-size="7.5" font-weight="500">Policy</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="Context / trace" data-legend-x="200" data-legend-baseline="448" data-legend-width="113">
-            <rect x="200" y="440" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
-            <text x="222" y="448" class="t-muted" font-size="7.5" font-weight="500">Context / trace</text>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="Context / trace" data-legend-x="200" data-legend-baseline="654" data-legend-width="113">
+            <rect x="200" y="646" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="222" y="654" class="t-muted" font-size="7.5" font-weight="500">Context / trace</text>
           </g>
         </g>
       </svg>

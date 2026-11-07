@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "workflow",
+  "quality": "standard",
+  "specification": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+    "sha256": "441a4632bca55e97b9828cd6c8591e7901240be343b048f8dbdc330e43931911",
+    "bytes": 2916
+  },
+  "artifact": {
+    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+    "sha256": "55e7e53bbe4449eb01520c67b595d9c66de2a91d9b11c7cbb33b59e1f05d4f81",
+    "bytes": 843409
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/tmp/piwrite-review-2/piwrite-pipeline.finalize.json",
+    "summaryReceipt": "/tmp/piwrite-review-2/piwrite-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "/tmp/piwrite-review-2/piwrite-pipeline.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-07T15:53:44.388Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 4927,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

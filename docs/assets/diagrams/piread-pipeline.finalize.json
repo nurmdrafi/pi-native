@@ -5,16 +5,16 @@
   "status": "pass",
   "type": "workflow",
   "quality": "standard",
-  "startedAt": "2026-10-29T15:52:55.852Z",
+  "startedAt": "2026-11-07T15:57:27.435Z",
   "specification": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
-    "sha256": "ce2ddb364852d1e2ed708d644b22461a3fee2635819d66fe5728742871bc0221",
-    "bytes": 3127
+    "sha256": "6072dd8b45dbf8f3d4adb99e30a116cb4bf7941f66092c4bf365580e1e87533d",
+    "bytes": 3370
   },
   "artifact": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
-    "sha256": "f56c848a3f7a961a3ae01c9a9aa350bf89ec29b860837b9d94e628f389e25657",
-    "bytes": 845426
+    "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
+    "bytes": 845728
   },
   "stages": {
     "validate": {
@@ -38,8 +38,8 @@
         "ok": true,
         "command": "validate",
         "specification": {
-          "sha256": "ce2ddb364852d1e2ed708d644b22461a3fee2635819d66fe5728742871bc0221",
-          "bytes": 3127
+          "sha256": "6072dd8b45dbf8f3d4adb99e30a116cb4bf7941f66092c4bf365580e1e87533d",
+          "bytes": 3370
         },
         "validation": {
           "checksPassed": 9,
@@ -47,39 +47,15 @@
           "compositionProfile": "standard",
           "compositionStatus": "pass",
           "errors": 0,
-          "warnings": 2,
+          "warnings": 1,
           "compositionIssues": [
             {
               "severity": "warning",
-              "code": "composition/proper-crossing",
-              "relationship": {
-                "id": "r13",
-                "from": "bf",
-                "to": "out",
-                "label": "",
-                "collectionIndex": 4,
-                "artifactIndex": 5
-              },
-              "otherRelationship": {
-                "id": "r3",
-                "from": "d",
-                "to": "os",
-                "label": "no / transport fails",
-                "collectionIndex": 6,
-                "artifactIndex": 7
-              },
-              "point": [
-                618.2,
-                77
-              ]
-            },
-            {
-              "severity": "warning",
               "code": "composition/desktop-readability",
-              "nodeId": "env",
+              "nodeId": "cli",
               "owner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "viewportWidth": 1440,
               "viewportHeight": 900,
@@ -89,12 +65,12 @@
               "requestedTargetPx": null,
               "requestedTargetMet": null,
               "budgetLimit": "legacy",
-              "viewBoxWidth": 1233,
-              "scale": 0.754257907542579,
-              "text": "Success / Failure + Node-style errors",
+              "viewBoxWidth": 1188,
+              "scale": 0.7828282828282829,
+              "text": "--path/--offset/--limit/--hits/--line-cap, limit &gt;= 1",
               "detail": "context",
-              "sourceFontPx": 7.5,
-              "projectedFontPx": 5.656934306569343,
+              "sourceFontPx": 6,
+              "projectedFontPx": 4.696969696969697,
               "minimumProjectedFontPx": 6
             }
           ]
@@ -104,7 +80,7 @@
     "deliver": {
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 1073,
+      "durationMs": 895,
       "command": [
         "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
         "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
@@ -118,19 +94,19 @@
       ],
       "receipt": {
         "schemaVersion": 1,
-        "receiptId": "93f5b986-2a0a-429c-a587-02857b2159b7",
+        "receiptId": "d9db3c3a-9614-4f02-a9bc-5f804ce42f5b",
         "ok": true,
         "command": "deliver",
         "type": "workflow",
         "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
         "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
         "specification": {
-          "sha256": "ce2ddb364852d1e2ed708d644b22461a3fee2635819d66fe5728742871bc0221",
-          "bytes": 3127
+          "sha256": "6072dd8b45dbf8f3d4adb99e30a116cb4bf7941f66092c4bf365580e1e87533d",
+          "bytes": 3370
         },
         "artifact": {
-          "sha256": "f56c848a3f7a961a3ae01c9a9aa350bf89ec29b860837b9d94e628f389e25657",
-          "bytes": 845426
+          "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
+          "bytes": 845728
         },
         "validation": {
           "checksPassed": 9,
@@ -138,39 +114,15 @@
           "compositionProfile": "standard",
           "compositionStatus": "pass",
           "errors": 0,
-          "warnings": 2,
+          "warnings": 1,
           "compositionIssues": [
             {
               "severity": "warning",
-              "code": "composition/proper-crossing",
-              "relationship": {
-                "id": "r13",
-                "from": "bf",
-                "to": "out",
-                "label": "",
-                "collectionIndex": 4,
-                "artifactIndex": 5
-              },
-              "otherRelationship": {
-                "id": "r3",
-                "from": "d",
-                "to": "os",
-                "label": "no / transport fails",
-                "collectionIndex": 6,
-                "artifactIndex": 7
-              },
-              "point": [
-                618.2,
-                77
-              ]
-            },
-            {
-              "severity": "warning",
               "code": "composition/desktop-readability",
-              "nodeId": "env",
+              "nodeId": "cli",
               "owner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "viewportWidth": 1440,
               "viewportHeight": 900,
@@ -180,12 +132,12 @@
               "requestedTargetPx": null,
               "requestedTargetMet": null,
               "budgetLimit": "legacy",
-              "viewBoxWidth": 1233,
-              "scale": 0.754257907542579,
-              "text": "Success / Failure + Node-style errors",
+              "viewBoxWidth": 1188,
+              "scale": 0.7828282828282829,
+              "text": "--path/--offset/--limit/--hits/--line-cap, limit &gt;= 1",
               "detail": "context",
-              "sourceFontPx": 7.5,
-              "projectedFontPx": 5.656934306569343,
+              "sourceFontPx": 6,
+              "projectedFontPx": 4.696969696969697,
               "minimumProjectedFontPx": 6
             }
           ]
@@ -206,7 +158,7 @@
     "check": {
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 413,
+      "durationMs": 265,
       "command": [
         "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
         "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
@@ -218,8 +170,8 @@
         "ok": true,
         "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
         "artifact": {
-          "sha256": "f56c848a3f7a961a3ae01c9a9aa350bf89ec29b860837b9d94e628f389e25657",
-          "bytes": 845426
+          "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
+          "bytes": 845728
         },
         "checks": [
           {
@@ -247,9 +199,7 @@
           {
             "name": "relationship_crossings",
             "ok": true,
-            "details": [
-              "[composition/proper-crossing] standard relationship id \"r13\" (\"bf\" -> \"out\") crosses relationship id \"r3\" (\"d\" -> \"os\") at [618.2, 77]"
-            ]
+            "details": []
           },
           {
             "name": "relationship_corridors",
@@ -278,28 +228,28 @@
           "status": "pass",
           "summary": {
             "errors": 0,
-            "warnings": 2
+            "warnings": 1
           },
           "metrics": {
-            "properCrossings": 1,
+            "properCrossings": 0,
             "resolvedCrossovers": 0,
             "ambiguousCorridors": 0,
             "arrowheadCollisions": 0,
             "containerBorderRuns": 0,
             "labelRouteClearanceIssues": 0,
             "labelCanvasOverflowIssues": 0,
-            "minLabelRouteClearance": 10,
+            "minLabelRouteClearance": 4,
             "desktopReadabilityIssues": 1,
             "viewportHeightIssues": 0,
-            "minProjectedNodeTextPx": 5.656934306569343,
+            "minProjectedNodeTextPx": 4.696969696969697,
             "maxBends": 0,
             "routesOverSuggestedBends": 0,
             "maxStretch": 1,
             "routesOverSuggestedStretch": 0,
             "minSegmentPx": 8,
             "minInteriorSegmentPx": null,
-            "shortSegmentCount": 10,
-            "shortEndpointSegmentCount": 10,
+            "shortSegmentCount": 6,
+            "shortEndpointSegmentCount": 6,
             "shortInteriorSegmentCount": 0,
             "microSegmentCount": 0
           },
@@ -329,44 +279,20 @@
             "hardFloorMet": false,
             "minimumOwner": {
               "kind": "node",
-              "id": "env"
+              "id": "cli"
             },
-            "minimumSourceTextPx": 7.5,
-            "minimumProjectedTextPx": 5.656934306569343,
-            "semanticTextCount": 27
+            "minimumSourceTextPx": 6,
+            "minimumProjectedTextPx": 4.696969696969697,
+            "semanticTextCount": 29
           },
           "issues": [
             {
               "severity": "warning",
-              "code": "composition/proper-crossing",
-              "relationship": {
-                "id": "r13",
-                "from": "bf",
-                "to": "out",
-                "label": "",
-                "collectionIndex": 4,
-                "artifactIndex": 5
-              },
-              "otherRelationship": {
-                "id": "r3",
-                "from": "d",
-                "to": "os",
-                "label": "no / transport fails",
-                "collectionIndex": 6,
-                "artifactIndex": 7
-              },
-              "point": [
-                618.2,
-                77
-              ]
-            },
-            {
-              "severity": "warning",
               "code": "composition/desktop-readability",
-              "nodeId": "env",
+              "nodeId": "cli",
               "owner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "viewportWidth": 1440,
               "viewportHeight": 900,
@@ -376,31 +302,33 @@
               "requestedTargetPx": null,
               "requestedTargetMet": null,
               "budgetLimit": "legacy",
-              "viewBoxWidth": 1233,
-              "scale": 0.754257907542579,
-              "text": "Success / Failure + Node-style errors",
+              "viewBoxWidth": 1188,
+              "scale": 0.7828282828282829,
+              "text": "--path/--offset/--limit/--hits/--line-cap, limit &gt;= 1",
               "detail": "context",
-              "sourceFontPx": 7.5,
-              "projectedFontPx": 5.656934306569343,
+              "sourceFontPx": 6,
+              "projectedFontPx": 4.696969696969697,
               "minimumProjectedFontPx": 6
             }
           ]
         },
         "provenance": "current",
-        "deliveryReceiptId": "93f5b986-2a0a-429c-a587-02857b2159b7"
+        "deliveryReceiptId": "d9db3c3a-9614-4f02-a9bc-5f804ce42f5b"
       }
     },
     "browser-check": {
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 4363,
+      "durationMs": 3993,
       "command": [
         "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
         "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
         "browser-check",
         "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
         "--json",
-        "--require-provenance"
+        "--require-provenance",
+        "--out-dir",
+        "/tmp/piread-pipeline-review2"
       ],
       "execution": "in-process",
       "receipt": {
@@ -411,11 +339,11 @@
         "status": "pass",
         "visualReview": "not-requested",
         "provenance": "current",
-        "deliveryReceiptId": "93f5b986-2a0a-429c-a587-02857b2159b7",
+        "deliveryReceiptId": "d9db3c3a-9614-4f02-a9bc-5f804ce42f5b",
         "artifact": {
           "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
-          "sha256": "f56c848a3f7a961a3ae01c9a9aa350bf89ec29b860837b9d94e628f389e25657",
-          "bytes": 845426
+          "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
+          "bytes": 845728
         },
         "state": {
           "detail": "read",
@@ -437,14 +365,14 @@
               "innerWidth": 1440,
               "innerHeight": 900,
               "scrollWidth": 1440,
-              "scrollHeight": 900,
+              "scrollHeight": 1000,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1376,
               "diagramWidth": 1346,
@@ -452,62 +380,62 @@
                 "bodyPaddingPx": 12,
                 "headerPx": 78,
                 "diagramChromePx": 78,
-                "svgPx": 576,
+                "svgPx": 832,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 114,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
-                  "spaceBelowNodesPx": 12
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 114,
-                  "nodeCount": 5,
+                  "heightPx": 351,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
+                  "nodeSpanPx": 184,
+                  "spaceAboveNodesPx": 163,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 118,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 59,
+                  "spaceAboveNodesPx": 46,
                   "spaceBelowNodesPx": 12
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 114,
+                  "heightPx": 118,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
+                  "nodeSpanPx": 59,
+                  "spaceAboveNodesPx": 46,
                   "spaceBelowNodesPx": 12
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -530,14 +458,14 @@
               "innerWidth": 1600,
               "innerHeight": 1000,
               "scrollWidth": 1600,
-              "scrollHeight": 1000,
+              "scrollHeight": 1165,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1536,
               "diagramWidth": 1506,
@@ -545,62 +473,62 @@
                 "bodyPaddingPx": 64,
                 "headerPx": 86,
                 "diagramChromePx": 84,
-                "svgPx": 645,
+                "svgPx": 930,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 127,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 127,
-                  "nodeCount": 5,
+                  "heightPx": 393,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
+                  "nodeSpanPx": 205,
+                  "spaceAboveNodesPx": 183,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 132,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 66,
+                  "spaceAboveNodesPx": 52,
+                  "spaceBelowNodesPx": 14
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 127,
+                  "heightPx": 132,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
+                  "nodeSpanPx": 66,
+                  "spaceAboveNodesPx": 52,
+                  "spaceBelowNodesPx": 14
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -623,77 +551,77 @@
               "innerWidth": 1920,
               "innerHeight": 1080,
               "scrollWidth": 1920,
-              "scrollHeight": 1080,
+              "scrollHeight": 1335,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1856,
-              "diagramWidth": 1826,
+              "diagramWidth": 1782,
               "pageComposition": {
                 "bodyPaddingPx": 64,
                 "headerPx": 86,
                 "diagramChromePx": 84,
-                "svgPx": 782,
+                "svgPx": 1101,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 154,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 154,
-                  "nodeCount": 5,
+                  "heightPx": 465,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
+                  "nodeSpanPx": 243,
+                  "spaceAboveNodesPx": 216,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 156,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 78,
+                  "spaceAboveNodesPx": 62,
+                  "spaceBelowNodesPx": 17
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 154,
+                  "heightPx": 156,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
+                  "nodeSpanPx": 78,
+                  "spaceAboveNodesPx": 62,
+                  "spaceBelowNodesPx": 17
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -716,77 +644,77 @@
               "innerWidth": 2048,
               "innerHeight": 1320,
               "scrollWidth": 2048,
-              "scrollHeight": 1320,
+              "scrollHeight": 1353,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1920,
-              "diagramWidth": 1870,
+              "diagramWidth": 1782,
               "pageComposition": {
                 "bodyPaddingPx": 64,
                 "headerPx": 94,
                 "diagramChromePx": 94,
-                "svgPx": 801,
+                "svgPx": 1101,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 158,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 79,
-                  "spaceAboveNodesPx": 62,
-                  "spaceBelowNodesPx": 17
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 158,
-                  "nodeCount": 5,
+                  "heightPx": 465,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 79,
+                  "nodeSpanPx": 243,
+                  "spaceAboveNodesPx": 216,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 156,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 78,
                   "spaceAboveNodesPx": 62,
                   "spaceBelowNodesPx": 17
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 158,
+                  "heightPx": 156,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 79,
+                  "nodeSpanPx": 78,
                   "spaceAboveNodesPx": 62,
                   "spaceBelowNodesPx": 17
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -862,14 +790,14 @@
               "innerWidth": 1440,
               "innerHeight": 900,
               "scrollWidth": 1440,
-              "scrollHeight": 900,
+              "scrollHeight": 1000,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1376,
               "diagramWidth": 1346,
@@ -877,62 +805,62 @@
                 "bodyPaddingPx": 12,
                 "headerPx": 78,
                 "diagramChromePx": 78,
-                "svgPx": 576,
+                "svgPx": 832,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 114,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
-                  "spaceBelowNodesPx": 12
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 114,
-                  "nodeCount": 5,
+                  "heightPx": 351,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
+                  "nodeSpanPx": 184,
+                  "spaceAboveNodesPx": 163,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 118,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 59,
+                  "spaceAboveNodesPx": 46,
                   "spaceBelowNodesPx": 12
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 114,
+                  "heightPx": 118,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
+                  "nodeSpanPx": 59,
+                  "spaceAboveNodesPx": 46,
                   "spaceBelowNodesPx": 12
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -955,14 +883,14 @@
               "innerWidth": 1600,
               "innerHeight": 1000,
               "scrollWidth": 1600,
-              "scrollHeight": 1000,
+              "scrollHeight": 1165,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1536,
               "diagramWidth": 1506,
@@ -970,62 +898,62 @@
                 "bodyPaddingPx": 64,
                 "headerPx": 86,
                 "diagramChromePx": 84,
-                "svgPx": 645,
+                "svgPx": 930,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 127,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 127,
-                  "nodeCount": 5,
+                  "heightPx": 393,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
+                  "nodeSpanPx": 205,
+                  "spaceAboveNodesPx": 183,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 132,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 66,
+                  "spaceAboveNodesPx": 52,
+                  "spaceBelowNodesPx": 14
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 127,
+                  "heightPx": 132,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
+                  "nodeSpanPx": 66,
+                  "spaceAboveNodesPx": 52,
+                  "spaceBelowNodesPx": 14
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1048,77 +976,77 @@
               "innerWidth": 1920,
               "innerHeight": 1080,
               "scrollWidth": 1920,
-              "scrollHeight": 1080,
+              "scrollHeight": 1335,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1856,
-              "diagramWidth": 1826,
+              "diagramWidth": 1782,
               "pageComposition": {
                 "bodyPaddingPx": 64,
                 "headerPx": 86,
                 "diagramChromePx": 84,
-                "svgPx": 782,
+                "svgPx": 1101,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 154,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 154,
-                  "nodeCount": 5,
+                  "heightPx": 465,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
+                  "nodeSpanPx": 243,
+                  "spaceAboveNodesPx": 216,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 156,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 78,
+                  "spaceAboveNodesPx": 62,
+                  "spaceBelowNodesPx": 17
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 154,
+                  "heightPx": 156,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
+                  "nodeSpanPx": 78,
+                  "spaceAboveNodesPx": 62,
+                  "spaceBelowNodesPx": 17
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1141,77 +1069,77 @@
               "innerWidth": 2048,
               "innerHeight": 1320,
               "scrollWidth": 2048,
-              "scrollHeight": 1320,
+              "scrollHeight": 1353,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1920,
-              "diagramWidth": 1870,
+              "diagramWidth": 1782,
               "pageComposition": {
                 "bodyPaddingPx": 64,
                 "headerPx": 94,
                 "diagramChromePx": 94,
-                "svgPx": 801,
+                "svgPx": 1101,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 158,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 79,
-                  "spaceAboveNodesPx": 62,
-                  "spaceBelowNodesPx": 17
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 158,
-                  "nodeCount": 5,
+                  "heightPx": 465,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 79,
+                  "nodeSpanPx": 243,
+                  "spaceAboveNodesPx": 216,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 156,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 78,
                   "spaceAboveNodesPx": 62,
                   "spaceBelowNodesPx": 17
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 158,
+                  "heightPx": 156,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 79,
+                  "nodeSpanPx": 78,
                   "spaceAboveNodesPx": 62,
                   "spaceBelowNodesPx": 17
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1239,14 +1167,14 @@
               "innerWidth": 1440,
               "innerHeight": 900,
               "scrollWidth": 1440,
-              "scrollHeight": 900,
+              "scrollHeight": 1000,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1376,
               "diagramWidth": 1346,
@@ -1254,62 +1182,62 @@
                 "bodyPaddingPx": 12,
                 "headerPx": 78,
                 "diagramChromePx": 78,
-                "svgPx": 576,
+                "svgPx": 832,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 114,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
-                  "spaceBelowNodesPx": 12
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 114,
-                  "nodeCount": 5,
+                  "heightPx": 351,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
+                  "nodeSpanPx": 184,
+                  "spaceAboveNodesPx": 163,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 118,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 59,
+                  "spaceAboveNodesPx": 46,
                   "spaceBelowNodesPx": 12
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 114,
+                  "heightPx": 118,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 57,
-                  "spaceAboveNodesPx": 45,
+                  "nodeSpanPx": 59,
+                  "spaceAboveNodesPx": 46,
                   "spaceBelowNodesPx": 12
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1332,14 +1260,14 @@
               "innerWidth": 1600,
               "innerHeight": 1000,
               "scrollWidth": 1600,
-              "scrollHeight": 1000,
+              "scrollHeight": 1165,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1536,
               "diagramWidth": 1506,
@@ -1347,62 +1275,62 @@
                 "bodyPaddingPx": 64,
                 "headerPx": 86,
                 "diagramChromePx": 84,
-                "svgPx": 645,
+                "svgPx": 930,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 127,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 127,
-                  "nodeCount": 5,
+                  "heightPx": 393,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
+                  "nodeSpanPx": 205,
+                  "spaceAboveNodesPx": 183,
+                  "spaceBelowNodesPx": 5
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 132,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 66,
+                  "spaceAboveNodesPx": 52,
+                  "spaceBelowNodesPx": 14
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 127,
+                  "heightPx": 132,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 64,
-                  "spaceAboveNodesPx": 50,
-                  "spaceBelowNodesPx": 13
+                  "nodeSpanPx": 66,
+                  "spaceAboveNodesPx": 52,
+                  "spaceBelowNodesPx": 14
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1425,77 +1353,77 @@
               "innerWidth": 1920,
               "innerHeight": 1080,
               "scrollWidth": 1920,
-              "scrollHeight": 1080,
+              "scrollHeight": 1335,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1856,
-              "diagramWidth": 1826,
+              "diagramWidth": 1782,
               "pageComposition": {
                 "bodyPaddingPx": 64,
                 "headerPx": 86,
                 "diagramChromePx": 84,
-                "svgPx": 782,
+                "svgPx": 1101,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 154,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 154,
-                  "nodeCount": 5,
+                  "heightPx": 465,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
+                  "nodeSpanPx": 243,
+                  "spaceAboveNodesPx": 216,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 156,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 78,
+                  "spaceAboveNodesPx": 62,
+                  "spaceBelowNodesPx": 17
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 154,
+                  "heightPx": 156,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 77,
-                  "spaceAboveNodesPx": 61,
-                  "spaceBelowNodesPx": 16
+                  "nodeSpanPx": 78,
+                  "spaceAboveNodesPx": 62,
+                  "spaceBelowNodesPx": 17
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1518,77 +1446,77 @@
               "innerWidth": 2048,
               "innerHeight": 1320,
               "scrollWidth": 2048,
-              "scrollHeight": 1320,
+              "scrollHeight": 1353,
               "overflowX": false,
-              "overflowY": false,
-              "verticalScrollAccepted": false,
-              "overflowDisposition": "contained",
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
               "readerLayout": "adaptive",
-              "readerOverflow": null,
-              "readerFit": null,
+              "readerOverflow": "authored",
+              "readerFit": "width-first",
               "ok": true,
               "readerWidth": 1920,
-              "diagramWidth": 1870,
+              "diagramWidth": 1782,
               "pageComposition": {
                 "bodyPaddingPx": 64,
                 "headerPx": 94,
                 "diagramChromePx": 94,
-                "svgPx": 801,
+                "svgPx": 1101,
                 "cardsPx": 0,
-                "viewBoxHeight": 528
+                "viewBoxHeight": 734
               },
-              "viewBoxWidth": 1233,
+              "viewBoxWidth": 1188,
               "workflowLanes": [
                 {
-                  "frameId": "lane-0",
-                  "heightPx": 158,
-                  "nodeCount": 5,
-                  "nodeIds": [
-                    "img",
-                    "d",
-                    "da",
-                    "os",
-                    "bf"
-                  ],
-                  "nodeSpanPx": 79,
-                  "spaceAboveNodesPx": 62,
-                  "spaceBelowNodesPx": 17
-                },
-                {
                   "frameId": "lane-1",
-                  "heightPx": 158,
-                  "nodeCount": 5,
+                  "heightPx": 465,
+                  "nodeCount": 6,
                   "nodeIds": [
                     "cli",
                     "main",
                     "pipe",
                     "comp",
-                    "env"
+                    "env",
+                    "loc"
                   ],
-                  "nodeSpanPx": 79,
+                  "nodeSpanPx": 243,
+                  "spaceAboveNodesPx": 216,
+                  "spaceBelowNodesPx": 6
+                },
+                {
+                  "frameId": "lane-0",
+                  "heightPx": 156,
+                  "nodeCount": 4,
+                  "nodeIds": [
+                    "d",
+                    "da",
+                    "os",
+                    "err"
+                  ],
+                  "nodeSpanPx": 78,
                   "spaceAboveNodesPx": 62,
                   "spaceBelowNodesPx": 17
                 },
                 {
                   "frameId": "lane-2",
-                  "heightPx": 158,
+                  "heightPx": 156,
                   "nodeCount": 1,
                   "nodeIds": [
                     "out"
                   ],
-                  "nodeSpanPx": 79,
+                  "nodeSpanPx": 78,
                   "spaceAboveNodesPx": 62,
                   "spaceBelowNodesPx": 17
                 }
               ],
-              "minimumProjectedNodeTextPx": 7.5,
-              "minimumProjectedNonEdgeTextPx": 7.5,
+              "minimumProjectedNodeTextPx": 6,
+              "minimumProjectedNonEdgeTextPx": 6,
               "minimumProjectedEdgeTextPx": 8,
-              "minimumProjectedNodeText": "Success / Failure + Node-style errors",
+              "minimumProjectedNodeText": "--path/--offset/--limit/--hits/--line-cap, limit >= 1",
               "minimumProjectedNodeTextDetail": "context",
               "minimumProjectedNodeTextOwner": {
                 "kind": "node",
-                "id": "env"
+                "id": "cli"
               },
               "minimumRequiredNodeTextPx": 6,
               "readabilityOk": true,
@@ -1612,6 +1540,7 @@
           "contactSheet": null
         },
         "sidecars": {
+          "directory": "/tmp/piread-pipeline-review2",
           "receipt": "piread-pipeline.browser-check.json",
           "files": []
         }
@@ -1624,19 +1553,19 @@
   },
   "diagnostics": [],
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.browser-check.json"
+    "receipt": "/tmp/piread-pipeline-review2/piread-pipeline.finalize.json",
+    "summaryReceipt": "/tmp/piread-pipeline-review2/piread-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "/tmp/piread-pipeline-review2/piread-pipeline.browser-check.json"
   },
   "visualReview": "not-requested",
-  "finishedAt": "2026-10-29T15:53:02.056Z",
-  "durationMs": 6203,
+  "finishedAt": "2026-11-07T15:57:32.798Z",
+  "durationMs": 5362,
   "update": {
     "status": "current",
     "installedVersion": "3.2.0",
     "availableVersion": "3.2.0",
     "releaseNotes": null,
-    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "checkedAt": "2026-11-07T15:53:44.388Z",
     "source": "cache",
     "noticeRequired": false,
     "noticeText": null

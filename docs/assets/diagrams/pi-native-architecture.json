@@ -13,7 +13,7 @@
     { "id": "turn", "type": "frontend", "label": "Agent turn", "sublabel": "plan, then tool calls", "pos": [300, 80], "size": [180, 90], "tag": "agent core" },
     { "id": "skills", "type": "external", "label": "Skills", "sublabel": "validator-enforced, zero prompt tokens", "pos": [620, 190], "size": [210, 90] },
     { "id": "subagents", "type": "external", "label": "Subagents", "sublabel": "tmux sandbox, gated off", "pos": [970, 80], "size": [200, 90] },
-    { "id": "gate", "type": "security", "label": "Permission gate", "sublabel": "23 rules, fail-closed", "pos": [300, 250], "size": [180, 80], "tag": "tool-call level" },
+    { "id": "gate", "type": "security", "label": "Permission gate", "sublabel": "31 rules, fail-closed", "pos": [300, 250], "size": [180, 80], "tag": "tool-call level" },
     { "id": "blocked", "type": "security", "label": "Block + targeted fix", "sublabel": "model gets the fix, not the failure", "pos": [40, 250], "size": [180, 80] },
     { "id": "shape", "type": "backend", "label": "Context shaping", "sublabel": "head-tail, 40 lines / 2 KB, -94%", "pos": [970, 250], "size": [200, 90] },
     { "id": "rung1", "type": "backend", "label": "Rung 1, daemon", "sublabel": "persistent NDJSON, fastest", "pos": [300, 430], "size": [200, 90], "tag": "via = daemon" },

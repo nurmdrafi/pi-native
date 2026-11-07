@@ -43,6 +43,7 @@ safe path for changing one of these tools). Per-crate build logs live in
 - [piread — native read pipeline](#piread--native-read-pipeline)
 - [piedit — native edit pipeline](#piedit--native-edit-pipeline)
 - [pidx — incremental session-log indexer](#pidx--incremental-session-log-indexer)
+- [piwrite — native file-write pipeline](#piwrite--native-file-write-pipeline)
 - [docheck — doc-consistency validator](#docheck--doc-consistency-validator)
 - [Shared techniques](#shared-techniques)
 - [Glossary](#glossary)
@@ -62,6 +63,7 @@ crates under one `Cargo.lock` and one `target/`:
 | `piwrite` | `bin/piwrite` | `serde`, `serde_json` (`preserve_order`) |
 | `pidx` | `bin/pidx` | + `sha1`; `preserve_order`, `float_roundtrip` |
 | `docheck` | `bin/docheck` | none — std only (all four families of the former `scripts/doc-check.mjs`, deleted after byte-parity; see [plans/permission_gate_implementation_plan.md](plans/permission_gate_implementation_plan.md) §13) |
+| `outline` | `bin/outline` | none — std only (definition index: one `start end kind name` row per symbol, so later reads aim one bounded window) |
 
 Deliberately kept small: no `tokio`, no `clap`, no `regex`, no `libc`. Threads
 are `std::thread`; argument parsing is hand-written; `setsid`/`setpgid` are
@@ -111,12 +113,12 @@ which never enters model-visible content.
 
 ### Rung 0 — registration and entry conditions
 
-All four tool extensions register a **distinct tool name** (`pibash`,
-`piread`, `piedit`, `piwrite`) alongside the built-in rather than shadowing it. The
-parameter schema is copied verbatim from `createBashToolDefinition` /
+All five tool extensions register a **distinct tool name** (`pibash`,
+`piread`, `piedit`, `piwrite`, `pidx`) alongside the built-in rather than shadowing it. The
+four built-in-parity tools copy the parameter schema verbatim from `createBashToolDefinition` /
 `createReadToolDefinition` / `createEditToolDefinition` / `createWriteToolDefinition` so input normalization
 and sampling behave identically; only name/label/description/promptGuidelines/
-execute/renderCall are native. Registration is unconditional — there is no env
+execute/renderCall are native; `pidx` defines its own schema. Registration is unconditional — there is no env
 opt-out, because a native tool never falls back to a built-in executor:
 `PI_BASH_BIN` / `PI_READ_BIN` / `PI_EDIT_BIN` / `PI_WRITE_BIN` / `PI_PIDX_BIN` override the
 binary path for parity tests. Choosing a built-in instead is configuration: do
@@ -803,6 +805,60 @@ binary:
 - The binary prints one **summary JSON on stderr** per run
   (`sessions` / `parsed` / `reused`), which the extension surfaces in
   `details`.
+
+---
+
+## piwrite — native file-write pipeline
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/piwrite-pipeline-dark.png" />
+    <img src="assets/diagrams/piwrite-pipeline-light.png" alt="piwrite pipeline" width="960" />
+  </picture>
+</p>
+
+▶ Explore the interactive view: [piwrite pipeline](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/piwrite-pipeline.html)
+
+One invocation reads raw bytes from stdin to EOF, creates parent directories
+recursively, and writes the bytes verbatim — binary-safe, no newline
+translation. Dispatch is **one-shot only** (see the framing table under
+[Generic dispatch ladder](#generic-dispatch-ladder)): a write is one process
+lifetime of work, so the extension spawns `bin/piwrite --path <resolved>` per
+call with the content piped over stdin, never argv. The `--serve` transport
+exists for the benchmark arms and is not wired into dispatch.
+
+### Module map
+
+| File | Role |
+| --- | --- |
+| `cli.rs` | hand-written parsing: `--path <P>`, `--serve`, `--help`, `--version` |
+| `main.rs` | one-shot run; `stream_to_file` copies stdin → file through ONE reused 1 MiB buffer — one read + one write syscall per MiB, the body never held whole; parents created mkdir-recursive |
+| `serve.rs` | protocol v2 framing: one `{"path","bytes"}` header line + exactly `bytes` raw body bytes (bodies never pay the JSON tax); one response line per request, in order; `bytes` never pre-allocated; pipe best-effort grown to 1 MiB (`F_SETPIPE_SZ`, raw `extern "C"` — no `libc` crate); `bytes` sanity cap 2^40 |
+| `envelope.rs` | `{"ok":true,"path","bytes"}` / `{"ok":false,"error"}`; exit 0 ok, 2 usage, 3 I/O, 1 framing |
+| `procgroup.rs` | own process group, so a group-wide kill from the client side cannot take the daemon down |
+
+### Failure modes (`--serve`)
+
+Malformed framing (bad header line, missing/non-numeric/oversized `bytes`,
+unterminated header at EOF) is unrecoverable on a byte stream: one error
+line, exit 1. EOF mid-body answers `truncated body` and exits 0 — the
+arrived prefix stays on disk; callers needing all-or-nothing write to a temp
+path and rename. A per-request I/O failure answers an error envelope, drains
+the remaining body bytes to keep framing in sync, and continues.
+
+### Extension boundary
+
+The envelope is turned into the built-in write's `Successfully wrote to
+<path>` result text; the interactive renderers are at parity with the
+built-in write. `PI_WRITE_BIN` overrides the binary path for parity tests;
+registration is unconditional.
+
+### Benchmark
+
+benchmark/piwrite/results/summary-2026-11-05-rawframe3.md: serve wins small
+writes — 4 KB p50 0.136 ms vs the built-in's 0.283 ms (2.08x). Large bodies
+favor streaming: 100 MB one-shot moves 904 MB/s vs the built-in's 480 MB/s,
+while the serve arm trails from 16 MB up.
 
 ---
 

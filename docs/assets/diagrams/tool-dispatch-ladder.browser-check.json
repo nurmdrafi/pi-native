@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "not-requested",
   "provenance": "current",
-  "deliveryReceiptId": "b7cc33af-529e-4865-af7c-f68980a0bec5",
+  "deliveryReceiptId": "f45ccb0c-84e0-4134-baa0-8cd3354e93ea",
   "artifact": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
-    "sha256": "58782e14ba3ceb2fe50d96b39d21715971657b86c78700af1094df9ec461b106",
-    "bytes": 840284
+    "sha256": "775c4a1bb302f51f5ac7b68c036f794259ae459f6e5e4bf430f53d04be5690f9",
+    "bytes": 840439
   },
   "state": {
     "detail": "read",
@@ -47,46 +47,46 @@
           "bodyPaddingPx": 12,
           "headerPx": 78,
           "diagramChromePx": 78,
-          "svgPx": 681,
+          "svgPx": 689,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 3,
             "nodeIds": [
               "m",
               "e",
               "d"
             ],
-            "nodeSpanPx": 66,
+            "nodeSpanPx": 67,
             "spaceAboveNodesPx": 54,
             "spaceBelowNodesPx": 15
           },
           {
             "frameId": "lane-1",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 3,
             "nodeIds": [
               "r1",
               "r2",
               "r3"
             ],
-            "nodeSpanPx": 87,
-            "spaceAboveNodesPx": 43,
+            "nodeSpanPx": 88,
+            "spaceAboveNodesPx": 44,
             "spaceBelowNodesPx": 5
           },
           {
             "frameId": "lane-2",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 1,
             "nodeIds": [
               "out"
             ],
-            "nodeSpanPx": 66,
+            "nodeSpanPx": 67,
             "spaceAboveNodesPx": 54,
             "spaceBelowNodesPx": 15
           }
@@ -130,8 +130,8 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1520,
-        "diagramWidth": 1490,
+        "readerWidth": 1503,
+        "diagramWidth": 1473,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
@@ -140,7 +140,7 @@
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
@@ -219,17 +219,17 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1678,
-        "diagramWidth": 1648,
+        "readerWidth": 1660,
+        "diagramWidth": 1630,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 834,
+          "svgPx": 835,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
@@ -314,48 +314,48 @@
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
-          "svgPx": 947,
+          "svgPx": 957,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 3,
             "nodeIds": [
               "m",
               "e",
               "d"
             ],
-            "nodeSpanPx": 92,
-            "spaceAboveNodesPx": 74,
-            "spaceBelowNodesPx": 21
+            "nodeSpanPx": 93,
+            "spaceAboveNodesPx": 75,
+            "spaceBelowNodesPx": 22
           },
           {
             "frameId": "lane-1",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 3,
             "nodeIds": [
               "r1",
               "r2",
               "r3"
             ],
-            "nodeSpanPx": 121,
-            "spaceAboveNodesPx": 60,
+            "nodeSpanPx": 122,
+            "spaceAboveNodesPx": 61,
             "spaceBelowNodesPx": 7
           },
           {
             "frameId": "lane-2",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 1,
             "nodeIds": [
               "out"
             ],
-            "nodeSpanPx": 92,
-            "spaceAboveNodesPx": 74,
-            "spaceBelowNodesPx": 21
+            "nodeSpanPx": 93,
+            "spaceAboveNodesPx": 75,
+            "spaceBelowNodesPx": 22
           }
         ],
         "minimumProjectedNodeTextPx": 8,
@@ -456,46 +456,46 @@
           "bodyPaddingPx": 12,
           "headerPx": 78,
           "diagramChromePx": 78,
-          "svgPx": 681,
+          "svgPx": 689,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 3,
             "nodeIds": [
               "m",
               "e",
               "d"
             ],
-            "nodeSpanPx": 66,
+            "nodeSpanPx": 67,
             "spaceAboveNodesPx": 54,
             "spaceBelowNodesPx": 15
           },
           {
             "frameId": "lane-1",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 3,
             "nodeIds": [
               "r1",
               "r2",
               "r3"
             ],
-            "nodeSpanPx": 87,
-            "spaceAboveNodesPx": 43,
+            "nodeSpanPx": 88,
+            "spaceAboveNodesPx": 44,
             "spaceBelowNodesPx": 5
           },
           {
             "frameId": "lane-2",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 1,
             "nodeIds": [
               "out"
             ],
-            "nodeSpanPx": 66,
+            "nodeSpanPx": 67,
             "spaceAboveNodesPx": 54,
             "spaceBelowNodesPx": 15
           }
@@ -539,8 +539,8 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1520,
-        "diagramWidth": 1490,
+        "readerWidth": 1503,
+        "diagramWidth": 1473,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
@@ -549,7 +549,7 @@
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
@@ -628,17 +628,17 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1678,
-        "diagramWidth": 1648,
+        "readerWidth": 1660,
+        "diagramWidth": 1630,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 834,
+          "svgPx": 835,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
@@ -723,48 +723,48 @@
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
-          "svgPx": 947,
+          "svgPx": 957,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 3,
             "nodeIds": [
               "m",
               "e",
               "d"
             ],
-            "nodeSpanPx": 92,
-            "spaceAboveNodesPx": 74,
-            "spaceBelowNodesPx": 21
+            "nodeSpanPx": 93,
+            "spaceAboveNodesPx": 75,
+            "spaceBelowNodesPx": 22
           },
           {
             "frameId": "lane-1",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 3,
             "nodeIds": [
               "r1",
               "r2",
               "r3"
             ],
-            "nodeSpanPx": 121,
-            "spaceAboveNodesPx": 60,
+            "nodeSpanPx": 122,
+            "spaceAboveNodesPx": 61,
             "spaceBelowNodesPx": 7
           },
           {
             "frameId": "lane-2",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 1,
             "nodeIds": [
               "out"
             ],
-            "nodeSpanPx": 92,
-            "spaceAboveNodesPx": 74,
-            "spaceBelowNodesPx": 21
+            "nodeSpanPx": 93,
+            "spaceAboveNodesPx": 75,
+            "spaceBelowNodesPx": 22
           }
         ],
         "minimumProjectedNodeTextPx": 8,
@@ -817,46 +817,46 @@
           "bodyPaddingPx": 12,
           "headerPx": 78,
           "diagramChromePx": 78,
-          "svgPx": 681,
+          "svgPx": 689,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 3,
             "nodeIds": [
               "m",
               "e",
               "d"
             ],
-            "nodeSpanPx": 66,
+            "nodeSpanPx": 67,
             "spaceAboveNodesPx": 54,
             "spaceBelowNodesPx": 15
           },
           {
             "frameId": "lane-1",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 3,
             "nodeIds": [
               "r1",
               "r2",
               "r3"
             ],
-            "nodeSpanPx": 87,
-            "spaceAboveNodesPx": 43,
+            "nodeSpanPx": 88,
+            "spaceAboveNodesPx": 44,
             "spaceBelowNodesPx": 5
           },
           {
             "frameId": "lane-2",
-            "heightPx": 135,
+            "heightPx": 137,
             "nodeCount": 1,
             "nodeIds": [
               "out"
             ],
-            "nodeSpanPx": 66,
+            "nodeSpanPx": 67,
             "spaceAboveNodesPx": 54,
             "spaceBelowNodesPx": 15
           }
@@ -900,8 +900,8 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1520,
-        "diagramWidth": 1490,
+        "readerWidth": 1503,
+        "diagramWidth": 1473,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
@@ -910,7 +910,7 @@
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
@@ -989,17 +989,17 @@
         "readerOverflow": null,
         "readerFit": null,
         "ok": true,
-        "readerWidth": 1678,
-        "diagramWidth": 1648,
+        "readerWidth": 1660,
+        "diagramWidth": 1630,
         "pageComposition": {
           "bodyPaddingPx": 64,
           "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 834,
+          "svgPx": 835,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
@@ -1084,48 +1084,48 @@
           "bodyPaddingPx": 64,
           "headerPx": 94,
           "diagramChromePx": 94,
-          "svgPx": 947,
+          "svgPx": 957,
           "cardsPx": 0,
           "viewBoxHeight": 534
         },
-        "viewBoxWidth": 1055,
+        "viewBoxWidth": 1043,
         "workflowLanes": [
           {
             "frameId": "lane-0",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 3,
             "nodeIds": [
               "m",
               "e",
               "d"
             ],
-            "nodeSpanPx": 92,
-            "spaceAboveNodesPx": 74,
-            "spaceBelowNodesPx": 21
+            "nodeSpanPx": 93,
+            "spaceAboveNodesPx": 75,
+            "spaceBelowNodesPx": 22
           },
           {
             "frameId": "lane-1",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 3,
             "nodeIds": [
               "r1",
               "r2",
               "r3"
             ],
-            "nodeSpanPx": 121,
-            "spaceAboveNodesPx": 60,
+            "nodeSpanPx": 122,
+            "spaceAboveNodesPx": 61,
             "spaceBelowNodesPx": 7
           },
           {
             "frameId": "lane-2",
-            "heightPx": 188,
+            "heightPx": 190,
             "nodeCount": 1,
             "nodeIds": [
               "out"
             ],
-            "nodeSpanPx": 92,
-            "spaceAboveNodesPx": 74,
-            "spaceBelowNodesPx": 21
+            "nodeSpanPx": 93,
+            "spaceAboveNodesPx": 75,
+            "spaceBelowNodesPx": 22
           }
         ],
         "minimumProjectedNodeTextPx": 8,
@@ -1159,6 +1159,7 @@
     "contactSheet": null
   },
   "sidecars": {
+    "directory": "/tmp/tool-dispatch-ladder-review",
     "receipt": "tool-dispatch-ladder.browser-check.json",
     "files": []
   }

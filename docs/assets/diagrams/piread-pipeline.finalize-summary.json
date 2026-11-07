@@ -7,13 +7,13 @@
   "quality": "standard",
   "specification": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
-    "sha256": "ce2ddb364852d1e2ed708d644b22461a3fee2635819d66fe5728742871bc0221",
-    "bytes": 3127
+    "sha256": "6072dd8b45dbf8f3d4adb99e30a116cb4bf7941f66092c4bf365580e1e87533d",
+    "bytes": 3370
   },
   "artifact": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
-    "sha256": "f56c848a3f7a961a3ae01c9a9aa350bf89ec29b860837b9d94e628f389e25657",
-    "bytes": 845426
+    "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
+    "bytes": 845728
   },
   "gates": {
     "validate": "pass",
@@ -28,22 +28,22 @@
     "truncated": false
   },
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.browser-check.json"
+    "receipt": "/tmp/piread-pipeline-review2/piread-pipeline.finalize.json",
+    "summaryReceipt": "/tmp/piread-pipeline-review2/piread-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "/tmp/piread-pipeline-review2/piread-pipeline.browser-check.json"
   },
   "update": {
     "status": "current",
     "installedVersion": "3.2.0",
     "availableVersion": "3.2.0",
     "releaseNotes": null,
-    "checkedAt": "2026-10-29T15:40:27.615Z",
+    "checkedAt": "2026-11-07T15:53:44.388Z",
     "source": "cache",
     "noticeRequired": false,
     "noticeText": null
   },
   "visualReview": "not-requested",
-  "durationMs": 6203,
+  "durationMs": 5362,
   "browserCheck": {
     "requested": true,
     "ran": true

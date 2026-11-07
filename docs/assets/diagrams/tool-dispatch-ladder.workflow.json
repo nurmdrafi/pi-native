@@ -3,7 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "Tool dispatch ladder",
-    "subtitle": "Every native tool: extension dispatch, two rungs, one envelope",
+    "subtitle": "Native tool dispatch: registration, daemon rung where wired, one-shot fallback, one envelope",
     "output": "tool-dispatch-ladder.html",
     "quality_profile": "showcase"
   },

@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "not-requested",
   "provenance": "current",
-  "deliveryReceiptId": "54a9965b-ef12-4d01-b5dd-5a09d1420461",
+  "deliveryReceiptId": "11b87626-b914-4442-b451-45219d962166",
   "artifact": {
     "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
-    "sha256": "71d160d994f7cb7c2ff49b5ad774ef84da37c792dfda3ee842593bffd01b8f87",
-    "bytes": 849576
+    "sha256": "6b7faceea3c604c5b26c6a1a3dbc463d81825b6b2ad575636a92331613b0e990",
+    "bytes": 849638
   },
   "state": {
     "detail": "read",
@@ -739,6 +739,7 @@
     "contactSheet": null
   },
   "sidecars": {
+    "directory": "/tmp/pi-native-architecture-review",
     "receipt": "pi-native-architecture.browser-check.json",
     "files": []
   }

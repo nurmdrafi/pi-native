@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "piwrite — native file-write pipeline",
+    "subtitle": "One-shot spawn, raw stdin bytes, one reused 1 MiB buffer; --serve frames header + raw body",
+    "output": "piwrite-pipeline.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "ext", "label": "extensions/piwrite/index.ts" },
+    { "id": "core", "label": "rust-tools/piwrite/src" },
+    { "id": "model", "label": "Result" }
+  ],
+  "nodes": [
+    { "id": "reg", "lane": "ext", "col": 0, "type": "frontend", "label": "piwrite tool", "sublabel": "registration + cwd resolve", "tag": "schema copied from write" },
+    { "id": "sp", "lane": "ext", "col": 1, "type": "backend", "label": "One-shot spawn", "sublabel": "bin/piwrite --path, stdin raw bytes" },
+    { "id": "bf", "lane": "ext", "col": 2, "type": "database", "label": "Terminal failure", "sublabel": "thrown tool error + one stderr line" },
+    { "id": "cli", "lane": "core", "col": 1, "type": "backend", "label": "cli.rs", "sublabel": "--path | --serve" },
+    { "id": "stream", "lane": "core", "col": 2, "type": "backend", "label": "stream_to_file", "sublabel": "one reused 1 MiB buffer", "tag": "one syscall per MiB; mkdir-recursive" },
+    { "id": "envl", "lane": "core", "col": 3, "type": "backend", "label": "envelope.rs", "sublabel": "ok {path, bytes}; exit 0/2/3" },
+    { "id": "serve", "lane": "core", "col": 4, "type": "backend", "label": "serve.rs --serve", "sublabel": "header + N raw body bytes", "tag": "bench arms; pipe grown to 1 MiB" },
+    { "id": "out", "lane": "model", "col": 3, "type": "backend", "label": "Envelope to model", "sublabel": "write-parity success message" },
+    { "id": "frerr", "lane": "model", "col": 4, "type": "database", "label": "Framing failure", "sublabel": "malformed: exit 1; truncated keeps prefix" }
+  ],
+  "edges": [
+    { "id": "x1", "from": "reg", "to": "sp", "label": "tool call" },
+    { "id": "x2", "from": "sp", "to": "cli", "label": "argv + stdin", "variant": "emphasis" },
+    { "id": "x3", "from": "cli", "to": "stream", "label": "--path", "variant": "emphasis" },
+    { "id": "x4", "from": "stream", "to": "envl", "label": "bytes written", "variant": "emphasis" },
+    { "id": "x5", "from": "envl", "to": "out", "label": "envelope JSON", "variant": "emphasis" },
+    { "id": "x6", "from": "sp", "to": "bf", "label": "spawn / parse failure", "variant": "dashed" },
+    { "id": "x7", "from": "bf", "to": "out", "label": "error to model", "variant": "dashed" },
+    { "id": "x8", "from": "cli", "to": "serve", "label": "--serve, bench arms", "variant": "dashed" },
+    { "id": "x9", "from": "serve", "to": "envl", "label": "one response per request", "toSide": "top" },
+    { "id": "x10", "from": "serve", "to": "frerr", "label": "malformed / truncated", "variant": "dashed" }
+  ],
+  "mainPath": ["reg", "sp", "cli", "stream", "envl", "out"]
+}
