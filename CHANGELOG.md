@@ -27,11 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   piwrite while the extension is registered, mirroring P1/P2; setting the rule to `"off"`
   restores the built-in.
 
+- **Demo GIF pipeline** (`scripts/demo-gif.sh`): ffmpeg two-pass palette conversion (10 fps, 800 px, 96 colors, 15 s trim) with a hard 3 MiB guard that fails loudly with tuning hints. Terminal-like 15 s test footage measures 0.58 MiB; synthetic noise stress footage exceeds the cap, as designed — real terminal output does not resemble it. `docs/assets/demo-placeholder.md` now carries the capture and convert commands.
+
 ### Changed
 
 - **Roster and docs adopt piwrite.** Nine agent definitions and the orchestration table declare
   `piwrite` instead of `write`; the native-tools, architecture, optimization, development, and
   contributing guides cover the tool, and the dashboard surfaces the P3 rule.
+
+- **README sharpened for pre-release.** Original tagline restored byte-exact, the Why-block removed, What-it-does rewritten as six plain bullets with deep-dive links, orchestration trimmed to three sentences, the broken demo embed removed, and piwrite added to the tools table and bin inventory. Benchmarks now leads with numbers-in-text beside the chart plus reproduce commands linking raw results.
+
+### Fixed
+
+- **Benchmark chart honesty pass** (`scripts/bench-charts.mjs`, `docs/assets/benchmarks/all-tools.svg`): panel A dropped its log10 scale for per-row linear bars — bar heights are now exactly proportional to values within each row (a regression test pins height ratio to value ratio within 2%); every latency label carries an explicit ms/s unit; the four-line footer paragraph collapsed to one short line with full citations kept in the SVG desc; the left axis now carries a 0–100% of-row-max measurement with gridlines and bars keep 22 px label headroom so value labels no longer overlap the panel header. Deterministic regeneration preserved (byte-identical rerun).
 
 ## [1.71.1] - 05-11-2026
 

@@ -1,12 +1,6 @@
 # pi-native
 
-Fail-closed trust and a measured token economy: a Pi harness with native Rust tools.
-
-Why:
-
-- Fail-closed native gates — every tool call crosses an explicit permission gate before it runs ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
-- Measurable token economy — the `pi sessions` dashboard tracks token spend per session and run ([dashboard/PRODUCT.md](dashboard/PRODUCT.md))
-- Drop-in pi harness compatibility — native tools match the pi built-ins' parameters verbatim, so existing setups work unchanged ([docs/native-tools.md](docs/native-tools.md))
+A performance-focused Pi coding-agent harness with native Rust tools, fail-closed permission gates, and token-efficient context management.
 
 ![pi-native logo](docs/assets/pi-native-logo.jpg)
 
@@ -26,7 +20,11 @@ Why:
 [![contributors](https://img.shields.io/github/contributors/nurmdrafi/pi-native?labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/graphs/contributors)
 [![last commit](https://img.shields.io/github/last-commit/nurmdrafi/pi-native?label=last%20commit&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/commits/dev)
 <br>
-[![node](https://img.shields.io/badge/node_%E2%A5%BC_22.19_%C2%B7_.nvmrc_24-339933?logo=nodedotjs&logoColor=5FA04E&labelColor=24292f&style=flat-square)](#requirements)
+[![node](https://img.shields.io/github/badge/node_%E2%A5%BC_22.19_%C2%B7_.nvmrc_24-339933?logo=nodedotjs&logoColor=5FA04E&labelColor=24292f&style=flat-square)](#requirements)
+
+## Demo
+
+![Live session dashboard: sessions overview, per-session cost detail, live tool and spend cards](docs/assets/demo.gif)
 
 ## Why this exists
 
@@ -40,30 +38,17 @@ Coding-agent configs rot — they accumulate always-on prompt bloat, machine-spe
 - Subagents gated and sandboxed — spawn tools are gated, children run in isolated panes under hard conduct bans ([docs/subagent-orchestration.md](docs/subagent-orchestration.md), [docs/subagents.md](docs/subagents.md))
 - Supported platforms: macOS and Linux — portability rules are enforced ([docs/design-rules.md](docs/design-rules.md#portability))
 
-## Demo
-
-![Terminal session: a pibash call paused at the permission gate, then a dashboard card rendering session token spend](docs/assets/demo.gif)
-
-One gated native tool call and one dashboard render, about 15 seconds. The recording is pending — [docs/assets/demo-placeholder.md](docs/assets/demo-placeholder.md) defines what it must show (asciinema or GIF, at most 3 MiB).
-
 ## What it does
 
-The pi-native harness optimizes agent execution loops by replacing built-in tool functionalities with **five** native Rust crates. It functions as a **transparent, high-throughput co-processor**, offloading heavy string validation, windowed file reading, and shell output filtering from the single-threaded Node.js event loop while maintaining strict parity with the upstream platform API.
+- Native Rust tools — `piread`, `piedit`, `pibash`, `piwrite`, `pidx` — replace the built-in `read`, `edit`, `bash`, and `write` tools plus session-log parsing, with the same parameters, so a tuned pi setup runs unchanged ([docs/native-tools.md](docs/native-tools.md))
+- Every tool call crosses a permission gate before it runs; a broken native tool is a visible error, never a silent fallback ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
+- Context stays small by default: windowed reads, bounded diffs, and hard caps on shell output shape what reaches the model ([docs/native-tools.md](docs/native-tools.md))
+- Cost is visible by default: the dashboard shows token spend, cache hit rate, and per-session USD budget alerts ([dashboard/](dashboard/))
+- Subagents run sandboxed with the gate re-enabled inside; each child declares its write scope, so parallel work never clobbers files ([docs/subagents.md](docs/subagents.md))
+- One directory, zero init: clone into `~/.pi/agent`, and every later pull re-checks the setup itself ([docs/zero-init.md](docs/zero-init.md))
 
 ### Daemon → One-Shot Ladder
 Each native utility runs the same **two-rung ladder**: a **persistent background daemon process (`--serve`)** over NDJSON stdio, then a **one-shot CLI spawn** when the daemon transport fails. There is no third rung and no functional fallback: a terminal failure — missing binary, unhandled panic, unparseable output — is a thrown tool error plus one stderr line, so a broken binary is visible instead of silently masked. Choosing pi's built-in tool instead is configuration: leave the extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`.
-
-*   **`piread` (Windowed Context Truncation Driver):** Replaces default text file reading routines by deploying **windowed reads with head-tail compaction**. The **persistent daemon path** operates at a p50 latency threshold of **0.03 to 0.39 ms** below the built-in tool across all **seven** corpora (achieving up to a **3.4x performance speedup** on small file reads), keeping the transcript completely byte-identical on cases within the budget.
-*   **`piedit` (Fuzzy Normalized Diff Processor):** Optimizes file modification operations via **exact-then-fuzzy matching (NFKC, smart quotes, CRLF)** backed by a **native diff/patch engine**. It delivers a **2.7x performance acceleration** over standard tools on **1 MiB** source files while maintaining **Anchor Guard parity** and strict line-coverage tracking.
-*   **`pibash` (Command-Kind Output Stream Filter):** Implements **command-kind-aware compression**, **run deduplication**, and low-overhead **ANSI strip processing**. It executes faster than its baseline oracle across all **nine** core command classes, tracking down to a absolute latency drop of **−5.64 ms** on `seq 50000` data arrays. Output that breaches token thresholds is automatically captured via a **spill-to-file fallback** that outputs a recovering path.
-*   **`pidx` (Byte-Offset Spending Cache Indexer):** Scans multi-megabyte log assets incrementally by preserving raw file byte pointer offsets via a **stateful size and modified-time (`mtime`) cache**. It shifts performance from a 2.1-second structural parse down to a **28 ms warm runtime**, delivering a **75x incremental acceleration** when calculating real-time model spend profiles from a **110 MB** log trace.
-*   **`docheck` (Markdown Syntax and Inventory Linter):** Audits markdown command blocks, terminal parameter flags, directory paths, tool inventories, and environment variable allowlists. It operates completely out-of-process to complete **structural validation sweeps** across **697** distinct files in just **1.9 seconds**, delivering an ultra-low latency timeline across large documentation assets.
-
-
-### Stream Compression and Permission Interception Loops
-*   **Deterministic Head-Tail Output Compaction:** Clamps streaming console blocks and reading inputs at a hard **40-line / 2 KB** ceiling using a **deterministic head-tail compaction algorithm**. It compresses **273 KB** of raw log data down to **15.6 KB** of high-density, model-visible context, yielding a **94.3%** reduction in overall token footprints while keeping errors, exit codes, and a certified **omission map** intact.
-*   **Fail-Closed Tool-Call Interception Gate:** Evaluates tool execution parameters synchronously against **31** granular safety rules, guarding against path traversal, runaway prompt loops, and destructive shell payloads. Rather than failing the process hard, the gate intercepts violations and employs a **Block + Targeted Fix design** that injects synthetic remediation context straight to the model turn, keeping **92** fixtures green at **93%** one-shot block recovery.
-*   **Sandboxed tmux Subagent Sandboxing:** Allocates background worker context within dedicated, **sandboxed tmux workspaces**. Internal **parent-to-child plumbing environment keys** pass tracking values and identity metrics dynamically, keeping subagent context requirements at **zero** tokens until a task is explicitly delegated.
 
 ## Quick start
 
@@ -82,9 +67,6 @@ git clone https://github.com/nurmdrafi/pi-native.git ~/.pi/agent
 # Additionally, per machine — copy extras from an existing machine
 scp <your-other-machine>:~/.agents/skills/* ~/.pi/agent/skills/  # private skills, not in the repo
 scp <your-other-machine>:~/.pi/agent/auth.json ~/.pi/agent/      # secrets — or /login per provider inside pi
-
-# 4. Bootstrap — npm deps, pidoc shim, Rust tool builds (cargo missing is reported, never auto-installed)
-sh ~/.pi/agent/scripts/bootstrap.sh
 ```
 
 After bootstrap, later `git pull`s re-check the setup automatically — husky `post-merge`/`post-rewrite` run `scripts/after-pull.sh`: refresh npm deps when the lockfile moved, recreate the `pidoc` shim, rebuild Rust tools when stale, then run `pidoc --fix`. Safe non-privileged fixes apply automatically; missing toolchains are reported, never installed.
@@ -107,7 +89,7 @@ Add `bin/` to your `PATH` so your own terminals resolve the same tools — zsh: 
 export PATH="$HOME/.pi/agent/bin:$PATH"
 ```
 
-`bin/` is gitignored and regenerated. It holds `rg` (built with PCRE2), `piread`, `piedit`, `pibash`, `pidx`, `fd`, and `pidoc`. `pidoc` verifies all of them — look for the `rg-pcre2`, `piread`, and `shell-path` rows.
+`bin/` is gitignored and regenerated. It holds `rg` (built with PCRE2), `piread`, `piedit`, `pibash`, `piwrite`, `pidx`, `fd`, and `pidoc`. `pidoc` verifies all of them — look for the `rg-pcre2`, `piread`, and `shell-path` rows.
 
 ## Requirements
 
@@ -123,9 +105,13 @@ Native tools register unconditionally and always execute the Rust binary; no env
 
 ## Benchmarks
 
-![Chart: native-tool latency versus built-in baselines (panel A) and piwrite 100 MB one-shot write throughput (panel B)](docs/assets/benchmarks/all-tools.svg)
+![Chart: native-tool latency versus built-in baselines (panel A) and per-tool throughput, 32 MiB per op, native versus baseline (panel B)](docs/assets/benchmarks/all-tools.svg)
 
-Methodology: tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs; p50 per op, one representative case per tool — raw data in [benchmark/](benchmark/), [benchmark/runs/](benchmark/runs/), and [results NDJSON](benchmark/piwrite/results/results-2026-11-05-rawframe3.ndjson).
+Numbers in text, beside the chart — representative p50, native vs built-in on matched workloads: `piwrite` 4 KB write **2.1x** faster, `piedit` 1 MiB edit **2.7x**, `piread` small reads **~3.4x**; a warm log re-scan drops 2.1 s to 28 ms. Peak RSS on identical workloads: the built-in path holds **24x-142x** more memory than the native tools — 110,128 KiB vs 2,300 KiB on a windowed read, 410,304 KiB vs 2,888 KiB on a 100 MB write (p50, `/usr/bin/time -v`).
+
+Reproduce every figure: the harness and raw results ship in-tree — [benchmark/runs/](benchmark/runs/), [benchmark/rss-arm/](benchmark/rss-arm/), [piwrite raw frame](benchmark/piwrite/results/results-2026-11-05-rawframe3.ndjson). Regenerate with `npm run bench:piread` / `bench:piedit` / `bench:pibash`; the memory arm runs `node benchmark/rss-arm/bench.mjs --full --tag v1`; the throughput tables behind panel B print from `node tests/tools/bench/{piread,pibash,piedit,pidx}.mjs --throughput` and `node benchmark/piwrite/bench.mjs --throughput`.
+
+Methodology: tool-call-boundary microbenchmarks (dispatch / serve protocol), not agent-level task runs; p50 per op, one representative case per tool — full raw data under [benchmark/](benchmark/).
 
 ## Architecture
 
@@ -144,24 +130,14 @@ Every rung byte-matches the one below it (parity-pinned by tests); `details.via`
 | `piread` | built-in `read`         | windowed reads with head-tail compaction                    |
 | `piedit` | built-in `edit`         | bounded diffs, Anchor Guard parity                          |
 | `pibash` | built-in `bash`         | command-aware output shaping, spill file                    |
+| `piwrite` | built-in `write`       | content piped as raw stdin bytes, parent dirs created       |
 | `pidx`   | Node session-log parser | incremental extracts, pointer-only output                  |
 
 Tools, env keys, benchmarks, and context-shaping tables: [docs/native-tools.md](docs/native-tools.md).
 
 ## Subagent orchestration
 
-A subagent orchestration runtime built into the harness: parallel throughput without merge conflicts, tokens spent once, children that finish or say why — [docs/subagents.md](docs/subagents.md).
-
-*   **Runtime-owned file-conflict safety:** a spawn declares its write scope; an overlapping spawn queues FIFO behind the owner while non-conflicting work keeps launching (skip-scan queue), so disjoint file-sets stay fully parallel and orchestrators stop hand-planning around collisions.
-*   **Cross-agent memory:** every result appends to an append-only per-repo history; a child whose scope overlaps recent work receives an injected prior-work digest (changed paths, diff excerpt, summary), so followers skip re-reading files a teammate just changed.
-*   **Duplicate-spawn detection:** a near-identical same-agent re-spawn draws a warn-only note before you pay for it — steer the running child or re-check the prior result.
-*   **Measured time-sense:** spawn acks carry per-agent baselines from your own history (``typical for `worker`: median 5m · p90 15m · $0.34``); a child running past its agent's p90 is flagged live.
-*   **Full control plane:** `cancel` walks interrupt → grace → kill through one delivery funnel (exactly one result), `restart` re-dispatches, steer/resume verbs reach running or finished children, and per-child budgets (wall-clock, turns, USD) are enforced with stops.
-*   **Failure recovery:** pane loss self-heals with one auto-restart, a window too full for a new pane makes room by closing the oldest subagent pane, the next session adopts orphans, and budget kills plus crash residue still deliver — a dead child's work arrives.
-*   **Token discipline:** work happens in isolated child contexts and only summaries return to the orchestrator; inspection is pull-based (zero parent tokens until asked), and a delegation gate keeps small tasks linear so parallelism is spent only where it pays.
-*   **Live dashboard:** per-child health and metric cards with deep links — [dashboard/](dashboard/).
-
-Verbs, scope locks, agent table, triage: [extensions/subagents/README.md](extensions/subagents/README.md).
+A built-in runtime for parallel children: each spawn declares its write scope, an overlapping spawn queues FIFO behind the owner, and disjoint work stays fully parallel — no more hand-planning around file collisions. Per-child budgets (wall-clock, turns, USD) are enforced with stops, only summaries return to the parent, and the dashboard tracks each child's health and cost live. Deep dives: [docs/subagents.md](docs/subagents.md) · [docs/subagent-orchestration.md](docs/subagent-orchestration.md) · [extensions/subagents/README.md](extensions/subagents/README.md)
 
 ## Skills & subagents
 
