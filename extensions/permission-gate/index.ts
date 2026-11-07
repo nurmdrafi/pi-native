@@ -396,6 +396,57 @@ export default function (pi: ExtensionAPI) {
       ? `${tool} '${abs.slice(0, 28)}' → protected (symlink-resolved) and`
       : undefined;
   };
+  /** WC (2026-11-07 audit, MED) — write-path confinement for the native
+   * write tools. piwrite/piedit resolve their targets lexically against the
+   * session cwd; a target landing outside it (realpath where resolvable, so
+   * an in-cwd symlink cannot launder the escape) confirms through the H2
+   * ladder (the destructiveConfirm rule — the same switch that arms the
+   * protected-prefix confirm, a safety floor that cannot ship below error),
+   * and a piwrite overwrite of an EXISTING file confirms too — silent
+   * overwrite is the finding's failure class and the WB binding that used
+   * to catch it is user policy that ships "off". Allowlist: the session
+   * cwd tree itself and the harness ledger tree ~/.pi/efforts (ledgers are
+   * written there by design). The confinement root is the handler ctx cwd —
+   * a context without one (stubbed harnesses) has nothing to confine
+   * against, so the rule skips; the tools' own resolution rung still
+   * rejects ../ escapes outright. Returns the H2 confirm subject when the
+   * write must confirm, else undefined. */
+  const realpathish = (abs: string): string => {
+    try {
+      return realpathSync(abs);
+    } catch {
+      try {
+        return join(realpathSync(dirname(abs)), basename(abs));
+      } catch {
+        return abs; // unresolvable — judge the path as written
+      }
+    }
+  };
+  const underRoot = (p: string, root: string): boolean =>
+    p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
+  const writeConfinementReason = (
+    tool: string,
+    abs: string,
+    cwd: string | undefined,
+    overwrite: boolean,
+  ): string | undefined => {
+    if (!cwd || !abs) return undefined;
+    let root: string;
+    try {
+      root = realpathSync(cwd);
+    } catch {
+      root = cwd;
+    }
+    const real = realpathish(abs);
+    if (!underRoot(real, root)) {
+      const efforts = realpathish(join(homedir(), ".pi", "efforts"));
+      if (!underRoot(real, efforts))
+        return `${tool} '${abs.slice(0, 28)}' → outside the session directory and`;
+    }
+    if (overwrite)
+      return `${tool} '${abs.slice(0, 28)}' → an existing file (overwrite) and`;
+    return undefined;
+  };
   /** H2 approval ladder, shared by destructive bash segments and the S4
    * fix 8 write/edit protected-path confirm: chat approval (promptApproves)
    * → remembered verbatim approval (2 min) → UI dialog with timeout (S-3) →
@@ -536,6 +587,17 @@ export default function (pi: ExtensionAPI) {
       if (prot) {
         const r = await confirmDestructive(`edit:${path}`, prot, ctx);
         if (r) return blockCall(r);
+      }
+      // WC: the native edit name gets the confinement confirm — edits always
+      // target existing files, so the anchor guard owns overwrite binding
+      if (event.toolName === "piedit") {
+        const wc = ruleEnabled("destructiveConfirm")
+          ? writeConfinementReason("piedit", path, ctx?.cwd, false)
+          : undefined;
+        if (wc) {
+          const r = await confirmDestructive(`piedit:${path}`, wc, ctx);
+          if (r) return blockCall(r);
+        }
       }
       // Anchor Guard off: skip validation and coverage registration entirely —
       // the built-in editor's own validation is then the only check.
@@ -757,7 +819,12 @@ export default function (pi: ExtensionAPI) {
       });
     }
 
-    if (isToolCallEventType("write", event)) {
+    // WC (2026-11-07 audit, MED): piwrite joins the write-kind lane — same
+    // malformed check, protected-prefix confirm, WB binding, and coverage
+    // bookkeeping as the built-in name (the piread/piedit doctrine), plus the
+    // WC confinement confirm below. isToolCallEventType matches the exact
+    // tool name, so the native name rides alongside it.
+    if (isToolCallEventType("write", event) || event.toolName === "piwrite") {
       // S4 fix 3: malformed write input — explicit block, never an analyzer throw
       if (typeof event.input.path !== "string" || !event.input.path.trim())
         return blockCall(
@@ -784,6 +851,17 @@ export default function (pi: ExtensionAPI) {
       if (prot) {
         const r = await confirmDestructive(`write:${path}`, prot, ctx);
         if (r) return blockCall(r);
+      }
+      // WC: native-name confinement — outside-cwd targets and existing-file
+      // overwrites confirm through the same ladder (see the helper above)
+      if (event.toolName === "piwrite") {
+        const wc = ruleEnabled("destructiveConfirm")
+          ? writeConfinementReason("piwrite", path, ctx?.cwd, existsSync(path))
+          : undefined;
+        if (wc) {
+          const r = await confirmDestructive(`piwrite:${path}`, wc, ctx);
+          if (r) return blockCall(r);
+        }
       }
       // S5 M1+M3+M2 (2026-10-16): write binding (spec §5.1–§5.3), keyed as WB
       // (2026-11-04: every rule configurable — this fired unconditionally
@@ -1678,13 +1756,14 @@ export default function (pi: ExtensionAPI) {
             (call.name === "piread" ||
               call.name === "read" ||
               call.name === "write" ||
+              call.name === "piwrite" ||
               call.name === "edit" ||
               call.name === "piedit") &&
             typeof call.arguments?.path === "string"
           ) {
             const path = normPath(call.arguments.path);
             if (!path) continue;
-            if (call.name === "write") {
+            if (call.name === "write" || call.name === "piwrite") {
               pending.set(call.id, {
                 path,
                 win: { start: 1, end: Infinity },

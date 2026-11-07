@@ -26,6 +26,23 @@ const DANGEROUS_PATTERNS = [
 	/\binit\s+0\b/,
 	/\bkill\s+-9\s+1\b/,
 	/\bkillall\b/,
+	// 2026-11-07 audit (LOW) — blocklist depth: three families the
+	// permission gate already catches (commit 1f4e67c); defense-in-depth,
+	// since the worker lane does not run the gate.
+	// Heredoc-to-sh: a shell interpreter fed by a heredoc runs its body as
+	// commands (`bash <<EOF ... EOF`) — the body must not count as data.
+	// `\b...sh\b` keeps ssh/fish out; the char class before `<<` stops a
+	// chained `cat <<EOF | sh` shape from matching cat's redirect.
+	/\b(?:ba|z|da|k)?sh\b[^<>|;&\n]*<<-?\s*["']?\w/,
+	// -e interpreter payloads: inline code the blocklist cannot scan.
+	// `sed -e`/`grep -e` never match — only interpreter words do; python's
+	// inline flag is -c (-m module runs are legitimate and stay allowed).
+	/\b(?:perl|ruby|php|node(?:js)?|deno|bun)\b[^|;&]*\s(?:--eval|-e)\b/,
+	/\bpython3?\b[^|;&]*\s-c\b/,
+	// Redirects into shell rc files: persistence on next shell start
+	// (`> ~/.bashrc`, `>> $HOME/.zshrc`, absolute home spellings). The
+	// terminator lookahead keeps unrelated `.profile.md`-style names out.
+	/>{1,2}\s*(?:[\w.$~/-]+\/)?\.(?:bashrc|zshrc|zprofile|zshenv|bash_profile|bash_aliases|bash_login|profile|tmux\.conf|gitconfig|inputrc)\b(?=[\s&;|]|$)/,
 ];
 
 function isDangerous(command: string): string | null {

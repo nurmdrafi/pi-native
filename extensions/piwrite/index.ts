@@ -16,7 +16,7 @@
  */
 import { spawn } from "node:child_process";
 
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -88,6 +88,24 @@ function resolveToolPath(input: string, cwd: string): string {
   };
   const n = norm(input);
   return isAbsolute(n) ? resolve(n) : resolve(norm(cwd), n);
+}
+
+/**
+ * WC resolution rung (2026-11-07 audit, MED): a RELATIVE path whose ..
+ * traversal escapes the session cwd is a lexical jailbreak — a tool error,
+ * never a confirm. Absolute targets (including ~/ and file:// forms, which
+ * norm expanded above) are the permission-gate's lane: outside-cwd ones
+ * confirm through the gate's WC rule, so this rung must not reject them.
+ * In-cwd .. spellings that stay under cwd resolve inside and pass.
+ */
+function assertInsideCwd(input: string, resolved: string, cwd: string): void {
+  const raw = input.startsWith("@") ? input.slice(1) : input;
+  if (isAbsolute(raw) || raw.startsWith("~") || /^file:\/\//.test(raw)) return;
+  const rel = relative(cwd, resolved);
+  if (rel === ".." || rel.startsWith("../"))
+    throw new Error(
+      `piwrite: path '${input}' escapes the session directory via .. — relative writes must stay under the session cwd (${cwd}); use an absolute path for outside targets (those confirm).`,
+    );
 }
 
 /** Write-tool params (schema verbatim from the built-in write tool). */
@@ -213,6 +231,8 @@ export default function piwriteExtension(pi: ExtensionAPI): void {
     // Resolve with the built-in's exact semantics (see resolveToolPath) so
     // the native rung writes the same file the built-in would.
     const resolvedPath = resolveToolPath(path, spawnCwd);
+    // WC resolution rung: relative ../ escapes are errors before any spawn
+    assertInsideCwd(path, resolvedPath, spawnCwd);
 
     let envelope: PiwriteEnvelope;
     try {

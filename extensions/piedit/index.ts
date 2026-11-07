@@ -33,7 +33,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync } from "node:fs";
-import { isAbsolute, join, dirname, resolve } from "node:path";
+import { isAbsolute, join, dirname, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -100,6 +100,23 @@ function resolveToolPath(input: string, cwd: string): string {
   };
   const n = norm(input);
   return isAbsolute(n) ? resolve(n) : resolve(norm(cwd), n);
+}
+
+/**
+ * WC resolution rung (2026-11-07 audit, MED): a RELATIVE path whose ..
+ * traversal escapes the session cwd is a lexical jailbreak — a tool error,
+ * never a confirm. Absolute targets (including ~/ and file:// forms, which
+ * norm expanded above) are the permission-gate's lane: outside-cwd ones
+ * confirm through the gate's WC rule, so this rung must not reject them.
+ */
+function assertInsideCwd(input: string, resolved: string, cwd: string): void {
+  const raw = input.startsWith("@") ? input.slice(1) : input;
+  if (isAbsolute(raw) || raw.startsWith("~") || /^file:\/\//.test(raw)) return;
+  const rel = relative(cwd, resolved);
+  if (rel === ".." || rel.startsWith("../"))
+    throw new Error(
+      `piedit: path '${input}' escapes the session directory via .. — relative edits must stay under the session cwd (${cwd}); use an absolute path for outside targets (those confirm).`,
+    );
 }
 
 /** Built-in `validateEditInput` — same message and order (it runs before path
@@ -458,6 +475,8 @@ export default function pieditExtension(pi: ExtensionAPI): void {
     const { path, edits } = validateEditInput(input);
     const spawnCwd = (ctx as { cwd?: string } | undefined)?.cwd || process.cwd();
     const absPath = resolveToolPath(path, spawnCwd);
+    // WC resolution rung: relative ../ escapes are errors before any dispatch
+    assertInsideCwd(path, absPath, spawnCwd);
 
     // Native dispatch runs under the exported queue so same-path writes
     // serialize exactly as the built-in does. A terminal failure throws
