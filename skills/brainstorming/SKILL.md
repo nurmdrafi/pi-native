@@ -4,6 +4,8 @@ description: "Use ONLY when intent is genuinely unclear — exploring a new feat
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/brainstorming`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Brainstorming Ideas Into Designs
 
 Turn ideas into fully formed designs + specs through natural collaborative dialogue.

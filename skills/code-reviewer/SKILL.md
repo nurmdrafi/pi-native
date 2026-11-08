@@ -4,6 +4,8 @@ description: "Runs the ollama-code-review push workflow's review locally, before
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/code-reviewer`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Code reviewer — be the CI reviewer before the push
 
 The ollama-code-review workflow reviews every push with an LLM and files one GitHub issue listing findings at/above its severity threshold (default `medium`). Goal: run that same review on the same diff first, fix everything it would flag, push only when clean.

@@ -61,13 +61,16 @@ const TIME_BIN = "/usr/bin/time";
 export const MODEL_BUDGET_BYTES = 2048;
 export const ENVELOPE_CAP_BYTES = 8192;
 
-/** Peak-RSS caps per size class (bytes), pinned from the first asserted run.
- *  These record current accumulator behavior (RSS ∝ output until spill),
- *  not a goal; regressions should raise them only with a measured report. */
+/** Peak-RSS caps per size class (bytes), pinned from a measured run.
+ *  Windowed (fold-free, dup-free, ANSI-free) streams are O(budget) in RSS
+ *  regardless of size — the stream is scanned in 64 KiB windows off the spill
+ *  file and never materialized. The single-giant-line band stays linear by
+ *  design (the windowed passes decline it; the exact materialized path holds
+ *  one copy), so caps are ~2x the measured per-class maximum. */
 export const RSS_CAP_BYTES = {
   1: 12 * 1024 * 1024,
-  10: 64 * 1024 * 1024,
-  100: 2 * 1024 * 1024 * 1024,
+  10: 28 * 1024 * 1024,
+  100: 224 * 1024 * 1024,
 };
 
 /** ru_maxrss unit normalization: Linux reports KiB, macOS reports bytes. */

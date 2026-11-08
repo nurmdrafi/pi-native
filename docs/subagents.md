@@ -1,6 +1,6 @@
 # Subagent conduct
 
-Conduct only — this file reaches child sessions. Orchestrator doctrine: `docs/subagent-orchestration.md`.
+Conduct only — this file reaches child sessions. Orchestrator doctrine: `~/.pi/agent/docs/subagent-orchestration.md`.
 
 - Task prompt = contract: scope, facts (paths, line numbers, shapes), verification command, file-set, report format. Trust it; don't re-derive given facts.
 - Do the task, nothing else. Out-of-scope edits forbidden; the declared file-set is the whole write surface.

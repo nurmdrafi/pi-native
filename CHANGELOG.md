@@ -7,9 +7,40 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
 
-## [1.73.0] - 12-11-2026
+## [1.75.0] - 09-11-2026
+
+### Changed
+
+- **pibash: O(budget) peak RSS on large outputs.** Generic outputs above 16 MiB stream through the
+  spill file in 64 KiB windows (budget-bounded head/tail rings, allocation-free walker, fold
+  rebuild); at or below 16 MiB one bounded materialization replaces streaming. Measured: 100 MB
+  `yes` peak 924.8 MB → 6.0 MB, fold-class RSS slope 18 B/line → flat, daemon 903.0 → 4.9 MiB
+  peak (3.1 MiB retained after 5 s). Wire bytes byte-identical to the frozen oracle
+  (120-case bin-diff; only the volatile spill-path and wall-time fields differ).
+
+- **Latency/throughput recovery pass.** Allocation-free spill walker plus the ≤16 MiB
+  materialize hybrid put every dispatch class below the oracle (seq50000 10.31 vs 10.90 ms
+  p50, stderr-mix 2.70 vs 5.35 ms) and cut 100 MB `yes` wall 42% below the pre-rework figure.
+  Documented trade above 16 MiB: windowed streams carry ~60-75 ns/line of streaming
+  bookkeeping (+19-27% wall at 100 MB), declined giant single lines pay a scan+materialize
+  double read; 32 MiB pipe 128.6 vs 139.3 MB/s (−11%). A follow-up pass confirmed the dispatch
+  arm sits at its structural floor (child spawn dominates); one micro-win kept — the Memory
+  arm of `compress_output_stream` borrows via `from_utf8_lossy` instead of cloning.
+
+- **runner fixes and records.** Pump-drain on shutdown (no lost tail on early exit), Utf8Stream
+  giant-line handling, per-class RSS caps pinned in the large-output harness. New benchmark
+  records (microbench, throughput, large-output, daemon RSS, RSS rework), README chart and
+  memory span regenerated (24x-171x), docs synced.
+
+## [1.74.0] - 08-11-2026
+
+### Added
+
+
+- **glm-5.3 auto-compact threshold override** (`settings.json`): `compaction.modelOverrides["zai/glm-5.3"].reserveTokens = 845000`. The model's real window is 1M, so the default trigger sat near 984K — unreachable in practice (zero compactions across 30 days of session logs); the override fires compaction past 155K, matching the 150K context budget.
+
+## [1.73.0] - 07-11-2026
 
 ### Added
 
@@ -252,7 +283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commitlint filename, marks probe tests skippable for bug fixes, and directs config-file reads
   to locate the basename instead of guessing its extension.
 
-## [1.65.0] - 01-11-2026
+## [1.65.0] - 28-10-2026
 
 ### Added
 
@@ -282,7 +313,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Post-block discipline** in `SYSTEM.md`: a block concerns one span, so only that region
   is re-sent.
 
-## [1.64.0] - 29-10-2026
+## [1.64.0] - 28-10-2026
 
 ### Added
 
@@ -533,14 +564,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Native binary installs no longer fail over a running daemon.** `install_native` stages the copy and renames into place, avoiding the `Text file busy` failure hit whenever a pull ran while a session served from `bin/<tool>`.
 
-## [1.54.0] - 26-10-2026
+## [1.54.0] - 25-10-2026
 
 ### Changed
 
 - **Perf-audit round: every custom tool re-measured against its built-in counterpart; no droppable aspect found — no production change.** All three micro-benches (`tests/{piread,pibash,piedit}-bench.mjs`) re-run twice on the shipping binaries. `piread` and `piedit` daemon arms lead the in-process oracle on every corpus in both runs (piedit large-1mib ~7x: 4.2 vs 30 ms). `pibash` is at-or-below oracle on 8 of 9 classes within noise; the one above-oracle arm, seq50000 (+0.66/+0.85 ms p50, +5–7%, stable across both runs), is the known §1 residual: a parity-pinned envelope (`content[0].text` + `structuredContent.output`) already minimized by the single-materialization fix (+3.57 → +0.7 ms), costing zero model tokens, with the in-process oracle arm skipping the serialization a real session pays on both sides. Dropping it would break the byte-parity contract the bash parity suite and permission-gate H1 depend on — verdict keep. First post-fix pibash record written (`benchmark/runs/pibash-microbench-2026-10-25.md`); audit detail in `docs/backlog.md` §12.
 - **Model-visible cost-control gap analysis: contract already held on every surface — no new budget.** `pibash` (Tier-1 `compress.rs` 40/2 KB + H1) and `piread` (windowing + on-by-default compaction + H1b 300/8 KB) are bounded twice over. `piedit`'s unbounded `details.diff`/`patch` never reach the model — the tool-result wire payload is content blocks only (adapter serializes `content`; `details`/`structuredContent` documented not-sent-to-model), and its `content` is the one-line success text. `subagents` steered-turn payloads are requested semantic content with no lossless continuation mechanism to cut against; status/activity fields already carry MAX_* caps. `pidx` is pointer-by-default with a hard cap on the `stdout:true` opt-in. Findings recorded in `docs/backlog.md` §12; no code changed.
 
-## [1.53.0] - 26-10-2026
+## [1.53.0] - 25-10-2026
 
 ### Changed
 
@@ -565,7 +596,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-adoption relies on. Post-revert microbench: flat vs baseline
   (lines2500 0.186 ms).
 
-## [1.52.0] - 26-10-2026
+## [1.52.0] - 25-10-2026
 
 ### Fixed
 
@@ -699,7 +730,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tests/piread-parity.test.mjs` pins `PI_READ_COMPRESS=0`.** The suite's entire contract is byte-identity with the built-in `read`, which is exactly what compaction changes; it now states that explicitly instead of depending on the ambient default.
 - **`docs/portability.md`** documents the no-hardcoded-`/bin/sh` rule and the daemon process-group requirement.
 
-## [1.45.0] - 17-10-2026
+## [1.45.0] - 16-10-2026
 
 ### Added
 
@@ -743,7 +774,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`piedit` native diff/patch render — 2.4–9.2× faster than the built-in `edit`** (user-requested speed mandate; supersedes spec D2's TS-render pin — the byte-parity risk D2 guarded against is now covered by a stronger oracle instead of avoidance). New `custom-tools/piedit/src/diff.rs` is a byte-identical Rust port of the bundled jsdiff v8 line tokenizer + greedy Myers walk (exact tie-break, `addToPath` coalescing, diagonal pruning) plus pi's `generateDiffString` and `structuredPatch`/`formatPatch` (`FILE_HEADERS_ONLY`), extracted from the shipped `dist/bundle` source. Protocol: requests carry `renderDiff: true`; success responses return `{diff, patch, firstChangedLine}` — `{baseContent, newContent}` never cross the IPC boundary (the old envelope remains as the mixed-version rung and still renders via the exported TS helpers). One shared Myers pass feeds both renders; equal-part rendering counts lines without materializing 60k-slice vectors (`RawLinesView`). Serve loop: single `serde_json` parse per request (was two) into a reused `read_until` line buffer (no per-line `String`). Also fixes a pre-existing occurrence-count parity bug the new adversarial corpus exposed: a whitespace-only `oldText` (fuzzy-normalizes to empty) counted `chars + 1` where JS counts UTF-16 units − 1 (8 vs 6 occurrences on the blank-lines case). Parity hardened: `tests/piedit-parity.test.mjs` 51/51 (+11 diff-adversarial cases: multi-hunk, 2×context gap boundary, pure insert/delete, no-eof-newline both sides, dropped trailing newline, repeated-block tie-break, blank/whitespace lines, 2k-line multiline block, same-line multi-edit) and new `tests/piedit-diff-fuzz.mjs` (deterministic 2k–3k-case differential fuzz vs the TS helpers, 0 failures); crate 40/40. Measured on this host (`benchmark/runs/piedit-microbench-2026-10-16.md`): disk corpus small 2.1×/mid 2.4–3.0×/multiline 3.2×/large 2.5× (large floored by an ~20 ms ext4 write BOTH arms pay); tmpfs corpus mid 3.8×/multiline 3.4×/large-1MiB **9.2×** (88.2 → 9.6 ms).
 
-## [1.41.0] - 16-10-2026
+## [1.41.0] - 15-10-2026
 
 ### Changed
 
@@ -759,7 +790,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`piedit` fallback no longer deadlocks** — the extension's own `withFileMutationQueue` released the path before the fallback ran; calling the built-in executor (which takes the same queue) inside the native wrap re-entered the same-path queue and hung. Fallback now runs after the native wrap returns.
 
-## [1.40.0] - 16-10-2026
+## [1.40.0] - 15-10-2026
 
 ### Added
 
@@ -816,7 +847,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Codemode nested-call exemptions in permission-gate** — rules (big-read, re-read coverage, re-run, re-block, search scope) apply uniformly again after codemode removal.
 
-## [1.37.3] - 14-10-2026
+## [1.37.3] - 13-10-2026
 
 ### Changed
 
@@ -905,7 +936,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`skills/markdown-optimizer` renamed `skills/llm-instruction-formatter`** — name now self-scopes to LLM rule/instruction markdown only; invocation `/skill:llm-instruction-formatter`; README roster row updated, roster table columns realigned. Behavior unchanged.
 - **`skills/` + `prompts/` instruction markdown optimized (first llm-instruction-formatter run)** — 59 files audited (19 SKILL.md bodies, 37 skill references, 3 prompt templates), 45 changed, 14 already compliant: label/aesthetic bolds stripped (constraint/entity bolds kept), bold pseudo-headers converted to real headings at correct levels, non-sequential numbered lists converted to bullets, compound and comma-blob bullets split. Wording verbatim — verified per-file by word-diff and globally by alpha-stream equality; frontmatter, code fences, tables, URLs untouched.
 
-## [1.33.0] - 12-10-2026
+## [1.33.0] - 11-10-2026
 
 ### Removed
 
@@ -920,7 +951,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pre-push-review scope narrowed to diff review** — changelog/version-hygiene context removed, matching the actual review prompt; severity ladder unchanged.
 - **Tool-selection cleanup across skills** — agent-facing commands and instructions use `rg` instead of `grep`; CI-embedded snippets keep portable `grep`.
 
-## [1.31.0] - 10-09-2026
+## [1.31.0] - 08-10-2026
 
 ### Changed
 
@@ -933,7 +964,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Skill count 23 → 20**: `wayfinder` (map-of-decision-tickets planning), `prototype` (throwaway UI/logic artifact), `research` (delegated reading legwork — content now lives in the researcher agent). No other references existed outside wayfinder itself.
 
-## [1.30.0] - 10-09-2026
+## [1.30.0] - 08-10-2026
 
 ### Changed
 
@@ -1053,7 +1084,7 @@ Measured: `npm run typecheck` exit 0; unit 156/156 (clean env) and 155/155 under
 
 Measured: unit 155/155 PASS (148 upstream + 7 gating/command tests); `system-prompt-mode` 21/21; integration with real pi + zai/glm-5.3 in a 220-col detached tmux — lifecycle 7/7 (spawn+steer-back, stalled-status, parallel, fork-linked session, caller_ping, project-agent discovery, systemPrompt) and tmux-surface 7/7; tree diff vs the patched checkout shows only the intended deltas (extra-extensions patch fold, gating block, status.ts path re-anchor); fresh `pi -p` smoke loads the extension clean with no package conflicts.
 
-## [1.21.0] - 10-07-2026
+## [1.21.0] - 06-10-2026
 
 ### Added
 
@@ -1197,7 +1228,7 @@ Measured: fixtures 43 → **51/51 PASS** (+4 unquoted-backslash, +4 hydration: p
 
 - permission-gate header comment: stray 2026-10-08 → 2026-10-05 (comment only, no functional change).
 
-## [1.16.5] - 10-08-2026
+## [1.16.5] - 05-10-2026
 
 ### Changed
 
