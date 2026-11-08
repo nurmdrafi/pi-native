@@ -10,6 +10,8 @@ description: >
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/harness-engineer`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Harness Engineer
 
 Make harness leaner, more cache-stable, fully portable (macOS+Linux). Evidence over opinion. Prefer deletion + lazy-loading.

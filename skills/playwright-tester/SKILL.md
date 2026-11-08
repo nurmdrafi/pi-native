@@ -4,6 +4,8 @@ description: "Playwright test automation — e2e specs, stress/update-flow runs,
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/playwright-tester`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Playwright Tester (CDP attach, session reuse)
 
 ## Invocation rules

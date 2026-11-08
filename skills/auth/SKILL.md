@@ -4,6 +4,8 @@ description: "Implements or migrates to NextAuth v4 credentials auth for Next.js
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/auth`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # auth
 
 NextAuth v4 (next-auth@4.x) credentials architecture for Next.js App Router app, real IdP = external REST backend issuing bearer tokens. Followed end-to-end kills classic bug class: login resolves, loading stops, redirect never fires (or only after manual refresh).

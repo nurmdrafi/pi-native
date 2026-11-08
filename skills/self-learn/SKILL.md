@@ -16,6 +16,8 @@ description: >
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/self-learn`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Self-learn
 
 Reasoning layer over `pidx` session extracts. Detectors are deterministic

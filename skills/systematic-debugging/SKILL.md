@@ -4,6 +4,8 @@ description: Use BEFORE proposing any fix when something is broken — runtime e
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/systematic-debugging`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Systematic Debugging
 
 ## Overview
