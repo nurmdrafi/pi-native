@@ -33,7 +33,7 @@
 - Machine-retrieval files (logs, temp data): NDJSON, one JSON object per line; skip malformed lines on read.
 - No `|| true` on cleanup: let the exit code surface, or check it.
 - Keep each mutation in its own single-purpose call — chained substitution plus append trips the destructive gate; for small files a full write-tool rewrite preserving existing lines is the append fallback.
-- Wrap long foreground jobs in `timeout(1)`; make one-shot CLI scripts exit explicitly (`process.exit(0)`), not linger on open sockets.
+- Wrap long foreground jobs in a timeout: `timeout(1)` where present, else the pibash `timeout` parameter (macOS hosts lack the binary); make one-shot CLI scripts exit explicitly (`process.exit(0)`), not linger on open sockets.
 - Toolchain pins: `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before node/npm/npx; missing → create one pinning the running `node --version` first. Same pattern for `.python-version`, `rust-toolchain.toml`, …; no pin convention → installed version.
 
 ## Blocks & recovery
