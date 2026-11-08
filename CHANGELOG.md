@@ -8,6 +8,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.75.0] - 09-11-2026
+
+### Changed
+
+- **pibash: O(budget) peak RSS on large outputs.** Generic outputs above 16 MiB stream through the
+  spill file in 64 KiB windows (budget-bounded head/tail rings, allocation-free walker, fold
+  rebuild); at or below 16 MiB one bounded materialization replaces streaming. Measured: 100 MB
+  `yes` peak 924.8 MB → 6.0 MB, fold-class RSS slope 18 B/line → flat, daemon 903.0 → 4.9 MiB
+  peak (3.1 MiB retained after 5 s). Wire bytes byte-identical to the frozen oracle
+  (120-case bin-diff; only the volatile spill-path and wall-time fields differ).
+
+- **Latency/throughput recovery pass.** Allocation-free spill walker plus the ≤16 MiB
+  materialize hybrid put every dispatch class below the oracle (seq50000 10.31 vs 10.90 ms
+  p50, stderr-mix 2.70 vs 5.35 ms) and cut 100 MB `yes` wall 42% below the pre-rework figure.
+  Documented trade above 16 MiB: windowed streams carry ~60-75 ns/line of streaming
+  bookkeeping (+19-27% wall at 100 MB), declined giant single lines pay a scan+materialize
+  double read; 32 MiB pipe 128.6 vs 139.3 MB/s (−11%). A follow-up pass confirmed the dispatch
+  arm sits at its structural floor (child spawn dominates); one micro-win kept — the Memory
+  arm of `compress_output_stream` borrows via `from_utf8_lossy` instead of cloning.
+
+- **runner fixes and records.** Pump-drain on shutdown (no lost tail on early exit), Utf8Stream
+  giant-line handling, per-class RSS caps pinned in the large-output harness. New benchmark
+  records (microbench, throughput, large-output, daemon RSS, RSS rework), README chart and
+  memory span regenerated (24x-171x), docs synced.
+
 ## [1.74.0] - 08-11-2026
 
 ### Added

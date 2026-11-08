@@ -8,16 +8,21 @@
 //! an omitted-size count, and never drops actionable lines (errors, warnings,
 //! failures, panics, assertions, stack frames, file/line refs, final summary).
 //!
-//! This module is pure: it never touches the filesystem. The spill file — the
-//! lossless copy of the full output — is owned by [`crate::accumulator`] and is
-//! only read from, never written or extended here.
+//! This module is deterministic and side-effect free: it never writes. The
+//! spill file — the lossless copy of the full output — is owned by
+//! [`crate::accumulator`]; the streaming twins below read it in bounded
+//! windows, never materializing the stream.
 
+use crate::accumulator::{read_spill_string, utf8_chunks_valid, FullStream};
 use crate::truncate::{
     js_byte_length, split_lines, truncate_string_to_bytes_from_end,
     truncate_string_to_bytes_from_start,
 };
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
 /// The compression target: the model-visible budget enforced by the
 /// permission-gate H1 cap (40 lines / 2 KB, `extensions/permission-gate/`
@@ -399,6 +404,244 @@ fn head_tail_windowed(
         strategy: Strategy::HeadTail,
         omitted_chars,
         partial: head_slice.partial || tail_slice.partial,
+    })
+}
+
+/// Streaming state for [`head_tail_windowed_folds`]: budget-bounded head/tail
+/// rings of REBUILT lines (fold markers are synthesized and owned, plain
+/// lines borrow the input) plus the running totals of the virtual rebuild.
+struct FoldWindow<'a> {
+    /// Rebuilt line count, before the trailing-phantom adjustment.
+    total: usize,
+    /// Sum of char counts over every rebuilt line.
+    chars: usize,
+    /// Sum of byte lengths over every rebuilt line.
+    nbytes: usize,
+    /// Fold markers emitted (0 => the dedup pass is a no-op).
+    folds: usize,
+    /// First rebuilt lines — `take_head`'s reach plus one entry.
+    head: Vec<Cow<'a, str>>,
+    /// Ring bytes under `take_head` accounting (first line: no separator).
+    head_bytes: usize,
+    /// False once the byte cap makes further head entries unreachable.
+    head_open: bool,
+    head_cap: usize,
+    head_budget: usize,
+    /// Last rebuilt lines — `take_tail`'s reach plus one entry.
+    tail: VecDeque<Cow<'a, str>>,
+    /// Ring bytes under `take_tail` accounting (every line: +1).
+    tail_bytes: usize,
+    tail_cap: usize,
+    tail_budget: usize,
+    last_empty: bool,
+}
+
+impl<'a> FoldWindow<'a> {
+    /// Record one rebuilt line: totals first, then ring maintenance. Both
+    /// rings stay O(budget): the head stops growing once its cumulative
+    /// `take_head` cost busts the head byte budget (`take_head` can never read
+    /// past that line), and the tail drops front entries beyond `take_tail`'s
+    /// line or byte reach (a dropped entry is exactly one `take_tail` would
+    /// break on, so its content is never needed).
+    fn emit(&mut self, line: Cow<'a, str>) {
+        self.last_empty = line.is_empty();
+        self.total += 1;
+        self.chars += line.chars().count();
+        self.nbytes += line.len();
+        if self.head_open && self.head.len() < self.head_cap {
+            self.head_bytes += line.len() + usize::from(!self.head.is_empty());
+            self.head.push(line.clone());
+            if self.head_bytes > self.head_budget {
+                self.head_open = false;
+            }
+        }
+        self.tail_bytes += line.len() + 1;
+        self.tail.push_back(line);
+        while self.tail.len() > self.tail_cap
+            || (self.tail_bytes > self.tail_budget && self.tail.len() > 1)
+        {
+            match self.tail.pop_front() {
+                Some(front) => self.tail_bytes -= front.len() + 1,
+                None => break,
+            }
+        }
+    }
+
+    /// Fold a completed run exactly as `dedup_lines` pass 2 would: one
+    /// synthesized marker line for foldable runs, the members verbatim
+    /// otherwise (actionable and blank lines never fold).
+    fn flush(&mut self, text: &'a str, first: (usize, usize), run: usize) {
+        let line = &text[first.0..first.1];
+        self.flush_line(line, run);
+    }
+
+    /// `flush` over a line the walker carried — same fold rule, owned copies
+    /// instead of borrows (the streaming twin feeds `FoldWindow<'static>`).
+    fn flush_line(&mut self, line: &str, run: usize) {
+        if run > 1 && !is_actionable(line) && !line.trim().is_empty() {
+            self.folds += 1;
+            self.emit(Cow::Owned(format!(
+                "{line} [... repeated {run} times ...]"
+            )));
+        } else {
+            for _ in 0..run {
+                self.emit(Cow::Owned(line.to_string()));
+            }
+        }
+    }
+}
+
+/// Generic-kind fold fast path: the counterpart of [`head_tail_windowed`] for
+/// the over-budget bodies that scan declines on — ANSI-free, marker-free
+/// streams WITH adjacent duplicate lines (fold candidates). The materialized
+/// path would `split_lines` the whole stream (16 B per line) and rebuild it
+/// into a stream-sized `String`; this pass runs the dedup fold virtually in
+/// one fused scan: runs are detected inline, rebuilt lines flow into
+/// budget-bounded head/tail rings, and running counters stand in for the
+/// rebuilt string. `None` defers to the exact materialized path on every band
+/// the rings cannot prove — anomaly bytes, no fold, a rebuild that fits, and
+/// the kept-everything/overlap band — so the output equals
+/// `dedup_lines` + `head_tail` composed, never a reimplementation parity.
+#[must_use]
+fn head_tail_windowed_folds(
+    text: &str,
+    max_lines: usize,
+    max_bytes: usize,
+    success: bool,
+) -> Option<Compressed<'_>> {
+    // Budget arithmetic mirrored from `head_tail_lines` (requirement 2).
+    let (head_share, tail_share): (usize, usize) = if success { (2, 1) } else { (1, 2) };
+    let content_lines = max_lines.saturating_sub(3);
+    let head_lines_budget = content_lines * head_share / (head_share + tail_share);
+    let tail_lines_budget = content_lines - head_lines_budget;
+    let head_bytes_budget = max_bytes * head_share / (head_share + tail_share);
+    let tail_bytes_budget = max_bytes - head_bytes_budget;
+
+    let bytes = text.as_bytes();
+    let mut win = FoldWindow {
+        total: 0,
+        chars: 0,
+        nbytes: 0,
+        folds: 0,
+        head: Vec::with_capacity(head_lines_budget + 1),
+        head_bytes: 0,
+        head_open: true,
+        head_cap: head_lines_budget + 1,
+        head_budget: head_bytes_budget,
+        tail: VecDeque::with_capacity(tail_lines_budget + 1),
+        tail_bytes: 0,
+        tail_cap: tail_lines_budget + 1,
+        tail_budget: tail_bytes_budget,
+        last_empty: false,
+    };
+
+    // Fused scan: run detection shares the anomaly walk, so 0x1b / b'[' bail
+    // before any further state grows.
+    let mut run_first = (0usize, 0usize);
+    let mut run_len = 0usize;
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x1b || b == b'[' {
+            return None; // ANSI escape or omission-tag prefix byte.
+        }
+        if b == b'\n' {
+            // Oversized line: every band this pass can prove needs the whole
+            // line in hand (fold markers embed it; the verbatim-rebuild band
+            // requires the total under `max_bytes`), and flushing it into the
+            // rings would copy it whole. Defer to the materialized path.
+            if i - start > max_bytes {
+                return None;
+            }
+            if run_len > 0 && bytes[run_first.0..run_first.1] == bytes[start..i] {
+                run_len += 1;
+            } else {
+                if run_len > 0 {
+                    win.flush(text, run_first, run_len);
+                }
+                run_first = (start, i);
+                run_len = 1;
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < bytes.len() {
+        // Final line without a trailing newline; same run rule, same
+        // oversized-line defer.
+        if bytes.len() - start > max_bytes {
+            return None;
+        }
+        if run_len > 0 && bytes[run_first.0..run_first.1] == bytes[start..bytes.len()] {
+            run_len += 1;
+        } else {
+            if run_len > 0 {
+                win.flush(text, run_first, run_len);
+            }
+            run_first = (start, bytes.len());
+            run_len = 1;
+        }
+    }
+    if run_len > 0 {
+        win.flush(text, run_first, run_len);
+    }
+
+    if win.folds == 0 {
+        return None; // Dedup is a no-op here; the exact path below owns it.
+    }
+    // The rebuild joins with '\n' and never writes a trailing one, so a
+    // trailing empty source line leaves the rebuilt string ending in '\n' —
+    // `split_lines` pops that phantom. Mirror it: the line totals and the
+    // tail ring drop the last rebuilt line. (The rebuilt STRING keeps its
+    // trailing '\n', so the char/byte totals below do not.)
+    let mut total = win.total;
+    if win.last_empty {
+        if total <= 1 {
+            return None; // Degenerate rebuild; the exact path owns it.
+        }
+        total -= 1;
+        if let Some(dropped) = win.tail.pop_back() {
+            win.tail_bytes -= dropped.len() + 1;
+        }
+    }
+    // Rebuild fits the budget: cleaning is not omission, so the ORIGINAL body
+    // comes back verbatim with Strategy::None (pinned by the fold tests).
+    if total <= max_lines && win.nbytes + win.total - 1 <= max_bytes {
+        return Some(Compressed::verbatim(text));
+    }
+    if total <= head_lines_budget + tail_lines_budget {
+        return None; // kept-everything / overlap bands stay materialized.
+    }
+    let head_lines: Vec<&str> = win.head.iter().map(|c| c.as_ref()).collect();
+    let tail_lines: Vec<&str> = win.tail.iter().map(|c| c.as_ref()).collect();
+    let head = take_head(&head_lines, head_lines_budget, head_bytes_budget);
+    // `from = tail_lines.len()`: the ring holds the true last lines (total
+    // exceeds both budgets), with identical per-line byte math.
+    let tail = take_tail(
+        &tail_lines,
+        tail_lines.len(),
+        tail_lines_budget,
+        tail_bytes_budget,
+    );
+    // Overlap is unreachable — same proof as `head_tail_windowed`: real
+    // overlap needs total < head_kept + tail_kept <= head+tail budgets, but
+    // this band only runs with total > head+tail budgets. Skipping
+    // `trim_overlap` (and the kept-everything branch) is therefore exact.
+    let omitted_lines = total - head.kept - tail.kept;
+    // Marker math over the REBUILT totals: every rebuilt line's chars plus
+    // the total-1 '\n' separators the join would write.
+    let rebuilt_chars = win.chars + win.total - 1;
+    let omitted_chars = rebuilt_chars
+        .saturating_sub(head.text.chars().count())
+        .saturating_sub(tail.text.chars().count());
+    let marker = omission_marker(omitted_chars, omitted_lines);
+    let content = format!("{}\n\n{marker}\n\n{}", head.text, tail.text);
+    Some(Compressed {
+        content: Cow::Owned(content),
+        strategy: Strategy::HeadTail,
+        omitted_chars,
+        partial: head.partial || tail.partial,
     })
 }
 
@@ -861,8 +1104,10 @@ fn dedup_lines<'a>(s: &'a str, lines: &[&'a str]) -> Cow<'a, str> {
     }
     // Pass 2: emit through one buffer. The previous shape pushed a
     // `String::to_string` per kept line before joining — one malloc per line,
-    // which was the dominant cost on seq-class output.
-    let mut out = String::with_capacity(s.len());
+    // which was the dominant cost on seq-class output. Capacity is bounded to
+    // the rebuild's realistic size (a marker per fold plus the kept lines):
+    // dedup shrinks, so grow on demand instead of reserving stream-sized.
+    let mut out = String::with_capacity(s.len().min(folds.len().saturating_mul(64) + 4096));
     let mut i = 0usize;
     for &(start, run) in &folds {
         while i < start {
@@ -927,6 +1172,14 @@ pub fn compress_output(
     {
         return c;
     }
+    // Fold fast path: the duplicate-line bodies the first scan declined on.
+    // Same guard; `None` (anomaly byte, no fold, small rebuild) falls through
+    // to the exact materialized path below.
+    if !matches!(kind, CommandKind::Test | CommandKind::Build)
+        && let Some(c) = head_tail_windowed_folds(text, max_lines, max_bytes, success)
+    {
+        return c;
+    }
 
     // Tier 1: deterministic structural pruning. Copy-on-write + a single
     // split shared across passes: piped output is ANSI-free and fold-free in
@@ -985,6 +1238,531 @@ pub fn compress_output(
         strategy,
         omitted_chars,
         partial,
+    }
+}
+
+// ---- Spill streaming: the C2 windowed twins ---------------------------------
+//
+// The `&str` fast paths above scan a materialized string; when the
+// accumulator spilled, materializing means a full copy of a 100 MB-class
+// stream (measured ~1x the output in peak RSS). These twins run the same
+// budget arithmetic over 64 KiB windows read straight off the spill file,
+// holding only budget-bounded state. Every band the bounded windows cannot
+// prove byte-exact returns `None` and falls through to the exact materialized
+// path — same never-a-reimplementation contract as the `&str` fast paths.
+
+/// Read granularity for spill scans.
+const STREAM_CHUNK: usize = 64 * 1024;
+
+/// Spills at or below this size materialize once (one page-cache-hot read)
+/// instead of streaming: below it the windowed scan's per-line bookkeeping
+/// costs more than a single bounded materialization, and the buffer stays
+/// under every per-class RSS cap. Above it, O(budget) streaming keeps peak
+/// RSS flat as output grows.
+const STREAM_MATERIALIZE_MAX: usize = 16 * 1024 * 1024;
+
+/// Bounded facts about one streamed line: byte length and head/tail byte
+/// windows of at most `cap` bytes (the whole line when it fits). Windows are
+/// trimmed to char boundaries, so they reinterpret as `&str` exactly.
+/// Borrowed view of one streamed line: byte length and head/tail byte
+/// windows of at most `cap` bytes (the whole line when it fits). Windows are
+/// trimmed to char boundaries, so they reinterpret as `&str` exactly. The
+/// bytes live in walker-owned buffers reused across lines, so the hot scan
+/// allocates nothing per line.
+struct LineView<'a> {
+    head: &'a [u8],
+    tail: &'a [u8],
+    len: usize,
+}
+
+impl LineView<'_> {
+    /// The whole line as `&str`, when it fits the carry cap.
+    fn full(&self) -> Option<&str> {
+        if self.len <= self.head.len() {
+            std::str::from_utf8(self.head).ok()
+        } else {
+            None
+        }
+    }
+}
+
+/// Windows are boundary-trimmed by the walker, so the decode is exact; the
+/// fallback only satisfies the type.
+fn window_str(bytes: &[u8]) -> &str {
+    std::str::from_utf8(bytes).unwrap_or("")
+}
+
+enum WalkEvent<'a> {
+    Line(LineView<'a>),
+    Eof,
+    /// ESC/'[' anomaly byte, invalid UTF-8, or read error: the exact
+    /// materialized path owns this stream.
+    Bail,
+}
+
+/// Chunked line splitter over a spill file. Carries the open line across
+/// chunk boundaries byte-exactly (a multibyte char split mid-line is never
+/// decoded here — bytes only), and counts chars as non-continuation bytes,
+/// exact for the valid-UTF-8 streams the validator lets through.
+struct SpillWalker {
+    file: File,
+    unread: usize,
+    buf: Vec<u8>,
+    pos: usize,
+    /// Incomplete trailing UTF-8 sequence deferred to the next chunk.
+    seq: Vec<u8>,
+    /// Reused per-line window buffers: cleared at each line start, never
+    /// reallocated once capacity reaches the carry cap.
+    line_head: Vec<u8>,
+    line_tail: Vec<u8>,
+    len: usize,
+    /// Chars of the whole stream, separators included.
+    total_chars: usize,
+    cap: usize,
+    eof: bool,
+}
+
+impl SpillWalker {
+    fn open(path: &Path, len: usize, cap: usize) -> Option<Self> {
+        let file = File::open(path).ok()?;
+        Some(SpillWalker {
+            file,
+            unread: len,
+            buf: Vec::new(),
+            pos: 0,
+            seq: Vec::new(),
+            line_head: Vec::new(),
+            line_tail: Vec::new(),
+            len: 0,
+            total_chars: 0,
+            cap,
+            eof: false,
+        })
+    }
+
+    fn next(&mut self) -> WalkEvent<'_> {
+        loop {
+            if self.pos >= self.buf.len() {
+                if self.eof {
+                    if !self.seq.is_empty() {
+                        return WalkEvent::Bail; // stream ends mid-character
+                    }
+                    if self.len > 0 {
+                        return self.take_line();
+                    }
+                    return WalkEvent::Eof;
+                }
+                if !self.refill() {
+                    return WalkEvent::Bail;
+                }
+                continue;
+            }
+            let nl = self.buf[self.pos..].iter().position(|&b| b == b'\n');
+            match nl {
+                Some(k) => {
+                    let start = self.pos;
+                    let end = start + k;
+                    self.pos = end + 1;
+                    if self.scan_segment(start, end) {
+                        return WalkEvent::Bail;
+                    }
+                    self.total_chars += 1; // the consumed newline
+                    return self.take_line();
+                }
+                None => {
+                    let start = self.pos;
+                    let end = self.buf.len();
+                    self.pos = end;
+                    if self.scan_segment(start, end) {
+                        return WalkEvent::Bail;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Fold `buf[start..end]` into the open line; true on an anomaly byte.
+    /// One pass: the segment is newline-free by construction, so counting
+    /// non-continuation bytes is its exact char count.
+    fn scan_segment(&mut self, start: usize, end: usize) -> bool {
+        if self.len == 0 {
+            // Line start: reset the reused window buffers (capacity stays).
+            self.line_head.clear();
+            self.line_tail.clear();
+        }
+        let seg = &self.buf[start..end];
+        let mut chars = 0usize;
+        for &b in seg {
+            if b == 0x1b || b == b'[' {
+                return true; // ANSI escape or omission-tag prefix byte.
+            }
+            if (b & 0xc0) != 0x80 {
+                chars += 1;
+            }
+        }
+        if self.line_head.len() < self.cap {
+            let take = (self.cap - self.line_head.len()).min(seg.len());
+            self.line_head.extend_from_slice(&seg[..take]);
+        }
+        self.line_tail.extend_from_slice(seg);
+        if self.line_tail.len() > self.cap {
+            let cut = self.line_tail.len() - self.cap;
+            self.line_tail.drain(..cut);
+        }
+        self.len += seg.len();
+        self.total_chars += chars;
+        false
+    }
+
+    /// Close the open line, trimming its windows to char boundaries when the
+    /// line overflowed the carry cap (the cut edges may land mid-character).
+    fn take_line(&mut self) -> WalkEvent<'_> {
+        if self.len > self.cap {
+            while self.line_head.last().is_some_and(|&b| (b & 0xc0) == 0x80) {
+                self.line_head.pop();
+            }
+            let mut start = 0;
+            while start < self.line_tail.len() && (self.line_tail[start] & 0xc0) == 0x80 {
+                start += 1;
+            }
+            self.line_tail.drain(..start);
+        }
+        let len = self.len;
+        self.len = 0;
+        WalkEvent::Line(LineView {
+            head: &self.line_head,
+            tail: &self.line_tail,
+            len,
+        })
+    }
+
+    /// Read the next chunk; false on a read error or invalid UTF-8 (the
+    /// materialized lossy path owns those streams).
+    fn refill(&mut self) -> bool {
+        let want = STREAM_CHUNK.min(self.unread);
+        if want == 0 {
+            self.eof = true;
+            return true;
+        }
+        self.buf.clear();
+        self.buf.resize(want, 0);
+        let n = match self.file.read(&mut self.buf) {
+            Ok(0) => {
+                self.eof = true;
+                return true;
+            }
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        self.unread -= n;
+        self.buf.truncate(n);
+        if !utf8_chunks_valid(&mut self.seq, &self.buf) {
+            return false;
+        }
+        self.pos = 0;
+        true
+    }
+}
+
+/// [`head_tail_windowed`] over a spilled stream: the same fused scan fed from
+/// 64 KiB chunks, with the head/tail rings holding bounded byte windows
+/// instead of borrows. A ring window is the whole line for anything
+/// `take_head`/`take_tail` can keep, and a superset of the bytes their partial
+/// cuts read for the line that busts the budget — so the windowed assembly is
+/// exact. `None` on every band the bounded windows cannot prove: anomaly
+/// bytes, invalid UTF-8, adjacent equal-length lines too large to compare
+/// (unknown counts as a duplicate — the folds twin and then the materialized
+/// path own it), and the small-corpus band.
+fn head_tail_windowed_spill(
+    path: &Path,
+    file_len: usize,
+    max_lines: usize,
+    max_bytes: usize,
+    success: bool,
+) -> Option<Compressed<'static>> {
+    // Budget arithmetic mirrored from `head_tail_lines` (requirement 2).
+    let (head_share, tail_share): (usize, usize) = if success { (2, 1) } else { (1, 2) };
+    let content_lines = max_lines.saturating_sub(3);
+    let head_lines_budget = content_lines * head_share / (head_share + tail_share);
+    let tail_lines_budget = content_lines - head_lines_budget;
+    let head_bytes_budget = max_bytes * head_share / (head_share + tail_share);
+    let tail_bytes_budget = max_bytes - head_bytes_budget;
+
+    let window = head_lines_budget + tail_lines_budget + 4;
+    let cap = max_bytes + 64;
+    let mut walker = SpillWalker::open(path, file_len, cap)?;
+
+    let mut head: VecDeque<String> = VecDeque::with_capacity(head_lines_budget);
+    let mut tail: VecDeque<String> = VecDeque::with_capacity(window);
+    let mut total = 0usize;
+    // Reused prev-line bytes for the adjacent-duplicate guard.
+    let mut prev_len = 0usize;
+    let mut prev_head: Vec<u8> = Vec::new();
+    let mut has_prev = false;
+    loop {
+        match walker.next() {
+            WalkEvent::Bail => return None,
+            WalkEvent::Eof => break,
+            WalkEvent::Line(line) => {
+                // Adjacent duplicate guard: equal lengths either compare in
+                // full (both fit the carry cap) or defer as unknown.
+                let dup = has_prev
+                    && prev_len == line.len
+                    && (line.len > cap || prev_head == line.head);
+                if dup {
+                    return None; // fold candidate — the folds twin owns it.
+                }
+                total += 1;
+                if head.len() < head_lines_budget {
+                    let mut slot = String::new();
+                    slot.push_str(window_str(line.head));
+                    head.push_back(slot);
+                }
+                let mut slot = if tail.len() == window {
+                    tail.pop_front().unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                slot.clear();
+                slot.push_str(window_str(line.tail));
+                tail.push_back(slot);
+                prev_len = line.len;
+                prev_head.clear();
+                prev_head.extend_from_slice(line.head);
+                has_prev = true;
+            }
+        }
+    }
+    if total <= window {
+        return None; // Small corpora: overlap/kept-everything branches live on
+                     // the materialized path.
+    }
+
+    let head_lines: Vec<&str> = head.iter().map(String::as_str).collect();
+    let tail_lines: Vec<&str> = tail.iter().map(String::as_str).collect();
+
+    let head_slice = take_head(&head_lines, head_lines_budget, head_bytes_budget);
+    // `from = tail_lines.len()`: walking the window from its end touches the
+    // true last lines (total > window), with identical per-line byte math.
+    let tail_slice = take_tail(
+        &tail_lines,
+        tail_lines.len(),
+        tail_lines_budget,
+        tail_bytes_budget,
+    );
+
+    let omitted_lines = total - head_slice.kept - tail_slice.kept;
+    let omitted_chars = walker.total_chars.saturating_sub(
+        head_slice.text.chars().count() + tail_slice.text.chars().count(),
+    );
+    let marker = omission_marker(omitted_chars, omitted_lines);
+    let content = format!("{}\n\n{marker}\n\n{}", head_slice.text, tail_slice.text);
+    Some(Compressed {
+        content: Cow::Owned(content),
+        strategy: Strategy::HeadTail,
+        omitted_chars,
+        partial: head_slice.partial || tail_slice.partial,
+    })
+}
+
+/// [`head_tail_windowed_folds`] over a spilled stream: same fused run scan,
+/// the [`FoldWindow`] rings fed owned lines. Only lines that fit the carry
+/// cap can fold (markers embed the line, runs compare in full); anything
+/// larger defers to the materialized path. The rebuild-fits band returns the
+/// ORIGINAL body verbatim, represented by an empty `Strategy::None` content:
+/// `compress_output_stream` flags it input-unchanged and the caller renders
+/// from the accumulator's own display snapshot instead.
+fn head_tail_windowed_folds_spill(
+    path: &Path,
+    file_len: usize,
+    max_lines: usize,
+    max_bytes: usize,
+    success: bool,
+) -> Option<Compressed<'static>> {
+    // Budget arithmetic mirrored from `head_tail_lines` (requirement 2).
+    let (head_share, tail_share): (usize, usize) = if success { (2, 1) } else { (1, 2) };
+    let content_lines = max_lines.saturating_sub(3);
+    let head_lines_budget = content_lines * head_share / (head_share + tail_share);
+    let tail_lines_budget = content_lines - head_lines_budget;
+    let head_bytes_budget = max_bytes * head_share / (head_share + tail_share);
+    let tail_bytes_budget = max_bytes - head_bytes_budget;
+
+    let cap = max_bytes + 64;
+    let mut walker = SpillWalker::open(path, file_len, cap)?;
+    let mut win = FoldWindow {
+        total: 0,
+        chars: 0,
+        nbytes: 0,
+        folds: 0,
+        head: Vec::with_capacity(head_lines_budget + 1),
+        head_bytes: 0,
+        head_open: true,
+        head_cap: head_lines_budget + 1,
+        head_budget: head_bytes_budget,
+        tail: VecDeque::with_capacity(tail_lines_budget + 1),
+        tail_bytes: 0,
+        tail_cap: tail_lines_budget + 1,
+        tail_budget: tail_bytes_budget,
+        last_empty: false,
+    };
+
+    let mut run_first: Option<String> = None;
+    let mut run_len = 0usize;
+    loop {
+        match walker.next() {
+            WalkEvent::Bail => return None,
+            WalkEvent::Eof => break,
+            WalkEvent::Line(line) => {
+                // Whole-line semantics (run compare, actionable check, marker
+                // embed) need the line in hand; beyond the cap, defer.
+                let line_str = line.full()?;
+                let in_run =
+                    run_len > 0 && run_first.as_deref().is_some_and(|f| f == line_str);
+                if in_run {
+                    run_len += 1;
+                } else {
+                    if run_len > 0 {
+                        win.flush_line(run_first.as_deref().unwrap_or(""), run_len);
+                    }
+                    let slot = run_first.get_or_insert_with(String::new);
+                    slot.clear();
+                    slot.push_str(line_str);
+                    run_len = 1;
+                }
+            }
+        }
+    }
+    if run_len > 0 {
+        win.flush_line(run_first.as_deref().unwrap_or(""), run_len);
+    }
+
+    if win.folds == 0 {
+        return None; // Dedup is a no-op here; the exact path below owns it.
+    }
+    // Trailing-phantom adjustment, exactly as the `&str` twin.
+    let mut total = win.total;
+    if win.last_empty {
+        if total <= 1 {
+            return None; // Degenerate rebuild; the exact path owns it.
+        }
+        total -= 1;
+        if let Some(dropped) = win.tail.pop_back() {
+            win.tail_bytes -= dropped.len() + 1;
+        }
+    }
+    // Rebuild fits the budget: cleaning is not omission, so the ORIGINAL body
+    // comes back verbatim (empty-content sentinel; see the doc comment).
+    if total <= max_lines && win.nbytes + win.total - 1 <= max_bytes {
+        return Some(Compressed {
+            content: Cow::Owned(String::new()),
+            strategy: Strategy::None,
+            omitted_chars: 0,
+            partial: false,
+        });
+    }
+    if total <= head_lines_budget + tail_lines_budget {
+        return None; // kept-everything / overlap bands stay materialized.
+    }
+    let head_lines: Vec<&str> = win.head.iter().map(|c| c.as_ref()).collect();
+    let tail_lines: Vec<&str> = win.tail.iter().map(|c| c.as_ref()).collect();
+    let head = take_head(&head_lines, head_lines_budget, head_bytes_budget);
+    // `from = tail_lines.len()`: the ring holds the true last lines (total
+    // exceeds both budgets), with identical per-line byte math.
+    let tail = take_tail(
+        &tail_lines,
+        tail_lines.len(),
+        tail_lines_budget,
+        tail_bytes_budget,
+    );
+    // Overlap is unreachable — same proof as `head_tail_windowed`.
+    let omitted_lines = total - head.kept - tail.kept;
+    // Marker math over the REBUILT totals: every rebuilt line's chars plus
+    // the total-1 '\n' separators the join would write.
+    let rebuilt_chars = win.chars + win.total - 1;
+    let omitted_chars = rebuilt_chars
+        .saturating_sub(head.text.chars().count())
+        .saturating_sub(tail.text.chars().count());
+    let marker = omission_marker(omitted_chars, omitted_lines);
+    let content = format!("{}\n\n{marker}\n\n{}", head.text, tail.text);
+    Some(Compressed {
+        content: Cow::Owned(content),
+        strategy: Strategy::HeadTail,
+        omitted_chars,
+        partial: head.partial || tail.partial,
+    })
+}
+
+/// The Tier-1 pass over a [`FullStream`]: `Generic`-kind spilled streams above
+/// `STREAM_MATERIALIZE_MAX` are
+/// scanned through 64 KiB windows and never materialized (a 100 MB stream
+/// costs O(budget), not O(stream), in peak RSS); everything else — Test/Build
+/// kinds, in-memory buffers bounded by the spill threshold, and every band
+/// the windowed twins decline — runs the exact materialized
+/// [`compress_output`] over the very bytes `into_full_text` would produce.
+///
+/// Returns the result plus `input_unchanged`: true only when the content is
+/// the input verbatim (no ANSI strip, no rebuild). A `Strategy::None` result
+/// with `input_unchanged` carries NO content — the caller renders from the
+/// accumulator's own display snapshot, pinned equal to the window snapshot
+/// over that verbatim content.
+pub fn compress_output_stream(
+    stream: &FullStream,
+    kind: CommandKind,
+    success: bool,
+    max_lines: usize,
+    max_bytes: usize,
+) -> (Compressed<'static>, bool) {
+    let materialized = || {
+        // Borrow the in-memory buffer: valid UTF-8 costs no copy, and the
+        // verbatim sentinel below means a borrowed content never escapes —
+        // every other strategy's content is a small owned string. Invalid
+        // bytes degrade to the same lossy replacement `from_utf8_owned` used.
+        let text = match stream {
+            FullStream::Memory(raw) => String::from_utf8_lossy(raw),
+            FullStream::Spill { path, .. } => Cow::Owned(read_spill_string(path)),
+        };
+        let c = compress_output(&text, kind, success, max_lines, max_bytes);
+        if c.strategy == Strategy::None && c.content == text {
+            // Verbatim pass: the caller renders from the accumulator's
+            // display snapshot and never reads this content, so return the
+            // empty sentinel (same shape as the windowed twins) instead of
+            // `detach`'s full-stream copy — a declined giant line otherwise
+            // peaked at 3x the stream (text + borrowed content + the copy).
+            return (
+                Compressed {
+                    content: Cow::Owned(String::new()),
+                    strategy: Strategy::None,
+                    omitted_chars: 0,
+                    partial: false,
+                },
+                true,
+            );
+        }
+        (detach(c), false)
+    };
+    if let FullStream::Spill { path, len } = stream
+        && !matches!(kind, CommandKind::Test | CommandKind::Build)
+        && *len > STREAM_MATERIALIZE_MAX
+    {
+        if let Some(c) = head_tail_windowed_spill(path, *len, max_lines, max_bytes, success) {
+            return (c, false);
+        }
+        if let Some(c) = head_tail_windowed_folds_spill(path, *len, max_lines, max_bytes, success) {
+            let unchanged = c.strategy == Strategy::None;
+            return (c, unchanged);
+        }
+    }
+    materialized()
+}
+
+/// Lift a borrow of the materialization-local text into the `'static` result —
+/// a move for owned content, the one copy for a verbatim borrow.
+fn detach(c: Compressed<'_>) -> Compressed<'static> {
+    Compressed {
+        content: Cow::Owned(c.content.into_owned()),
+        strategy: c.strategy,
+        omitted_chars: c.omitted_chars,
+        partial: c.partial,
     }
 }
 
@@ -1697,5 +2475,129 @@ mod tests {
             avg < BUDGET_MS,
             "compression of {total_lines} lines took {avg:.3} ms (budget {BUDGET_MS} ms)"
         );
+    }
+
+    // ---- Characterization: the Generic fold path of compress_output ------
+    // Byte-exact literals frozen from the current implementation so an
+    // optimization of the fold path can be diffed against today's behavior.
+
+    /// u*100 + dup*30 + v*100 lines: the 30-run of "dup" folds, and the
+    /// rebuilt body is still over budget, so head-tail windows the REBUILD.
+    fn u_dup_v_corpus() -> String {
+        let mut s = String::new();
+        for i in 0..100 {
+            s.push_str(&format!("u{i:03}\n"));
+        }
+        for _ in 0..30 {
+            s.push_str("dup\n");
+        }
+        for i in 0..100 {
+            s.push_str(&format!("v{i:03}\n"));
+        }
+        s
+    }
+
+    #[test]
+    fn pure_fold_body_is_verbatim_none_despite_the_rebuild() {
+        // 5000 identical lines fold to one rebuilt line that fits the budget,
+        // but the Strategy::None branch discards the rebuild and returns the
+        // ORIGINAL cleaned body: cleaning is not omission.
+        let body = "y\n".repeat(5000);
+        let out = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        assert_eq!(out.strategy, Strategy::None);
+        assert_eq!(out.content, body.as_str(), "the rebuild must be discarded");
+        assert_eq!(out.omitted_chars, 0);
+    }
+
+    #[test]
+    fn fold_body_over_budget_composes_dedup_then_head_tail() {
+        let body = u_dup_v_corpus();
+        let out = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        assert_eq!(out.strategy, Strategy::HeadTail);
+        assert_eq!(out.omitted_chars, 848);
+        // Frozen: 24 head lines, blank, marker counting REBUILT chars/lines,
+        // blank, 13 tail lines. The rebuild never emits a trailing newline,
+        // hence 848 (not 849) omitted chars.
+        assert_eq!(
+            out.content,
+            "u000\nu001\nu002\nu003\nu004\nu005\nu006\nu007\nu008\nu009\nu010\nu011\nu012\nu013\nu014\nu015\nu016\nu017\nu018\nu019\nu020\nu021\nu022\nu023\n\n[... omitted 848 chars / 164 lines ...]\n\nv087\nv088\nv089\nv090\nv091\nv092\nv093\nv094\nv095\nv096\nv097\nv098\nv099"
+        );
+        // Decomposition: head 24 rebuilt lines + marker line + tail 13
+        // rebuilt lines, and the fold marker is exactly one rebuilt line.
+        let parts: Vec<&str> = out.content.split("\n\n").collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(split_lines(parts[0]).len(), 24);
+        assert_eq!(parts[1], "[... omitted 848 chars / 164 lines ...]");
+        assert_eq!(split_lines(parts[2]).len(), 13);
+        let rebuilt = dedup_repeats(&body);
+        assert_eq!(split_lines(&rebuilt).len(), 201);
+        assert_eq!(
+            split_lines(&rebuilt)
+                .iter()
+                .filter(|l| **l == "dup [... repeated 30 times ...]")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn fold_predicate_edges() {
+        // Any run > 1 of identical non-actionable non-blank lines folds; the
+        // emit joins with '\n' and never writes a trailing newline.
+        assert_eq!(dedup_repeats("x\nx\ny\n"), "x [... repeated 2 times ...]\ny");
+        // Repeated blank lines never fold: byte-identical passthrough.
+        assert_eq!(dedup_repeats("\n\n\n\nz\n"), "\n\n\n\nz\n");
+        // Repeated actionable lines never fold.
+        assert_eq!(
+            dedup_repeats(&"error: boom\n".repeat(4)),
+            "error: boom\nerror: boom\nerror: boom\nerror: boom\n"
+        );
+        // Multibyte line content folds with a byte-exact marker.
+        assert_eq!(
+            dedup_repeats(&"naïve\n".repeat(5)),
+            "naïve [... repeated 5 times ...]"
+        );
+
+        // Same corpus without the trailing newline: the rebuild never emits
+        // one, so the compressed bytes are identical to the newline case.
+        let mut body = u_dup_v_corpus();
+        body.pop();
+        let out = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        assert_eq!(out.strategy, Strategy::HeadTail);
+        assert_eq!(out.omitted_chars, 848);
+        assert_eq!(
+            out.content,
+            "u000\nu001\nu002\nu003\nu004\nu005\nu006\nu007\nu008\nu009\nu010\nu011\nu012\nu013\nu014\nu015\nu016\nu017\nu018\nu019\nu020\nu021\nu022\nu023\n\n[... omitted 848 chars / 164 lines ...]\n\nv087\nv088\nv089\nv090\nv091\nv092\nv093\nv094\nv095\nv096\nv097\nv098\nv099"
+        );
+
+        // success=false flips the split tail-heavy: 12 head / 25 tail lines.
+        let body = u_dup_v_corpus();
+        let out = compress_output(&body, CommandKind::Generic, false, 40, 2048);
+        assert_eq!(out.strategy, Strategy::HeadTail);
+        assert_eq!(out.omitted_chars, 848);
+        assert_eq!(
+            out.content,
+            "u000\nu001\nu002\nu003\nu004\nu005\nu006\nu007\nu008\nu009\nu010\nu011\n\n[... omitted 848 chars / 164 lines ...]\n\nv075\nv076\nv077\nv078\nv079\nv080\nv081\nv082\nv083\nv084\nv085\nv086\nv087\nv088\nv089\nv090\nv091\nv092\nv093\nv094\nv095\nv096\nv097\nv098\nv099"
+        );
+    }
+
+    #[test]
+    fn marker_carrying_body_is_never_recompacted() {
+        // Over-budget body already carrying a Tier-1 marker: the windowed fast
+        // path declines on the '[' byte, head_tail_lines declines on the
+        // idempotence tag, and the Strategy::None branch echoes the original
+        // bytes back with no omission and no re-count.
+        let mut body = String::new();
+        for i in 0..100 {
+            body.push_str(&format!("a{i:03}\n"));
+        }
+        body.push_str("[... omitted 5 chars ...]\n");
+        for i in 0..100 {
+            body.push_str(&format!("b{i:03}\n"));
+        }
+        let out = compress_output(&body, CommandKind::Generic, true, 40, 2048);
+        assert_eq!(out.strategy, Strategy::None);
+        assert_eq!(out.content, body.as_str());
+        assert_eq!(out.omitted_chars, 0);
     }
 }

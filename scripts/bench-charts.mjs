@@ -31,10 +31,10 @@ const OUT_FILE = resolve(ROOT, process.env.PI_BENCH_CHART_OUT ?? 'docs/assets/be
 // ---- read-only sources --------------------------------------------------------
 const SRC_PIWRITE = 'benchmark/piwrite/results/summary-2026-11-05-rawframe3.md';
 const SRC_PIREAD = 'benchmark/runs/piread-microbench-2026-10-27.md';
-const SRC_PIBASH = 'benchmark/runs/pibash-microbench-2026-10-27.md';
+const SRC_PIBASH = 'benchmark/runs/pibash-microbench-2026-11-08.md';
 const SRC_PIEDIT = 'benchmark/runs/piedit-microbench-2026-10-27.md';
 const SRC_TP_PIREAD = 'benchmark/runs/throughput-piread-2026-11-07.md';
-const SRC_TP_PIBASH = 'benchmark/runs/throughput-pibash-2026-11-07.md';
+const SRC_TP_PIBASH = 'benchmark/runs/throughput-pibash-2026-11-08.md';
 const SRC_TP_PIEDIT = 'benchmark/runs/throughput-piedit-2026-11-07.md';
 const SRC_TP_PIWRITE = 'benchmark/runs/throughput-piwrite-2026-11-07.md';
 const SRC_TP_PIDX = 'benchmark/runs/throughput-pidx-2026-11-07.md';
@@ -227,8 +227,8 @@ const SUBTITLE =
 const caveat = `caveat: piwrite serve p50 trails built-in at 1–100 MB in-bench (1 MB: ${s1.arms['piwrite-serve'].p50.raw} vs ${s1.arms['node-builtin'].p50.raw} ms/op); large serves = kernel dirty-page throttling (${SRC_RUST_OPT})`;
 
 const FOOTER = [
-  `sources: benchmark/runs/{piread,pibash,piedit}-microbench-2026-10-27.md · ${SRC_PIWRITE} (mode=--full)`,
-  `throughput (panel B): benchmark/runs/throughput-{piread,pibash,piedit,piwrite,pidx}-2026-11-07.md · 32 MiB per op · N=10/arm (5 warmup) · MB/s = 32 ÷ p50 s`,
+  `sources: benchmark/runs/{piread,piedit}-microbench-2026-10-27.md + pibash-microbench-2026-11-08.md · ${SRC_PIWRITE} (mode=--full)`,
+  `throughput (panel B): benchmark/runs/throughput-{piread,piedit,piwrite,pidx}-2026-11-07.md + throughput-pibash-2026-11-08.md · 32 MiB per op · N=10/arm (5 warmup) · MB/s = 32 ÷ p50 s`,
   `${SRC_NATIVE_TOOLS} pidx row: 511 sessions / 110 MB, cold re-parse 2.1 s → warm 28 ms (re-measured 2026-10-28)`,
   caveat,
   'bar labels verbatim from source tables; xN.n sublabels = improvement ratio, computed (latency: baseline/native; throughput: native/baseline); full source paths in the SVG desc element',
