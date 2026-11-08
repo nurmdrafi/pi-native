@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **context-guard extension** (`extensions/context-guard/`): always-on context gauge widget (`ctx 132K/1M (13%)`) driven by per-turn `cacheRead` — WARN at 120K tokens or 60% of window, ALERT at 150K or 75%; ALERT emits a rate-limited compact-or-split reminder (once per 10 turns); widget and latch reset on `session_compact`. Known windows: glm 1M (bundled pi-ai catalog), gemini 1M, claude 200K, gpt-4.1/4o 128K, 200K fallback. 20 helper assertions, no framework (`node extensions/context-guard/test.mjs`).
 
 - **glm-5.3 auto-compact threshold override** (`settings.json`): `compaction.modelOverrides["zai/glm-5.3"].reserveTokens = 845000`. The model's real window is 1M, so the default trigger sat near 984K — unreachable in practice (zero compactions across 30 days of session logs); the override fires compaction past 155K, matching the 150K context budget.
 
