@@ -1,6 +1,6 @@
 # Subagent orchestration
 
-Orchestrator doctrine. Child conduct: `docs/subagents.md` (reaches child sessions — keep lean). Machinery reference: `extensions/subagents/` README. Verbs: `subagent` (spawn), `subagent_message` (steer/resume), `subagents_list` (list), `subagent_control` (cancel/restart).
+Orchestrator doctrine. Child conduct: `~/.pi/agent/docs/subagents.md` (reaches child sessions — keep lean). Machinery reference: `~/.pi/agent/extensions/subagents/` README. Verbs: `subagent` (spawn), `subagent_message` (steer/resume), `subagents_list` (list), `subagent_control` (cancel/restart).
 
 Spawn tools inactive (zero prompt tokens) until `/subagents on|off`, any `/subagents [agent] [task]` spawn, or `PI_SUBAGENTS=1`. Spawn from the current session only — never detached/background; a print-mode parent exits before results arrive.
 
@@ -15,7 +15,7 @@ Spawn tools inactive (zero prompt tokens) until `/subagents on|off`, any `/subag
 Terms: fork clone = child cloning the current session (unrestricted toolset). Wave ledger = `plan.md` + `status.jsonl`. Cache = recovered results and history rows.
 
 ## Agents
-- Definitions in `agents/`, inert while spawn tools are gated. Discovery: project > global; `<project>/.pi/agents/<name>.md` shadows the shipped name outright, `tools:` included. No `model` pin.
+- Definitions in `~/.pi/agent/agents/`, inert while spawn tools are gated. Discovery: project > global; `<project>/.pi/agents/<name>.md` shadows the shipped name outright, `tools:` included. No `model` pin.
 - Every definition declares `tools:`; undeclared = denied (deny-by-default; unrestricted toolset reserved for top-level fork clones).
 - `tools:` names resolve from extension manifests and the naming convention first (that makes the `-e` path); `registerToolExtension` last. Unresolved names silently fall back to the built-in — so entries name the natives (`piread`, `piedit`, `pibash`) alongside built-in fallbacks.
 
@@ -41,7 +41,7 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 ## Orchestration rules
 - Delegate only when it beats inline on speed, accuracy, or context: 2+ disjoint file-sets, a context-heavy read sweep, or an independent check. Overlapping sets serialize — isolation only, never wall clock. Fresh child context costs many times linear; read-heavy parallel work pays, single-file coding does not.
 - Stay linear: single-file tasks without independent verification; work past one wave (~10 min); few-minute fixes — even inside a subagent effort.
-- Route by contract against the roster; review-only work never goes to worker. Only an agent declaring `subagent_agents` (today `worker: scout, researcher`) spawns children — that field, not `tools:`, is the enforced allowlist. Depth stops at two (no spawner declares `subagent_agents`); grandchildren inherit the gate, outside the child cap. Table and `agents/` frontmatter stay in sync.
+- Route by contract against the roster; review-only work never goes to worker. Only an agent declaring `subagent_agents` (today `worker: scout, researcher`) spawns children — that field, not `tools:`, is the enforced allowlist. Depth stops at two (no spawner declares `subagent_agents`); grandchildren inherit the gate, outside the child cap. Table and `~/.pi/agent/agents/` frontmatter stay in sync.
 - One task = one agent = one file-set. Disjoint sets spawn in the same turn; any shared file forces the next wave. A directory claim owns its whole subtree — a sibling naming a nested file queues. Queued ack = failed partition: narrow the owner's scope by steer, never wait out the queue. Start a downstream agent early only on a fixed input contract; steer the correction if it changes.
 - Bake facts into every prompt: paths, line numbers, shapes, contracts, verification command, report format. Verification names the scoped test, never the full suite (that is the orchestrator's end-of-wave gate, run once). 5–10 anchors cut a child to ~1/3 the turns; a worker that explores is a linear worker plus overhead — scrape facts or send a scout. Deliverable = machine-readable file; report = pointer + headline numbers, never restated contents. Child without file-write tools → hand-walked numbers only.
 - Spawn with `agent`, a stable task-specific `name` (resume handle), explicit `files` + `cwd` at the target package — `files`/`cwd` do the locking, not the scope sentence. Paste `cwd` from the session cwd field verbatim, never retype it; carry an absolute repo path in the prompt as recovery. Then end the turn: no polling, sleeping, tailing logs, fabricating results.

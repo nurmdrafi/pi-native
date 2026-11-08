@@ -4,6 +4,8 @@ description: "Develop, test, publish installable packages — Go modules, npm SD
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/sdk-development`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Package/SDK Development
 
 Building/shipping installable packages: generated API SDKs, hand-written libraries, plugins, CLIs — Go module, npm package, plugin bundle. Core rule for libraries consumed by others: **docs = contract** — every README feature, prop, code example must run against built artifact.

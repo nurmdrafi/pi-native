@@ -5,6 +5,8 @@ license: Complete terms in LICENSE.txt
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/frontend-design`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 Build distinctive, production-grade frontend interfaces; avoid generic "AI slop" aesthetics. Real working code, exceptional attention to aesthetic detail + creative choices.
 
 Input: frontend requirements — component/page/app/interface; maybe purpose, audience, constraints.

@@ -29,7 +29,7 @@
 ### Subagents
 - Off until `/subagents on`; until then work linearly, never spawn unasked.
 - `npx` fetches missing packages without the ask-before-install gate — pre-install or vendor CLIs before child use.
-- Read `docs/subagent-orchestration.md` before the first spawn. Child conduct: `docs/subagents.md` (keep it lean). Keep the roster table and `agents/` frontmatter in sync on every roster change.
+- Read `~/.pi/agent/docs/subagent-orchestration.md` before the first spawn; child conduct: `~/.pi/agent/docs/subagents.md` (keep it lean). Keep the roster table and `~/.pi/agent/agents/` frontmatter in sync on every roster change.
 
 ## Verification
 - At task end: tests + lint + typecheck scoped to changed files only; project lacks lint/typecheck → skip that leg and say so.
@@ -41,7 +41,8 @@
 - Behavior claims: read the consumption site, not the helper that derives the value — a doc built from an intermediate function asserts what nothing downstream enforces.
 
 ## Docs
-- Apply `docs/portability.md` before shell/path work.
+- Apply `~/.pi/agent/docs/portability.md` before shell/path work.
+- Repo paths cited in these instructions and their docs (docs, tests, benchmarks) resolve under the agent home (`~/.pi/agent`), never the session cwd. Skill-body paths (`scripts/`, `references/`, `assets/`) resolve under the invoked skill's directory (`location` on the injected skill tag; project skills live in `.pi/skills/`).
 - Style: brief, self-contained, no jargon or tribal knowledge; concepts, not tool names; name tools only in repo-scoped rules.
 - In any file (docs, comments, tests, fixtures, notes, changelog), neutralize project/session/artifact references as `<project-a>`, `<vendor>`, `<org>`, `<project-root>`; keep dates. Fixture names describe shape, never the incident's source. Exception: a skill about a named stack names it.
 - Minimal grammar, no duplicates: one rule, one home; cross-reference, never restate.
@@ -50,7 +51,7 @@
 - Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push.
 - Tool-defect lessons carry path, file size, and exact payload (anchor text or hash) so a replay reproduces it.
 - A tool writing output/state to a chosen path keeps it inside agent home — outside paths are refused.
-- File writes use `piwrite` when it is registered — see `docs/native-tools.md`.
+- File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`.
 
 ## Tmux temporary panes
 - Before the first pane handover, run `tmux has-session -t tasks 2>/dev/null || tmux new-session -d -s tasks` — a missing server shows only an exit code (stderr silenced); `new-session -d` boots detached; identical on macOS and Linux; never reference socket paths.

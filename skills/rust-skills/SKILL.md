@@ -21,6 +21,8 @@ metadata:
     - ripgrep, tokio, serde, polars, axum, cargo codebases
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/rust-skills`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Rust Best Practices
 
 Comprehensive guide for writing high-quality, idiomatic, and highly optimized Rust code. Contains 269 rules across 26 categories, prioritized by impact to guide LLMs in code generation and refactoring. Current for Rust 1.96 (2024 edition).
