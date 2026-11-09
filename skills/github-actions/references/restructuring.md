@@ -27,3 +27,7 @@ Parse with real YAML parser after, not eyeball — `python3 -c 'import yaml,sys;
 `verify`/`build-check` job running install + build before deploy = only thing between broken tree and published image. Removing = policy change: deploy job's own build still compiles app, so compile errors surface later not never, but no signal reaches pull requests. State trade-off in commit message + open issue that asked for gate — gap recorded, not rediscovered.
 
 Pre-push git hook ≠ CI gate substitute even when present — hooks skipped by `--no-verify`, not installed on every clone, invisible to PR reviewer. Verify hook exists before trusting enforcement claims (`ls .husky/`, `husky` key in `package.json`, `git config core.hooksPath`) — often proposed in review, never committed.
+
+## Removing a whole workflow that enforced a control
+
+Deleted control workflow (secret scanning, e.g. gitleaks; dependency audit) = coverage decision, not cleanup. Document the replacement control in the CHANGELOG/PR so reviewers can verify coverage is not lost — when the replacement is local hooks, state the accepted trade-off explicitly (hook-substitute caveat above). Then `rg` the whole repo — not just `.github/workflows/` — for stale claims that the removed workflow still runs (hook comments, docs, scripts): they must describe the replacement, not the dead workflow.

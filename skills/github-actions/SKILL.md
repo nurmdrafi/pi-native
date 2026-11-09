@@ -92,7 +92,7 @@ env:
 
 ## 5–8. Restructuring + release workflows
 
-- Job removal (dangling `needs:`, lost toolchain) + build-gate deletion → [references/restructuring.md](references/restructuring.md).
+- Job removal (dangling `needs:`, lost toolchain) + build-gate deletion + whole-workflow removal → [references/restructuring.md](references/restructuring.md).
 - Version/tag derivation from one parser, tag-overwrite guards, multiline data between jobs → [references/release-versioning.md](references/release-versioning.md).
 
 ## Checklist
@@ -105,6 +105,7 @@ env:
 - [ ] Workflow defaults least privilege; write grants isolated in own job
 - [ ] Version/tag derivation calls repo's own parser, fails non-semver, refuses existing remote tag, guard tested both directions vs real remote state
 - [ ] Removed build gate + waived acceptance criteria recorded in commit message + related issue
+- [ ] Removed control workflow (e.g. gitleaks secret scanning): replacement documented in CHANGELOG/PR; repo-wide `rg` for stale claims the old workflow still runs
 - [ ] Self-hosted runners only private repos / isolated-ephemeral runners — never public repos (pull_request_target pwn risk)
 - [ ] `concurrency` set — stale run can't overwrite same branch/tag
 - [ ] Production image build runs quality gate (lint/typecheck/test) — never skipped via Dockerfile/`.dockerignore`
