@@ -6,7 +6,7 @@ A measured performance harness for the official Pi coding agent: native Rust too
 
 [![stars](https://img.shields.io/github/stars/nurmdrafi/pi-native?label=stars&logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/stargazers)
 [![CI](https://img.shields.io/github/actions/workflow/status/nurmdrafi/pi-native/ci.yml?label=CI&logo=githubactions&logoColor=2088FF&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/github/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnurmdrafi%2Fpi-native%2Fmain%2F.github%2Fbadges%2Ftests.json&style=flat-square)](tests/)
+[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnurmdrafi%2Fpi-native%2Fmain%2F.github%2Fbadges%2Ftests.json&style=flat-square)](tests/)
 [![release](https://img.shields.io/github/v/release/nurmdrafi/pi-native?logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/releases)
 [![last commit](https://img.shields.io/github/last-commit/nurmdrafi/pi-native?label=last%20commit&logo=github&labelColor=24292f&style=flat-square)](https://github.com/nurmdrafi/pi-native/commits)
 [![license](https://img.shields.io/badge/license-MIT-2ea44f?logo=opensourceinitiative&logoColor=white&labelColor=24292f&style=flat-square)](LICENSE)
