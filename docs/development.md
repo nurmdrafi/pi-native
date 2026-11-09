@@ -104,6 +104,7 @@ Prompt templates (`prompts/*.md`) expand from a mid-session cache: after editing
 | ------------------------------ | -------------------------------------------------------------------- |
 | [`CHANGELOG.md`](../CHANGELOG.md) | every harness change (what / why / risk / measured delta)         |
 | `README.md`                    | structure, skill roster, budget, or sync/portability contract change |
+| `.github/badges/tests.json`    | test cases added or removed — regenerate with `npm run tests:badge` |
 
 **Goal:** smaller, more stable, cache-friendly, rg-first, fully portable harness.
 
