@@ -3,11 +3,13 @@ description: Fetch one or more GitHub issues, solve solo in one session — foll
 argument-hint: "<issue-number> [<issue-number> ...]"
 ---
 
+Issue numbers: $ARGUMENTS
+
 Priorities: (1) fix without breaking existing behavior, (2) follow suggested fix as written.
 Mapping: Evidence → anchors · Suggested fix → Approach · Acceptance criteria → verbatim into Propose + Report (derive only if missing, mark "derived").
 
 ## 1. Fetch
-- Arguments: one or more issue numbers; stop if any is not a number. Deduplicate, keep the given order.
+- Arguments = the `Issue numbers:` line above: one or more issue numbers; stop if any is not a number or the line is empty. Deduplicate, keep the given order.
 - Run + record per issue: `gh issue view <N> --json number,title,body,labels,state,comments,createdAt`; once per session: `git rev-parse HEAD` · `git status --porcelain` · `git branch --show-current`.
 - Multiple issues: Sections 1–2 run for every issue first; Sections 3–6 then run one issue at a time in the given order — each completes through Report before the next starts. Never merge two issues into one Propose unless the user asks.
 - Reopen check: `gh api repos/{owner}/{repo}/issues/<N>/timeline --paginate --jq '.[]|select(.event=="reopened")|.created_at'` — any hit means the issue was opened again after a close. The reopen comment is posted ~1s BEFORE its reopen event, so never filter comments with `created_at > last_reopen`: take the last 3 by the closing side and match them by content.

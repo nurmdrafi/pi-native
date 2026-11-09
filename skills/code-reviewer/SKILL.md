@@ -51,4 +51,6 @@ Read the whole function around a hunk when the hunk alone doesn't decide a findi
 
 Report findings at/above `medium` (CI's default threshold), high first: `file:line`, title, detail, suggestion; end with the summary. Fix each finding, re-run this review on the same range, repeat until zero findings at/above threshold — then push. Below-threshold findings: list once, fix only if cheap.
 
+Deleted-control finding (removed scan, gate, or workflow, e.g. gitleaks CI) where the removal is intentional: the fix is documenting the replacement control in the CHANGELOG/PR and sweeping stale claims that the old control still runs — the whole-workflow removal procedure lives in the github-actions skill — not silently restoring or silently dropping it.
+
 CI files findings without verifying them — verify locally via [references/finding-verification.md](references/finding-verification.md) so you fix real bugs, not false positives.
