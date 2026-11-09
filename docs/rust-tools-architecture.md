@@ -458,12 +458,13 @@ grows past the cap:
   window (`trim_tail_bytes`, cut on a UTF-8 boundary) and a line ring
   (`trim_tail_lines`, byte offsets of the last complete lines), so repeated
   `snapshot()` calls re-split only the display window, never the whole tail.
-- **`into_full_text` / `cap_full_output`**: give the compression pre-pass the
+- **`into_full_text` / `cap_full_output`**: give the materialized arms (Test/Build and the exact bands) the
   *complete* stream in a single materialization (moving the raw buffer
   zero-copy when no spill exists, one spill-file read otherwise), and derive
   the ≤1 MiB `structuredContent` payload from that same buffer instead of
   re-reading — errors buried mid-stream survive, and the stream is never
   serialized twice.
+- **`into_stream` / `compress_output_stream`** (2026-11 spill-streaming rework): Generic kinds never materialize — the stream (`Memory` raw buffer or `Spill` file) feeds budget-bounded head/tail windowed scanners in 64 KiB chunks, so peak RSS is O(budget), not O(output) (spills at or below 16 MiB materialize once — cheaper than streaming at that size, still cap-bounded); `Strategy::None` renders from the accumulator's own display snapshot (snapshot ≡ window_snapshot is parity-pinned). Measured: 100 MB `yes` peak 924.8 MB → 6.0 MB, RSS slope 18 B/line → flat; after the allocation-free-walker pass, 100 MB `yes` wall is 3033 ms vs the pre-rework 5387 ([record](../../benchmark/runs/pibash-rss-rework-2026-11-08.md)).
 - **`snapshot`**: produces the oracle-shaped result plus an optional
   `fullOutputPath` reference.
 
@@ -479,9 +480,10 @@ of `fullOutputPath`); the oneshot arm measures peak RSS under
 one helper). Assertions pin current behavior, not goals: `child_bytes`
 byte-exact, `spill_bytes == child_bytes`, envelope ≤ 8192 B flat as output
 grows — compression-classified streams render ≈2 KB, unclassified ones
-(`yes | head -c`) fall to the parity-locked 2000-line tail window (4111 B
-measured) — and per-class RSS caps record the accumulator's by-design
-scaling until spill (100 MB class measured 1003 MB peak). Reports land in
+(`yes | head -c`) fall to the parity-locked 2000-line tail window (4104 B
+measured) — and per-class RSS caps record measured peaks: windowed/fold classes are O(budget) — flat ~6 MB above the 16 MiB materialize threshold, one bounded materialization (≤ ~13 MB) below it — at every size
+since the 2026-11 spill-streaming rework, while the giant-single-line band stays ~bytes by
+design (100 MB class measured 108 MB, capped at 224 MiB). Reports land in
 `benchmark/runs/`; the 1 MB class also runs in the Node suite
 (`tests/integration/pibash-large-output.test.mjs`). Wall time is recorded, never
 asserted.
@@ -527,6 +529,18 @@ The "before" column carries the three-pass `split_lines` and the per-line
 `String` malloc in `dedup_repeats` that motivated the copy-on-write rework;
 `strip_ansi`'s before/after is the borrowed-vs-owned difference. Wire bytes are
 unchanged throughout — parity suites pin the envelope shape.
+
+2026-11-09 addendum — the spill-streaming rework initially traded latency for flat RSS (seq 50000
+p50 +4.4 ms, 32 MiB throughput −15 %, measured against the frozen pre-rework oracle). The
+allocation-free walker plus the ≤ 16 MiB materialize hybrid recovered it: seq 50000 and the
+≤ 10 MB classes sit at oracle parity, 100 MB `yes` wall is −42 % vs the pre-rework oracle, while
+> 16 MiB windowed streams carry ~60-75 ns/line of streaming bookkeeping (+19-27 % wall at
+100 MB) and declined bands (giant lines) a scan+materialize double read — the price of O(budget)
+RSS, which stays flat (~6 MB at 100 MB). Wire bytes byte-equal modulo the volatile spill-path
+and wall-time fields ([record](../../benchmark/runs/pibash-rss-rework-2026-11-08.md) §8). A
+follow-up pass (same record, §8 tail) measured the dispatch arm at its structural floor — child
+spawn dominates — keeping one micro-win: the Memory arm of `compress_output_stream` borrows
+instead of cloning.
 
 ---
 

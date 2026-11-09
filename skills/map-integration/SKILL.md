@@ -4,6 +4,8 @@ description: "ANY map work, Barikoi stack included: react-bkoi-gl / bkoi-gl (Bar
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/map-integration`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Map Integration
 
 ## 1. Detect stack first — never assume

@@ -116,7 +116,15 @@ Every class is now below the oracle, including `seq 50000` and `large-blob`, whi
 above it in the 2026-10-26 audit; the host is slower overall (spawn floor ~5.0 ms here vs ~1.9 ms
 then), so compare the Δ within a run, not the absolutes across audits.
 
-Spawn floor per session: ~5.0 ms on the 2026-10-28 host (paid once, not per call). Daemon RSS is not reported here: the resident-set probe used by `piread`/`pibash` benchmarks reads `/proc`, so it is Linux-only and is skipped elsewhere.
+2026-11-09 RSS rework + recovery pass ([record](../benchmark/runs/pibash-rss-rework-2026-11-08.md);
+one-shot, frozen pre-rework binary vs reworked binary, same host): peak RSS on large outputs is
+now O(budget) — 100 MB `yes` 924.8 MB → 6.0 MB, slope 18 B/line → flat. The initial wall cost on
+windowed classes (`seq 50000` p50 10.8 → 15.3 ms, 32 MiB throughput 139.3 → 117.9 MB/s) was
+recovered by the allocation-free walker and the ≤ 16 MiB materialize hybrid: `seq 50000` and the
+≤ 10 MB classes at oracle parity, 32 MiB 128.6 MB/s (−11 %), 100 MB `yes` wall −42 %, 100 MB
+uniform +19-27 % (streaming bookkeeping); cold start flat (4.36 → 4.28 ms).
+
+Spawn floor per session: ~5.0 ms on the 2026-10-28 host (paid once, not per call). Daemon RSS is reported on Linux by the RSS-rework record (100 MB `yes` peak 903.0 → 4.9 MiB, 3.1 MiB retained after 5 s); the resident-set probe used by `piread`/`pibash` benchmarks reads `/proc`, so it is Linux-only and is skipped elsewhere.
 
 </details>
 

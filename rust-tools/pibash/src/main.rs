@@ -18,7 +18,7 @@ mod truncate;
 use std::io::Write;
 use std::process::ExitCode;
 
-use accumulator::{cap_full_output, OutputAccumulator};
+use accumulator::{cap_full_output_stream, OutputAccumulator};
 use cli::{Mode, Request};
 use envelope::Success;
 use render::{format_output, format_snapshot, structured_limit};
@@ -126,27 +126,34 @@ pub fn execute_observed(
         ));
     };
 
-    // Single materialization of the stream: the spill file (or raw buffer) is
-    // read exactly once, and the structured output is derived from that same
-    // buffer after compression instead of re-reading it a second time.
-    let structured_output_path = accumulator.temp_output_path();
-    let last_line_bytes = accumulator.last_line_bytes();
-    let full_text = accumulator.into_full_text();
-    let full_output_path = structured_output_path
-        .as_ref()
-        .map(|path| path.to_string_lossy().into_owned());
-
     // ---- Option B: Tier-1 shadow pre-pass over the FULL stream ----
-    // Compress the complete output (from the spill file when one exists, else
-    // the in-memory raw buffer) so errors buried in the middle of a huge
-    // failing stream survive. Then feed the compressed text through the legacy
+    // Compress the complete output so errors buried in the middle of a huge
+    // failing stream survive, then feed the compressed text through the legacy
     // tail-truncation/parity path, unchanged, so the envelope shape is intact.
     let kind = compress::classify(&request.command);
     let success = exit_code == 0;
+    // Display snapshot taken BEFORE the stream is consumed (persist=false:
+    // pure read, no side effects). When Tier-1 returns the stream verbatim,
+    // this snapshot is the display source — the window snapshot over that
+    // verbatim content is pinned equal to it by the accumulator tests.
+    let display_snapshot = accumulator.snapshot(false);
+    let display_total_lines = display_snapshot.truncation.total_lines;
+    let display_total_bytes = display_snapshot.truncation.total_bytes;
+    // Original char count for the compression metadata, without
+    // materializing: equals the materialized text's `.chars().count()`.
+    let original_chars = accumulator.total_chars();
+    let structured_output_path = accumulator.temp_output_path();
+    let last_line_bytes = accumulator.last_line_bytes();
+    // The stream itself — never materialized on the generic path: the spill
+    // file is read in bounded windows straight from disk.
+    let stream = accumulator.into_stream();
+    let full_output_path = structured_output_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned());
     // Prune to the model-visible budget (40 lines / 2 KB), not the accumulator's
     // 2000 / 50 KB spill cap, so the gate's H1 can pass the result through.
-    let compressed = compress::compress_output(
-        &full_text,
+    let (compressed, input_unchanged) = compress::compress_output_stream(
+        &stream,
         kind,
         success,
         compress::COMPRESS_MAX_LINES,
@@ -163,7 +170,20 @@ pub fn execute_observed(
     // ORIGINAL spill, which holds the untouched stream. When an omission
     // strategy fired the compressed text is tiny, so the scratch accumulator
     // stays the cheap path for it.
-    let (text, mut truncation, truncated) = if compressed.strategy == compress::Strategy::None {
+    let (text, mut truncation, truncated) = if compressed.strategy == compress::Strategy::None
+        && input_unchanged
+    {
+        // Verbatim result: the accumulator's own window is the display text's
+        // source (equal to the window snapshot over the verbatim content,
+        // pinned by the accumulator tests), and the trailing-open-line bytes
+        // are exactly `last_line_bytes`. No copy of the stream ever exists.
+        let truncated = display_snapshot.truncation.truncated;
+        let (text, truncation) = format_snapshot(display_snapshot, last_line_bytes, "(no output)");
+        (text, truncation, truncated)
+    } else if compressed.strategy == compress::Strategy::None {
+        // ANSI-stripped verbatim (cleaning alone brought it within budget):
+        // the cleaned body is materialized by construction and rare — keep the
+        // window-snapshot path over it.
         let snapshot =
             OutputAccumulator::window_snapshot(&compressed.content, structured_output_path.clone());
         // Bytes of the trailing open line, as scratch.last_line_bytes() gave.
@@ -212,16 +232,24 @@ pub fn execute_observed(
     let truncated = original_truncated || truncated;
     if truncation.is_none() && original_truncated {
         // The original spilled: surface an oracle-shaped truncation object so the
-        // extension's `details` carries the spill reference.
-        let original_lines = full_text.lines().count();
+        // extension's `details` carries the spill reference. The stream totals
+        // come from the display snapshot's counters — the same values the
+        // materialized text's `lines().count()` / `len()` would report — and a
+        // verbatim result repeats them as the output counts.
+        let verbatim = compressed.strategy == compress::Strategy::None && input_unchanged;
+        let (output_lines, output_bytes) = if verbatim {
+            (display_total_lines, display_total_bytes)
+        } else {
+            (compressed.content.lines().count(), compressed.content.len())
+        };
         truncation = Some(crate::truncate::Truncation {
             content: String::new(),
             truncated: true,
             truncated_by: Some("bytes"),
-            total_lines: original_lines,
-            total_bytes: full_text.len(),
-            output_lines: compressed.content.lines().count(),
-            output_bytes: compressed.content.len(),
+            total_lines: display_total_lines,
+            total_bytes: display_total_bytes,
+            output_lines,
+            output_bytes,
             last_line_partial: false,
             first_line_exceeds_limit: false,
             max_lines: compress::COMPRESS_MAX_LINES,
@@ -233,7 +261,7 @@ pub fn execute_observed(
     } else {
         Some(compress::CompressionMeta {
             strategy: compressed.strategy.as_str(),
-            original_chars: full_text.chars().count(),
+            original_chars,
             visible_chars: compressed.content.chars().count(),
             omitted_chars: compressed.omitted_chars,
             spill_used: full_output_path.is_some(),
@@ -242,11 +270,12 @@ pub fn execute_observed(
     };
     let token_estimate = compress::token_estimate(&text);
 
-    // Derive the programmatic payload from the already-materialized stream:
-    // under the 1 MiB cap the buffer moves through with no second copy, past
-    // it the middle is replaced by the oracle's omission marker.
+    // Derive the programmatic payload from the stream: under the 1 MiB cap
+    // the buffer moves through with no second copy, past it the middle is
+    // replaced by the oracle's omission marker — assembled from the two
+    // boundary windows, not a materialization.
     let (structured_output, structured_truncated) =
-        cap_full_output(full_text, structured_limit());
+        cap_full_output_stream(&stream, structured_limit());
 
     Ok(Success {
         ok: true,

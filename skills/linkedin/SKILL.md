@@ -5,6 +5,8 @@ license: MIT (github.com/Jakeschincariol/linkedin-agent-skill)
 disable-model-invocation: true
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/linkedin`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 Run a LinkedIn account's writing side: draft, comment, reply, plan, score — the user posts. Nothing gets published by this skill, ever.
 
 Scope steering: `/skill:linkedin post` / `human` / `plan` … — read only the matching reference.

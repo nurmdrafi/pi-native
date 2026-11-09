@@ -17,6 +17,11 @@
     "-bash"
   ],
   "packages": [],
+  "compaction": {
+    "modelOverrides": {
+      "zai/glm-5.3": { "reserveTokens": 845000 }
+    }
+  },
   "extensions": [
     "-builtin:mcp"
   ]

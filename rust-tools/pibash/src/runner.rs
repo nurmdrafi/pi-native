@@ -1,7 +1,8 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use crate::accumulator::OutputAccumulator;
@@ -132,11 +133,21 @@ pub fn run_observed(
     // Drain both pipes on their own threads so a full pipe never deadlocks the
     // wait below; chunks are forwarded in arrival order.
     let (tx, rx) = mpsc::channel::<(Stream, Vec<u8>)>();
+    // Soft backpressure on the reader side: bytes sent but not yet received.
+    // A fast producer can outpace the append loop (decode + spill write), and
+    // an unbounded channel would queue the difference — O(stream) resident
+    // for a stream the spill path never materializes. Readers pause before
+    // their next read once this crosses QUEUED_GATE, so the PIPE backs up and
+    // the child blocks on write instead. The channel stays unbounded and the
+    // main loop keeps draining regardless, so kill/timeout semantics are
+    // untouched; a gated reader resumes as the consumer drains (within the
+    // 30 ms reader grace) or exits at the pipe's EOF.
+    let queued = Arc::new(AtomicUsize::new(0));
     if let Some(stdout) = child.stdout.take() {
-        let _ = spawn_reader(stdout, Stream::Stdout, tx.clone());
+        let _ = spawn_reader(stdout, Stream::Stdout, tx.clone(), Arc::clone(&queued));
     }
     if let Some(stderr) = child.stderr.take() {
-        let _ = spawn_reader(stderr, Stream::Stderr, tx.clone());
+        let _ = spawn_reader(stderr, Stream::Stderr, tx.clone(), Arc::clone(&queued));
     }
     drop(tx);
 
@@ -159,24 +170,57 @@ pub fn run_observed(
     let mut timed_out = false;
     let mut status: Option<std::process::ExitStatus> = None;
 
+    // `readers_done`: once both reader threads hit EOF and disconnect, no
+    // chunk can ever arrive again, so the lockstep wait below would spin —
+    // fall back to the fixed 1 ms exit wait for the child's remainder.
+    let mut readers_done = false;
     loop {
-        while let Ok((stream, chunk)) = rx.try_recv() {
-            match stream {
-                Stream::Stdout => pending_out.push(chunk),
-                Stream::Stderr => pending_err.push(chunk),
+        // Wait for the next CHUNK, not a fixed sleep: sleeping 1 ms while
+        // the reader threads kept draining let a fast producer queue a
+        // whole stream's worth of chunks (O(stream) resident). Blocking on
+        // chunk arrival keeps the backlog at the in-flight pipe chunks;
+        // the 1 ms timeout preserves the original exit-poll cadence when
+        // output stalls.
+        if !readers_done {
+            match rx.recv_timeout(Duration::from_millis(1)) {
+                Ok((Stream::Stdout, chunk)) => {
+                    queued.fetch_sub(chunk.len(), Ordering::Relaxed);
+                    pending_out.push(chunk);
+                }
+                Ok((Stream::Stderr, chunk)) => {
+                    queued.fetch_sub(chunk.len(), Ordering::Relaxed);
+                    pending_err.push(chunk);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => readers_done = true,
             }
-        }
-        if flush_pending(&mut pending_out, &mut pending_err, accumulator) {
-            observer.update(accumulator);
-        }
-
-        match done_rx.recv_timeout(Duration::from_millis(1)) {
-            Ok(exit_status) => {
-                status = Some(exit_status);
-                break;
+            while let Ok((stream, chunk)) = rx.try_recv() {
+                queued.fetch_sub(chunk.len(), Ordering::Relaxed);
+                match stream {
+                    Stream::Stdout => pending_out.push(chunk),
+                    Stream::Stderr => pending_err.push(chunk),
+                }
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            if flush_pending(&mut pending_out, &mut pending_err, accumulator) {
+                observer.update(accumulator);
+            }
+            match done_rx.try_recv() {
+                Ok(exit_status) => {
+                    status = Some(exit_status);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        } else {
+            match done_rx.recv_timeout(Duration::from_millis(1)) {
+                Ok(exit_status) => {
+                    status = Some(exit_status);
+                    break;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
         }
 
         if let Some(deadline) = deadline
@@ -226,6 +270,11 @@ enum Stream {
 /// and disconnect the channel immediately, so this only bounds the rare case.
 const READER_GRACE: Duration = Duration::from_millis(30);
 
+/// Reader-side backpressure threshold on sent-but-unreceived bytes (see the
+/// `queued` counter where the readers spawn): 1 MiB, sized so the in-channel
+/// backlog plus one in-flight drain batch stays well under 2 MiB resident.
+const QUEUED_GATE: usize = 1024 * 1024;
+
 /// Drain in-flight chunks until the readers finish or the grace period lapses.
 fn drain_readers(
     rx: &mpsc::Receiver<(Stream, Vec<u8>)>,
@@ -274,6 +323,7 @@ fn spawn_reader<R: Read + Send + 'static>(
     mut source: R,
     stream: Stream,
     tx: mpsc::Sender<(Stream, Vec<u8>)>,
+    queued: Arc<AtomicUsize>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         // 64 KB matches the Linux pipe capacity: one read syscall drains a
@@ -282,12 +332,18 @@ fn spawn_reader<R: Read + Send + 'static>(
         // larger read buffer simply never fills past that, still correct).
         let mut buffer = [0u8; 64 * 1024];
         loop {
+            // Backpressure gate: let the consumer drain before reading more,
+            // so the in-channel backlog stays bounded (see `queued` above).
+            while queued.load(Ordering::Relaxed) >= QUEUED_GATE {
+                std::thread::sleep(Duration::from_millis(1));
+            }
             match source.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
                 Ok(read) => {
                     if tx.send((stream, buffer[..read].to_vec())).is_err() {
                         break;
                     }
+                    queued.fetch_add(read, Ordering::Relaxed);
                 }
             }
         }

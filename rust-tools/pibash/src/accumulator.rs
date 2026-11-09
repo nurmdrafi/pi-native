@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::truncate::{js_byte_length, truncate_string_to_bytes_from_start, truncate_tail, Truncation};
@@ -32,22 +32,30 @@ impl Utf8Stream {
 
     /// Append decoded text for `data`, buffering an incomplete trailing
     /// sequence (if any) for the next chunk.
-    fn decode_into(&mut self, data: &[u8], out: &mut String) {
-        if self.pending_len == 0 {
-            self.decode_slice(data, out);
-            return;
+    fn decode_into(&mut self, mut data: &[u8], out: &mut String) {
+        // Loop, because the combined `pending + data` head can ITSELF end on
+        // a fresh lead byte whose character is still incomplete: the bytes
+        // were consumed out of `data`, so the stash must re-enter the
+        // combination with the remainder. Decoding the remainder standalone
+        // (the old shape) orphaned that lead byte, emitted a spurious
+        // replacement, and broke one-shot-lossy parity exactly at chunk
+        // boundaries that split characters.
+        while self.pending_len > 0 && !data.is_empty() {
+            // A UTF-8 character is at most 4 bytes, so at most three leading
+            // bytes of `data` are needed to complete the pending sequence.
+            let needed = 4 - self.pending_len;
+            let take = data.len().min(needed);
+            let head_len = self.pending_len + take;
+            let mut head = [0u8; 4];
+            head[..self.pending_len].copy_from_slice(&self.pending[..self.pending_len]);
+            head[self.pending_len..head_len].copy_from_slice(&data[..take]);
+            self.pending_len = 0;
+            self.decode_slice(&head[..head_len], out);
+            data = &data[take..];
         }
-        // A UTF-8 character is at most 4 bytes, so at most three leading bytes
-        // of `data` are needed to complete the pending sequence.
-        let needed = 4 - self.pending_len;
-        let take = data.len().min(needed);
-        let head_len = self.pending_len + take;
-        let mut head = [0u8; 4];
-        head[..self.pending_len].copy_from_slice(&self.pending[..self.pending_len]);
-        head[self.pending_len..head_len].copy_from_slice(&data[..take]);
-        self.pending_len = 0;
-        self.decode_slice(&head[..head_len], out);
-        self.decode_slice(&data[take..], out);
+        if !data.is_empty() {
+            self.decode_slice(data, out);
+        }
     }
 
     fn decode_slice(&mut self, bytes: &[u8], out: &mut String) {
@@ -100,6 +108,16 @@ pub struct Snapshot {
     pub full_output_path: Option<PathBuf>,
 }
 
+/// The finished output stream, unmaterialized: the in-memory raw buffer while
+/// it stayed under the spill threshold, else the spill file holding every raw
+/// byte. Consumers that only need budget-bounded windows (Tier-1 compression,
+/// the capped structured output) read windows straight off the file instead
+/// of copying the stream into memory.
+pub enum FullStream {
+    Memory(Vec<u8>),
+    Spill { path: PathBuf, len: usize },
+}
+
 /// Incremental accumulator over raw stdout/stderr chunks.
 pub struct OutputAccumulator {
     max_lines: usize,
@@ -110,6 +128,7 @@ pub struct OutputAccumulator {
     tail_starts_at_line_boundary: bool,
     total_raw_bytes: usize,
     total_decoded_bytes: usize,
+    total_decoded_chars: usize,
     completed_lines: usize,
     total_lines: usize,
     current_line_bytes: usize,
@@ -142,6 +161,7 @@ impl OutputAccumulator {
             tail_starts_at_line_boundary: true,
             total_raw_bytes: 0,
             total_decoded_bytes: 0,
+            total_decoded_chars: 0,
             completed_lines: 0,
             total_lines: 0,
             current_line_bytes: 0,
@@ -302,6 +322,16 @@ impl OutputAccumulator {
         self.current_line_bytes
     }
 
+    /// Characters in the decoded stream — equal to
+    /// `into_full_text().chars().count()`, because the streaming decoder and
+    /// the one-shot lossy decode agree byte-for-byte (pinned by the
+    /// characterization tests). Lets the compression metadata quote the
+    /// original size without materializing the stream.
+    #[must_use]
+    pub fn total_chars(&self) -> usize {
+        self.total_decoded_chars
+    }
+
     /// The path of the spill file holding the full stream, if one exists. Does
     /// not create a spill (unlike `snapshot(true)`).
     #[must_use]
@@ -325,12 +355,30 @@ impl OutputAccumulator {
         from_utf8_owned(std::mem::take(&mut self.raw))
     }
 
+    /// Consume the accumulator into the finished stream without ever
+    /// materializing the full text: the raw buffer moves out while it stayed
+    /// under the spill threshold, else the spill path and byte length are
+    /// handed over for windowed reads. `Spill.len` is `total_raw_bytes`, the
+    /// exact number of bytes written to the file.
+    #[must_use]
+    pub fn into_stream(mut self) -> FullStream {
+        self.finish();
+        if let Some(path) = self.temp_file_path.take() {
+            return FullStream::Spill {
+                path,
+                len: self.total_raw_bytes,
+            };
+        }
+        FullStream::Memory(std::mem::take(&mut self.raw))
+    }
+
     fn append_decoded_text(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
         let bytes = js_byte_length(text);
         self.total_decoded_bytes += bytes;
+        self.total_decoded_chars += text.chars().count();
         let tail_base = self.tail.len();
         self.tail.push_str(text);
         // One pass: this loop already visits every newline, so counting here is
@@ -467,10 +515,155 @@ pub fn cap_full_output(full: String, max_bytes: usize) -> (String, bool) {
     )
 }
 
+/// [`cap_full_output`] over a [`FullStream`], without materializing the full
+/// text: `Memory` (bounded by the spill threshold) and under-cap spills read
+/// through as before; an over-cap spill fetches only the two boundary windows
+/// the marker math reads, plus one validation pass proving the raw and decoded
+/// lengths coincide. Anything the windows cannot prove byte-exact (invalid
+/// UTF-8 changes every cut) takes the exact materialized path.
+#[must_use]
+pub fn cap_full_output_stream(stream: &FullStream, max_bytes: usize) -> (String, bool) {
+    let materialized = |path: &Path| -> (String, bool) {
+        cap_full_output(read_spill_string(path), max_bytes)
+    };
+    let (path, len) = match stream {
+        FullStream::Memory(raw) => {
+            return cap_full_output(from_utf8_owned(raw.clone()), max_bytes);
+        }
+        FullStream::Spill { path, len } => (path, *len),
+    };
+    if len <= max_bytes || !file_is_valid_utf8(path) {
+        return materialized(path);
+    }
+    let head_bytes = max_bytes / 2;
+    let tail_bytes = max_bytes - head_bytes;
+    // Head cut: `truncate_string_to_bytes_from_start` reads at most
+    // `head_bytes` plus the three bytes a boundary backoff can touch.
+    let mut head_win = match pread(path, 0, (head_bytes + 4).min(len)) {
+        Some(bytes) => bytes,
+        None => return materialized(path),
+    };
+    while head_win.last().is_some_and(|&b| (b & 0xc0) == 0x80) {
+        head_win.pop();
+    }
+    let Ok(head_str) = String::from_utf8(head_win) else {
+        return materialized(path);
+    };
+    let head = truncate_string_to_bytes_from_start(&head_str, head_bytes);
+    // Tail cut: `skip_continuation` starts at absolute offset `len -
+    // tail_bytes`, so fetch from four bytes earlier and index into it.
+    let tail_from = len.saturating_sub(tail_bytes + 4);
+    let Some(tail_win) = pread(path, tail_from, len - tail_from) else {
+        return materialized(path);
+    };
+    let start = skip_continuation(&tail_win, len - tail_bytes - tail_from);
+    let tail = String::from_utf8_lossy(&tail_win[start..]).into_owned();
+    let omitted = len - head_bytes - tail_bytes;
+    (
+        format!("{head}\n\n[... {omitted} bytes omitted ...]\n\n{tail}"),
+        true,
+    )
+}
+
+/// Read exactly `len` bytes at `offset` (`pread` — no cursor to disturb).
+fn pread(path: &Path, offset: usize, len: usize) -> Option<Vec<u8>> {
+    use std::os::unix::fs::FileExt;
+    let file = File::open(path).ok()?;
+    let mut buf = vec![0u8; len];
+    file.read_exact_at(&mut buf, offset as u64).ok()?;
+    Some(buf)
+}
+
+/// Read a spill file into a lossy string in one exact-size allocation.
+/// `fs::read`'s doubling growth briefly held ~3x the file — a cost the
+/// materialized fallback paths pay on streams the windowed twins decline
+/// (e.g. a single giant line), so size the buffer up front instead.
+pub(crate) fn read_spill_string(path: &Path) -> String {
+    let Ok(mut file) = File::open(path) else {
+        return String::new();
+    };
+    let cap = file.metadata().map_or(0, |meta| meta.len() as usize);
+    let mut bytes = Vec::with_capacity(cap);
+    if file.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    from_utf8_owned(bytes)
+}
+
+/// True when the whole file decodes as valid UTF-8, read in bounded chunks.
+fn file_is_valid_utf8(path: &Path) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        match file.read(&mut buf) {
+            Ok(0) => return pending.is_empty(),
+            Ok(n) => {
+                if !utf8_chunks_valid(&mut pending, &buf[..n]) {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+/// Validate `chunk`, continuing a `pending` incomplete trailing sequence
+/// from the previous chunk: bytes that cannot yet complete a character stay
+/// in `pending` for the next round. Shared by every streaming consumer that
+/// must treat the raw spill as the decoded stream (only true for valid
+/// UTF-8; anything else falls back to the exact lossy materialization).
+pub(crate) fn utf8_chunks_valid(pending: &mut Vec<u8>, chunk: &[u8]) -> bool {
+    if pending.is_empty() {
+        return match std::str::from_utf8(chunk) {
+            Ok(_) => true,
+            Err(err) => match err.error_len() {
+                // Incomplete trailing sequence: defer it.
+                None => {
+                    pending.extend_from_slice(&chunk[err.valid_up_to()..]);
+                    true
+                }
+                Some(_) => false,
+            },
+        };
+    }
+    // At most `4 - pending.len()` leading bytes of `chunk` can complete the
+    // pending character; the rest is validated on its own.
+    let take = (4 - pending.len()).min(chunk.len());
+    let mut combo = [0u8; 4];
+    combo[..pending.len()].copy_from_slice(pending);
+    combo[pending.len()..pending.len() + take].copy_from_slice(&chunk[..take]);
+    let combined = pending.len() + take;
+    match std::str::from_utf8(&combo[..combined]) {
+        Ok(_) => {
+            pending.clear();
+            if take < chunk.len() {
+                utf8_chunks_valid(pending, &chunk[take..])
+            } else {
+                true
+            }
+        }
+        Err(err) => match err.error_len() {
+            None => {
+                if take == chunk.len() {
+                    pending.clear();
+                    pending.extend_from_slice(&combo[..combined]);
+                    true
+                } else {
+                    false
+                }
+            }
+            Some(_) => false,
+        },
+    }
+}
+
 /// Consume a byte buffer as UTF-8, replacing invalid sequences only when the
 /// buffer is not valid UTF-8. String::from_utf8 reuses the allocation, so the
 /// common all-valid case is a zero-copy reinterpretation.
-fn from_utf8_owned(bytes: Vec<u8>) -> String {
+pub(crate) fn from_utf8_owned(bytes: Vec<u8>) -> String {
     String::from_utf8(bytes)
         .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
 }
@@ -657,6 +850,28 @@ mod tests {
         let content = acc.snapshot(false).content;
         assert!(content.starts_with('a') && content.ends_with('b'));
         assert!(content.contains(char::REPLACEMENT_CHARACTER));
+    }
+
+    #[test]
+    fn decoder_head_stash_recombines_across_chunk_boundary() {
+        // Regression: a chunk ending mid-character whose completing bytes
+        // end on a FRESH lead byte. `decode_into`'s combined head then
+        // stashes that lead as pending, and the old code decoded the
+        // remainder standalone — clobbering the stash, orphaning the lead,
+        // and emitting a spurious replacement, so content and the byte
+        // counter drifted from one-shot lossy exactly at chunk boundaries
+        // that split characters (e.g. `é\n` streams crossing 64 KiB reads:
+        // totalBytes 210004 vs the true 210000).
+        let mut acc = OutputAccumulator::new("pi-output-test");
+        // "ab" + the first byte of the first `é`.
+        acc.append(&[b'a', b'b', 0xc3]);
+        // Completing `é`, a newline, then a second `é` split the same way
+        // within one chunk: head = [0xc3, 0xa9, b'\n', 0xc3] ends on a lead.
+        acc.append(&[0xa9, b'\n', 0xc3, 0xa9, b'\n']);
+        acc.finish();
+        let snap = acc.snapshot(false);
+        assert_eq!(snap.content, "ab\u{e9}\n\u{e9}\n");
+        assert_eq!(snap.truncation.total_bytes, 8);
     }
 
     #[test]
@@ -900,5 +1115,75 @@ mod tests {
             assert_eq!(mode, 0o600, "spill file must not be world-readable");
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Characterization helper — `Truncation` has no `PartialEq`, so compare
+    /// every field individually. If a shape ever mismatches, do NOT reconcile:
+    /// pin both sides' actual values in separate assertions with a DELTA
+    /// comment — a delta kills the planned window_snapshot substitution for
+    /// that shape.
+    fn assert_snapshot_equivalence(name: &str, acc: &Snapshot, win: &Snapshot) {
+        assert_eq!(acc.content, win.content, "{name}: Snapshot.content");
+        let a = &acc.truncation;
+        let w = &win.truncation;
+        assert_eq!(a.content, w.content, "{name}: Truncation.content");
+        assert_eq!(a.truncated, w.truncated, "{name}: Truncation.truncated");
+        assert_eq!(a.truncated_by, w.truncated_by, "{name}: Truncation.truncated_by");
+        assert_eq!(a.total_lines, w.total_lines, "{name}: Truncation.total_lines");
+        assert_eq!(a.total_bytes, w.total_bytes, "{name}: Truncation.total_bytes");
+        assert_eq!(a.output_lines, w.output_lines, "{name}: Truncation.output_lines");
+        assert_eq!(a.output_bytes, w.output_bytes, "{name}: Truncation.output_bytes");
+        assert_eq!(
+            a.last_line_partial,
+            w.last_line_partial,
+            "{name}: Truncation.last_line_partial"
+        );
+        assert_eq!(
+            a.first_line_exceeds_limit,
+            w.first_line_exceeds_limit,
+            "{name}: Truncation.first_line_exceeds_limit"
+        );
+        assert_eq!(a.max_lines, w.max_lines, "{name}: Truncation.max_lines");
+        assert_eq!(a.max_bytes, w.max_bytes, "{name}: Truncation.max_bytes");
+    }
+
+    /// Characterization: the live accumulator's `snapshot(false)` and
+    /// `window_snapshot` over the lossy-decoded full text are documented as
+    /// byte-identical. A later change substitutes one for the other; every
+    /// shape below is a pin holding that equivalence in place.
+    #[test]
+    fn accumulator_snapshot_matches_window_snapshot_on_adversarial_shapes() {
+        let short_lines = |n: usize| -> Vec<u8> {
+            (0..n).map(|i| format!("line-{i}\n")).collect::<String>().into_bytes()
+        };
+        let shapes: Vec<(&str, Vec<u8>)> = vec![
+            ("trailing_newline", b"alpha\nbeta\n".to_vec()),
+            ("no_trailing_newline", b"alpha\nbeta".to_vec()),
+            // Incomplete 3-byte sequence at the tail: both decoders emit one
+            // replacement character, shifting decoded byte totals identically.
+            ("invalid_utf8_tail", b"ok\n\xE2\x82".to_vec()),
+            ("giant_single_line_60kb", "x".repeat(60 * 1024).into_bytes()),
+            ("exactly_2000_short_lines", short_lines(2000)),
+            // 5120 * 10 digits = 50 * 1024 bytes exactly: the untruncated edge.
+            ("exactly_50kb_of_digits", "0123456789".repeat(5120).into_bytes()),
+            ("crosses_rolling_window_3000_lines", short_lines(3000)),
+            ("empty", Vec::new()),
+            ("crlf", b"alpha\r\nbeta\r\n".to_vec()),
+            ("cr_only", b"alpha\rbeta\r".to_vec()),
+        ];
+        for (name, raw) in shapes {
+            let mut acc = OutputAccumulator::new("char-acc");
+            for chunk in raw.chunks(8192) {
+                acc.append(chunk);
+            }
+            acc.finish();
+            let acc_snap = acc.snapshot(false);
+            // into_full_text is lossy (from_utf8_owned), i.e. exactly the
+            // String::from_utf8_lossy(raw).into_owned() the main.rs path
+            // feeds window_snapshot.
+            let lossy = acc.into_full_text();
+            let win_snap = OutputAccumulator::window_snapshot(&lossy, None);
+            assert_snapshot_equivalence(name, &acc_snap, &win_snap);
+        }
     }
 }

@@ -8,6 +8,8 @@ metadata:
   author: tt-a1i
 ---
 
+`<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/archify`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
+
 # Archify
 
 Create checked standalone HTML as a native diagram or a one-page explainer that answers a question.
