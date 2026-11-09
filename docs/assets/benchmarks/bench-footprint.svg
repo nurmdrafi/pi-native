@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="386" viewBox="0 0 880 386" font-family="sans-serif">
+<rect width="880" height="386" fill="#0d1117"/>
+<text x="16" y="24" font-size="13" fill="#e6edf3" font-weight="bold" text-anchor="start">Memory and context footprint</text>
+<text x="16" y="40" font-size="10" fill="#8b949e" text-anchor="start">peak RSS · model-visible context · session-log re-scan · lower is better everywhere</text>
+<rect x="540" y="14" width="12" height="12" fill="#6e7681"/>
+<text x="556" y="24" font-size="10" fill="#e6edf3" text-anchor="start">Pi Coding Agent (built-in)</text>
+<rect x="716" y="14" width="12" height="12" fill="#58a6ff"/>
+<text x="732" y="24" font-size="10" fill="#e6edf3" text-anchor="start">Pi Native (Rust)</text>
+<text x="16" y="64" font-size="12" fill="#e6edf3" font-weight="bold" text-anchor="start">A · Peak RSS on identical workloads (KiB)</text>
+<text x="166" y="99" font-size="10" fill="#e6edf3" text-anchor="end">windowed read</text>
+<rect x="180" y="80" width="640" height="12" fill="#6e7681"/>
+<text x="815" y="89.5" font-size="9" fill="#0d1117" font-weight="bold" text-anchor="end">110,128</text>
+<rect x="180" y="96" width="13.4" height="12" fill="#58a6ff"/>
+<text x="198.4" y="105.5" font-size="9" fill="#58a6ff" text-anchor="start">2,300</text>
+<text x="856" y="106" font-size="10" fill="#58a6ff" font-weight="bold" text-anchor="end">48x lower</text>
+<text x="166" y="133" font-size="10" fill="#e6edf3" text-anchor="end">100 MB write</text>
+<rect x="180" y="114" width="640" height="12" fill="#6e7681"/>
+<text x="815" y="123.5" font-size="9" fill="#0d1117" font-weight="bold" text-anchor="end">410,304</text>
+<rect x="180" y="130" width="4.5" height="12" fill="#58a6ff"/>
+<text x="189.5" y="139.5" font-size="9" fill="#58a6ff" text-anchor="start">2,888</text>
+<text x="856" y="140" font-size="10" fill="#58a6ff" font-weight="bold" text-anchor="end">142x lower</text>
+<text x="166" y="167" font-size="10" fill="#e6edf3" text-anchor="end">100 MB piped yes</text>
+<rect x="180" y="148" width="640" height="12" fill="#6e7681"/>
+<text x="815" y="157.5" font-size="9" fill="#0d1117" font-weight="bold" text-anchor="end">1,027,144</text>
+<rect x="180" y="164" width="3.7" height="12" fill="#58a6ff"/>
+<text x="188.7" y="173.5" font-size="9" fill="#58a6ff" text-anchor="start">~6,000</text>
+<text x="856" y="174" font-size="10" fill="#58a6ff" font-weight="bold" text-anchor="end">171x lower</text>
+<text x="16" y="196" font-size="12" fill="#e6edf3" font-weight="bold" text-anchor="start">B · Model-visible context, bytes (bench-suite totals)</text>
+<text x="166" y="231" font-size="10" fill="#e6edf3" text-anchor="end">context bytes</text>
+<rect x="180" y="212" width="640" height="12" fill="#6e7681"/>
+<text x="815" y="221.5" font-size="9" fill="#0d1117" font-weight="bold" text-anchor="end">273,312</text>
+<rect x="180" y="228" width="36.5" height="12" fill="#58a6ff"/>
+<text x="221.5" y="237.5" font-size="9" fill="#58a6ff" text-anchor="start">15,569</text>
+<text x="856" y="238" font-size="10" fill="#58a6ff" font-weight="bold" text-anchor="end">−94.3%</text>
+<text x="16" y="254" font-size="12" fill="#e6edf3" font-weight="bold" text-anchor="start">C · pidx session-log re-scan, ms (cold vs warm)</text>
+<rect x="640" y="243" width="12" height="12" fill="#6e7681"/>
+<text x="656" y="253" font-size="10" fill="#8b949e" text-anchor="start">cold index</text>
+<rect x="740" y="243" width="12" height="12" fill="#58a6ff"/>
+<text x="756" y="253" font-size="10" fill="#8b949e" text-anchor="start">warm rerun</text>
+<text x="166" y="289" font-size="10" fill="#e6edf3" text-anchor="end">re-scan</text>
+<rect x="180" y="270" width="640" height="12" fill="#6e7681"/>
+<text x="815" y="279.5" font-size="9" fill="#0d1117" font-weight="bold" text-anchor="end">2,100 (2.1 s)</text>
+<rect x="180" y="286" width="8.5" height="12" fill="#58a6ff"/>
+<text x="193.5" y="295.5" font-size="9" fill="#58a6ff" text-anchor="start">28</text>
+<text x="856" y="296" font-size="10" fill="#58a6ff" font-weight="bold" text-anchor="end">~17x payback</text>
+<text x="16" y="318" font-size="9" fill="#8b949e" text-anchor="start">bars exactly proportional to values within each row · each row scaled to its own max - compare lengths within a row, read values across rows</text>
+<text x="16" y="332" font-size="9" fill="#8b949e" text-anchor="start">native RSS bars are intentionally near-invisible at exact proportion - that is the 48x-171x result, not a rendering artifact</text>
+<text x="16" y="346" font-size="9" fill="#8b949e" text-anchor="start">context: reads and shell output converge on a fixed ceiling regardless of source size - cost stops scaling with the file</text>
+<text x="16" y="360" font-size="9" fill="#8b949e" text-anchor="start">regenerate: node benchmark/rss-arm/bench.mjs --full --tag v1 · npm run bench:model-visible · sources: docs/native-tools.md, benchmark/runs/</text>
+</svg>

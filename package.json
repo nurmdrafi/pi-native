@@ -12,6 +12,7 @@
     "test:subagents": "node --test --import ./tests/subagents/runner.ts 'tests/subagents/*.test.ts'",
     "lint:agents": "node scripts/agents-lint.mjs",
     "doc:check": "~/.pi/agent/bin/docheck",
+    "tests:badge": "node scripts/tests-badge.mjs",
     "gate:eval": "node tests/gate/eval/run.mjs",
     "daemons:kill": "pkill -f \"$(dirname \"$npm_package_json\")/bin/(pibash|piread|piedit) --serve\" || true",
     "bench:model-visible": "node tests/tools/bench/model-visible-baseline.mjs",
