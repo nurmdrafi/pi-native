@@ -37,8 +37,11 @@ Coding-agent configs decay: always-on prompt bloat, machine-specific paths, undo
 - Native Rust tools (`piread`, `piedit`, `pibash`, `piwrite`, `pidx`) replace `read`, `edit`, `bash`, `write`, and session-log parsing — same parameters, so a tuned pi setup runs unchanged ([docs/native-tools.md](docs/native-tools.md))
 - Every tool call crosses a permission gate before it runs ([docs/rust-tools-architecture.md](docs/rust-tools-architecture.md))
 - Context stays small by default: windowed reads, bounded diffs, hard output caps ([docs/native-tools.md](docs/native-tools.md))
-- Dashboard shows token spend, cache hit rate, and per-session USD budget alerts ([dashboard/](dashboard/))
+- Dashboard tracks cost and health live: overview, sessions, subagents, permission-gate, and live tabs over SSE, with token spend, cache hit rate, tool/subagent/gate metrics, and per-session USD budget alerts ([dashboard/](dashboard/))
 - Subagents run sandboxed with the gate re-enabled inside; each child declares its write scope, so parallel work never clobbers files ([docs/subagents.md](docs/subagents.md))
+- `/handoff <goal>` drafts a compaction-aware context-transfer prompt and seeds a new session with it; auto-offers once per session at the turn cadence limit ([extensions/README.md](extensions/README.md))
+- Compact editor caps the prompt-editor height so a long paste cannot push the transcript off screen ([extensions/README.md](extensions/README.md))
+- Self-heal repairs the PATH pin, native binaries, and the PCRE2 `rg` on session start after a pull or pi update ([extensions/README.md](extensions/README.md))
 - Zero init: clone into `~/.pi/agent`; every later pull re-checks the setup itself ([docs/zero-init.md](docs/zero-init.md))
 - No silent fallback: native tools always execute the Rust binary; terminal failure throws an error plus one stderr line; built-ins only by explicit configuration ([docs/native-tools.md](docs/native-tools.md))
 
@@ -125,6 +128,8 @@ Native-tool spawns re-set the session keys from the live tool context (`extensio
 | `PI_DASH_PORT`        | user       | dashboard server port (`npm run dashboard`; default 8787)      |
 | `PI_DASH_SESSIONS_DIR`| user       | dashboard sessions tree to index (default `~/.pi/agent/sessions`) |
 | `PI_DASH_SESSION_BUDGET` | user  | dashboard per-session cost budget in USD for alerts (0 disables) |
+| `PI_COMPACT_EDITOR_LINES` | user | compact-editor height cap in lines (default 10) |
+| `HANDOFF_TURN_LIMIT`      | user | turns before the auto handoff offer (default 120) |
 
 Workers also inherit the internal parent-to-child plumbing (`PI_SUBAGENT_AGENT`, `PI_SUBAGENT_SESSION`, `PI_SUBAGENT_ID`, `PI_SUBAGENT_ALLOWED`, `PI_SUBAGENT_ACTIVITY_FILE`, `PI_SUBAGENT_SURFACE`, `PI_SUBAGENT_AUTO_EXIT`), classified in the env-var allowlist in [rust-tools/docheck/src/main.rs](rust-tools/docheck/src/main.rs).
 
