@@ -64,6 +64,14 @@ Match existing patterns before introducing new ones. New framework = new file un
 - Full failure-UX architecture (transport-owned toasts, message precedence, single-toast dedupe): [references/error-ux.md](references/error-ux.md).
 - Global API error layer implementation (`ApiError` contract, baseQuery/plain-wrapper adapters, 401 refresh-or-logout modes, window nets, rollout + acceptance tests): [references/api-error-handling.md](references/api-error-handling.md).
 
+### Environment access (new UI reading config/env)
+
+- Client code reads only the framework's public, build-time-inlined vars (Next.js `NEXT_PUBLIC_*`, Vite `VITE_*`, CRA `REACT_APP_*`); no-prefix vars are server-only and invisible to the client — never reference one client-side, never put a secret in a public var.
+- Public vars are baked at build time, and deploys may substitute placeholders into the built bundles: a value change means rebuild/redeploy, not an env edit.
+- Server/edge-bundled code reading a public var: direct `process.env.<NAME>` member access only — a bare token (string literal, key array, dot access on an env object) collides with placeholder substitution and corrupts the bundle.
+- Repo-specific env contracts (naming, substitution, middleware rules) live in the repo's own docs — read them before touching env/config.
+- CSP shipped per request from middleware (runtime-env policy, boot-dead validation, placeholder-safe public-var reads): [references/csp-runtime-middleware.md](references/csp-runtime-middleware.md).
+
 ## Design Thinking (GREENFIELD ONLY — skip if Pattern Audit found existing UI)
 
 Direction depth: [references/design-language.md](references/design-language.md) (persona, hero, typography discipline, structural devices, empty/error voice).
