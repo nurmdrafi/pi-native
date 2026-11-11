@@ -1,6 +1,6 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
-  "lastChangelogVersion": "1.5.0",
+  "lastChangelogVersion": "1.5.2",
   "theme": "dark",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.3",
@@ -19,7 +19,9 @@
   "packages": [],
   "compaction": {
     "modelOverrides": {
-      "zai/glm-5.3": { "reserveTokens": 845000 }
+      "zai/glm-5.3": {
+        "reserveTokens": 845000
+      }
     }
   },
   "extensions": [

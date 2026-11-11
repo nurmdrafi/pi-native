@@ -110,5 +110,5 @@ File map (every piece exists for a reason; skip none):
 - [ ] Social: provider token exchanged for backend token before session write
 - [ ] AuthN+authZ server-side on every mutating route; id-addressed access verifies ownership (IDOR)
 - [ ] Cookies `Secure`+`HttpOnly`+`SameSite`; no token in localStorage; TLS verification on (incl. proxy agents)
-- [ ] No secret in client bundle (check built output); CSP/security headers set
+- [ ] No secret in client bundle (check built output); CSP/security headers set (middleware CSP pattern + env contract: `frontend-design` skill → references/csp.md; primer: https://web.dev/articles/csp)
 - [ ] New integration: legacy-free day one. Migration: legacy storage/cookie/route code deleted, not dormant
