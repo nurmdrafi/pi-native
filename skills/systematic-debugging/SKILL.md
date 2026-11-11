@@ -104,3 +104,4 @@ But: 95% of "no root cause" = incomplete investigation.
 - [references/condition-based-waiting.md](references/condition-based-waiting.md) — replace arbitrary timeouts with condition polling
 - [references/evidence-gathering.md](references/evidence-gathering.md) — multi-component instrumentation + external-API throttle-counter case
 - [references/red-flags.md](references/red-flags.md) — red-flag thoughts, human-partner signals, rationalization→reality table
+- [references/segment-isolation.md](references/segment-isolation.md) — substitute a local stand-in to prove which pipeline segment is broken; why a green check in the wrong environment proves nothing

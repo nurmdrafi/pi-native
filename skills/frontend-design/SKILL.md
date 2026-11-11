@@ -36,6 +36,7 @@ Detect UI stack from `package.json` + existing components; express design throug
 - **shadcn/ui + Tailwind**: [references/shadcn-tailwind.md](references/shadcn-tailwind.md) — `components.json` detection, project context via CLI, Base UI vs Radix primitives, Tailwind v3/v4 token detection, composition rules.
 - **Vanilla/other**: no established idioms → full aesthetic freedom below.
 - Mixed stacks: read both references; check Tailwind reset against AntD styles before mixing.
+- Security headers (middleware CSP): [references/csp.md](references/csp.md) — goal: env-only CSP ops (restart, never rebuild); required `CSP_ORIGINS` allowlist, `CSP_MODE`/`SENTRY_CSP_REPORT_ENDPOINT` contract, runtime delivery + member-access rules, boot-dead validation, allowlist script-src (no nonce/strict-dynamic — next dev blocks), deck.gl eval caveat, report-only rollout; primer: <https://web.dev/articles/csp>.
 - Existing-UI polish/audit/critique (not new build) → impeccable skill: `/skill:impeccable <command>`; full source clone `git/impeccable`.
 
 Match existing patterns before introducing new ones. New framework = new file under `references/` + one router row here.
