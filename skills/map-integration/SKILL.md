@@ -135,7 +135,7 @@ new ScatterplotLayer({
 
 ## 5. Known map bugs / pitfalls (fixed before — keep guards)
 
-Thirteen numbered guards in [references/known-pitfalls.md](references/known-pitfalls.md) — cited as `known-pitfalls.md #N` elsewhere. Covers: queryRenderedFeatures guards, mapbox-gl v3 drift, [lng, lat] order, geolocation validation, draw/polygon sync, geometry staleness, marker `dragend` capture, engine-clear-vs-state-clear, react-bkoi-gl component-vs-constructor exports, DrawControl callback-only architectures, draw-toolbar CSS mismatch, degenerate turf rings, deck.gl `zIndex` inert prop.
+Fifteen numbered guards in [references/known-pitfalls.md](references/known-pitfalls.md) — cited as `known-pitfalls.md #N` elsewhere. Covers: queryRenderedFeatures guards, mapbox-gl v3 drift, [lng, lat] order, geolocation validation, draw/polygon sync, geometry staleness, marker `dragend` capture, engine-clear-vs-state-clear, react-bkoi-gl component-vs-constructor exports, DrawControl callback-only architectures, draw-toolbar CSS mismatch, degenerate turf rings, deck.gl `zIndex` inert prop, `data:` icon urls refused by CSP `connect-src`, uncached icon proxy bursting the icon host (N+1).
 
 ## 6. Camera idioms
 
@@ -165,7 +165,7 @@ Optimized routes: call through server-side API proxy — routing API key out of 
 
 Read project `.env*` for actual names — don't invent. Common shapes: map style token (`NEXT_PUBLIC_MAP_API_ACCESS_TOKEN` / `VITE_MAP_API_ACCESS_TOKEN`), MQTT broker host/port/protocol + auth username/password, routing API key (separate from map token). Barikoi names in use: `BARIKOI_API_KEY` (dominant), `BARIKOI_STYLE_URL`, `BARIKOI_GL_TOKEN`, `BARIKOI_API`/`BARIKOI_API_ENDPOINT`, `NEXT_PUBLIC_MAP_BASE_URL`; legacy mapbox-era: `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`.
 
-Browser-visible credentials = public by definition: style key rides in style URL, MQTT creds in wss connection. Consequences: restrict keys by allowed origin in developer dashboard, one key per app/service, privileged keys (routing, geofence CRUD) server-side behind app's proxy. Restrictive-CSP deployments need real worker URL, not blob: — that's what `./worker` exports are for (§1).
+Browser-visible credentials = public by definition: style key rides in style URL, MQTT creds in wss connection. Consequences: restrict keys by allowed origin in developer dashboard, one key per app/service, privileged keys (routing, geofence CRUD) server-side behind app's proxy. Restrictive-CSP deployments need real worker URL, not blob: — that's what `./worker` exports are for (§1). Standard allowlist policies set `worker-src 'self' blob:` so the bundled worker works untouched — the full middleware CSP pattern + env allowlist lives in the `frontend-design` skill (references/csp.md, primer https://web.dev/articles/csp).
 
 ## 11. CI for dashboard family (solved once — keep pattern)
 
