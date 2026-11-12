@@ -21,7 +21,22 @@ user-data-dir (verified: developer.chrome.com/blog/remote-debugging-port).
 3. Probe scripts here: `probe-mcp.mjs` (handshake + tools/list),
    `live-test.mjs` (list_pages end-to-end), `mcp-drive.mjs` (the driver).
 
-## Per-run usage
+## Per-session usage (preferred: bridge = ONE Allow-click per session)
+
+```bash
+nohup node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-bridge.mjs >/tmp/mcp-bridge.log 2>&1 &
+node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-client.mjs 'list_pages:{}' \
+  'navigate_page:{"pageId":1,"url":"https://www.linkedin.com/"}' 'take_snapshot:{}'
+node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-client.mjs '__quit__'   # stop: drops banner
+```
+
+- Bridge holds one MCP connection open: Chrome asks Allow ONCE per session,
+  the "controlled by automated test software" banner stays while connected.
+- Client calls are cheap; multiple steps per call execute in order.
+- If Chrome restarts (DevToolsActivePort changes): kill and restart the bridge.
+- `navigate_page` requires the numeric `pageId` from `list_pages`.
+
+## Per-run usage (one-shot fallback; one dialog per run)
 
 ```bash
 node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-drive.mjs \
@@ -29,11 +44,6 @@ node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-drive.mjs \
   'navigate_page:{"pageId":1,"url":"https://www.linkedin.com/"}' \
   'take_snapshot:{}'
 ```
-
-- One MCP connection per run; tools execute in order; results print as text.
-- Chrome pops a permission dialog per connection: the user clicks Allow.
-- A "controlled by automated test software" banner shows while attached.
-- `navigate_page` requires the numeric `pageId` from `list_pages`.
 
 ## Tools available (33)
 
