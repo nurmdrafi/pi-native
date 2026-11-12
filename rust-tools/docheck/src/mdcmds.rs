@@ -528,7 +528,7 @@ fn is_handoff_or_ignored(rel_md: &str) -> bool {
             }
         }
     }
-    rel_md.starts_with("handoff/") || rel_md.starts_with("audit-reports/")
+    rel_md.starts_with("handoff/") || rel_md.starts_with("audit-reports/") || rel_md.starts_with("sessions/")
 }
 
 fn truncate_chars(s: &str, n: usize) -> &str {
@@ -552,9 +552,11 @@ fn rel_of(md: &Path, root: &Path) -> String {
         .unwrap_or_else(|_| md.display().to_string())
 }
 
-/// Markdown walk: skip `node_modules`, `.git`, and a root-level `git/`
-/// (external clones). readdirSync sorts entries (libuv qsorts scandir results),
-/// so the walk sorts each directory's entries by name bytes to match.
+/// Markdown walk: skip `node_modules`, `.git`, and root-level `git/`
+/// (external clones) and `sessions/` (frozen session-capture artifacts —
+/// history records, never curated docs). readdirSync sorts entries (libuv
+/// qsorts scandir results), so the walk sorts each directory's entries by
+/// name bytes to match.
 fn walk_mds(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -565,7 +567,10 @@ fn walk_mds(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
         .collect();
     names.sort();
     for name in names {
-        if name == "node_modules" || name == ".git" || (dir == root && name == "git") {
+        if name == "node_modules"
+            || name == ".git"
+            || (dir == root && (name == "git" || name == "sessions"))
+        {
             continue;
         }
         let p = dir.join(&name);
@@ -1167,7 +1172,27 @@ mod tests {
         assert!(!is_handoff_or_ignored("HANDOFF-x/y.md"));
         assert!(is_handoff_or_ignored("handoff/a.md"));
         assert!(is_handoff_or_ignored("audit-reports/b.md"));
+        assert!(is_handoff_or_ignored("sessions/a/doc-consistency-2026-11-12T08-22-23.md"));
+        assert!(!is_handoff_or_ignored("docs/sessions.md"));
         assert!(!is_handoff_or_ignored("docs/handoff.md"));
+    }
+
+    #[test]
+    fn walk_skips_root_sessions_dir() {
+        let root = std::env::temp_dir().join(format!("docheck-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root); // stale dir from a killed run is fine
+        std::fs::create_dir_all(root.join("sessions/sub")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("sessions/sub/capture.md"), "x").unwrap();
+        std::fs::write(root.join("docs/curated.md"), "x").unwrap();
+        let mut mds = Vec::new();
+        walk_mds(&root, &root, &mut mds);
+        let rels: Vec<String> = mds
+            .iter()
+            .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(rels, vec!["docs/curated.md".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -62,7 +62,7 @@ next action, and its doc path is the trigger.
 Loaded on demand, never always-on (the links used to sit in AGENTS.md, where they
 cost every project's prefix for rules only this harness needs):
 
-- `docs/change-discipline.md` — change ladder, root cause, deployment.
+- `docs/change-rules.md` — change ladder, root cause, deployment.
 - `docs/portability.md` — macOS+Linux shell subset, dynamic paths.
 - `docs/rust-tools-optimization.md` — safe path for optimizing a native tool: model
 the cost, freeze the old binary, pin the seam, swap, verification ladder, honest

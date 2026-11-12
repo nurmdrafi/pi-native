@@ -724,10 +724,21 @@ export default function (pi: ExtensionAPI) {
       ) {
         const hits = searchHits.get(path);
         const hint = hits ? hitWindowHint(hits) : undefined;
+        // 2026-11-12 self-serve (554-refusal churn audit): the old hint had
+        // a <term> placeholder and only the basename as target — replaying it
+        // credited nothing unless the file sat at the cwd. The exact command
+        // below carries the refused path itself as the search target;
+        // searchedPathsFrom credits an argv token that exists on disk, so
+        // running it satisfies this check and the re-read passes. Budget: the
+        // runner's 220c reason diet — one path mention, basename as pattern.
+        const quotable =
+          /^(?!-)[^\s'"|><;$`=&()]+$/.test(display) && !display.includes("://");
         return blockCall(
           hint && hits
             ? `Locate-first: no hit in this ${win.end - win.start + 1}-line window (hits ${hitLinesLabel(hits)}) — piread {path:'${shown}', offset:${hint.offset}, limit:${hint.limit}}. Hits listed above; do not re-search.`
-            : `Locate-first: '${shown}' was never named by a search this session — locate first (\`rg -n <term> ${shown.replace(/^.*\//, "")}\`), or piread {path, hits:'<term>'}.`,
+            : quotable
+              ? `Locate-first: no search has named this path — run \`rg -n -F '${display.replace(/^.*\//, "")}' ${display}\`, then re-read.`
+              : `Locate-first: '${shown}' was never named by a search this session — locate first (\`rg -n -F '<term>' <path>\`), or piread {path, hits:'<term>'}.`,
         );
       }
       // R1b (2026-10-10 audit; demoted 2026-10-21): a whole read of a large

@@ -53,6 +53,10 @@ Measured p50, built-in Pi tools vs Pi Native Rust tools, matched workloads. Bars
 
 ![Chart, three panels: peak RSS in KiB, 48x to 171x lower on three identical workloads; model-visible context bytes, 273,312 before vs 15,569 after, minus 94.3 percent; and pidx session-log re-scan, cold 2.1 s vs warm 28 ms with ~17x payback](docs/assets/benchmarks/bench-footprint.svg)
 
+The all-tools chart regenerates with `node scripts/bench-charts.mjs` — output
+defaults to `docs/assets/benchmarks/all-tools.svg`; set `PI_BENCH_CHART_OUT`
+to write it elsewhere.
+
 ## <img src="https://api.iconify.design/withicons-anime/rocket.svg" height="18" alt="" /> Quick start
 
 Prereqs: git; Rust (cargo); macOS or Linux; tmux only for subagents.
@@ -124,6 +128,7 @@ Native-tool spawns re-set the session keys from the live tool context (`extensio
 | `PI_CODING_AGENT_DIR` | override   | agent config dir (default `~/.pi/agent`); forwarded to workers |
 | `PI_SUBAGENT_NAME`    | subagents  | worker display name                                            |
 | `PI_SUBAGENT_MAX_CONCURRENT` | user | cap on simultaneous subagent spawns (default 5; <1 unlimited) |
+| `PI_SUBAGENT_MAX_AUTO_RESUMES` | user | auto-resume attempts after a transient provider error before the child fails (default 2; 0 disables) |
 | `PI_PIDX_MAX_INLINE`  | user       | pidx inline-output cap before spill (default 2000)             |
 | `PI_DASH_PORT`        | user       | dashboard server port (`npm run dashboard`; default 8787)      |
 | `PI_DASH_SESSIONS_DIR`| user       | dashboard sessions tree to index (default `~/.pi/agent/sessions`) |

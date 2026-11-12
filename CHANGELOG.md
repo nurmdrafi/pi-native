@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.76.0] - 12-11-2026
+
+### Added
+
+- **Self-serve read-gate refusal.** A blocked read now prints the exact `rg` search that credits it, so a
+  locate-first refusal resolves in one turn instead of three.
+- **Bounded subagent auto-resume.** `PI_SUBAGENT_MAX_AUTO_RESUMES` (default 2) caps resumes after a
+  transient provider error; the notice reports the attempt count instead of reading as a failure.
+- **`doc:check` gate restored.** `bin/docheck` is built and installed by `scripts/bootstrap.sh`.
+
+### Changed
+
+- **docheck ignores session captures.** Markdown under `sessions/` is never scanned, so frozen
+  transcripts no longer fail the doc gate.
+- **Agent rules tightened.** Commit shape defers to `prompts/ship.md` with no `#` in subject or body;
+  fresh-shell, nvm-sourcing, pane-failure, attachment and 429-staggering rules added.
+  `docs/change-discipline.md` renamed to `docs/change-rules.md`.
+
 ## [1.75.0] - 09-11-2026
 
 ### Changed

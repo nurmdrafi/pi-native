@@ -199,7 +199,7 @@ one percent. Optimize the rung before optimizing the code.
 ## Related
 
 - [rust-tools-architecture.md](rust-tools-architecture.md) — crate layout, dispatch ladder, envelopes.
-- [change-discipline.md](change-discipline.md) — change ladder, root cause, deployment.
+- [change-rules.md](change-rules.md) — change ladder, root cause, deployment.
 - `tests/README.md` — entry points for every audit and bench driver.
 - [../research/piread-compaction-approaches.md](../research/piread-compaction-approaches.md) — compaction methods tried, with
   outputs and verdict.

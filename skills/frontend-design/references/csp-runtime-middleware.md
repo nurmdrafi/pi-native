@@ -194,7 +194,7 @@ Also cover: validation throws on missing/placeholder/quote/semicolon values; `CS
 
 Build with bare-name placeholders exactly as the pipeline does, replay the substitution over every bundle holding a token, syntax-check each:
 
-```bash
+```text
 NEXT_PUBLIC_BASE_URL=NEXT_PUBLIC_BASE_URL NODE_ENV=production next build
 
 for f in $(rg -l 'NEXT_PUBLIC_[A-Z_]+' --glob '*.js' .next); do

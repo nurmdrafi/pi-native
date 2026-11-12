@@ -6,7 +6,7 @@
 - Ambiguous "continue"/"proceed" → confirm scope first.
 
 ## Safety
-- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps, anything public, out-of-scope edits.
+- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps (except a ship run whose gates pass — commit and push immediately), anything public, out-of-scope edits.
 - Never without explicit approval: secrets (`.env`, `~/.ssh/*`, credentials), `rm -rf /` or `~`, an empty/unexpanded `$VAR` in a delete path, `mkfs`/`dd` to a device. A denial is final — no retries or disguises.
 
 ## Communication
@@ -16,8 +16,8 @@
 - Between tool calls: one sentence, ≤20 words.
 
 ## Workflow & TDD
-- Commit messages: no `#` — chat webhooks render `#` lines as headings.
-- Merge commits: write a subject naming the deliverable; never keep git's default `Merge branch …` + conflicts template.
+- Commit subject and body: no `#` character anywhere. Shape per `prompts/ship.md`: `type(scope): imperative summary`, body as multi-line `-` bullets, one per change, ≤100 chars per line, standard conventional type. Gates pass → commit and push without waiting for approval.
+- Merge commits: subject names the deliverable, changelog deduped; never git's default `Merge branch …` template. Never commit pasted CI or webhook text — link the commit it announces.
 - TDD always: failing test → watch it fail → minimum code → refactor.
 - Bug fix → write a failing repro test first (no probe test).
 - Untestable (config/docs/infra) → state why, proceed.
@@ -48,9 +48,11 @@
 - Style: brief, self-contained, no jargon or tribal knowledge; concepts, not tool names; name tools only in repo-scoped rules.
 - In any file (docs, comments, tests, fixtures, notes, changelog), neutralize project/session/artifact references as `<project-a>`, `<vendor>`, `<org>`, `<project-root>`; keep dates. Fixture names describe shape, never the incident's source. Exception: a skill about a named stack names it.
 - Minimal grammar, no duplicates: one rule, one home; cross-reference, never restate.
+- A cross-reference is a resolvable path from the referring file (markdown link or repo path), never a bare code span naming a file that lives elsewhere.
+- Slash-command bodies pass arguments only through `$ARGUMENTS`/`$@`/`${N}` placeholders — a body without one silently drops the invoked argument.
 
 ## Harness tool discipline
 - Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push.
 - Tool-defect lessons carry path, file size, and exact payload (anchor text or hash) so a replay reproduces it.
 - A tool writing output/state to a chosen path keeps it inside agent home — outside paths are refused.
-- File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`.
+- File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`. Overwriting an existing path trips the destructive gate: check for the twin first (`fd <basename>`), then write a fresh path or rewrite the original deliberately.
