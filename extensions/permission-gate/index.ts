@@ -10,7 +10,7 @@
  * git log.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { config, projectTrustMode, ruleBlocks, ruleEnabled, ruleSeverity, setYolo, yoloActive, YOLO_FLOOR } from "./loader.ts";
+import { config, ruleBlocks, ruleEnabled, ruleSeverity, setYolo, yoloActive, YOLO_FLOOR } from "./loader.ts";
 import { CADENCE_CTX_TOKENS, CADENCE_TURNS } from "./cadence.ts";
 
 /** Bash-kind predicate: `bash` plus the native `pibash` tool (2026-10-18
@@ -548,19 +548,6 @@ export default function (pi: ExtensionAPI) {
       `first — ${ctx?.hasUI ? "the user declined" : "no chat approval, no confirm dialog"}; ask in chat and wait. Never run it unprompted.`
     );
   };
-
-  // PT: pi-core asks "Do you trust this project?" at startup for any cwd
-  // with .pi/ resources or .agents/skills, before loading them. With
-  // projectTrust "auto" (the shipped state) the gate answers in-process —
-  // trusted, remember:false — so nothing is written to the vendor trust
-  // store and every run decides fresh. "ask" stays undecided and pi's own
-  // prompt runs. First decided extension answer wins (pi-core
-  // emitProjectTrustEvent), so this fully replaces the ask; a throw inside
-  // fails closed back to pi's prompt.
-  on("project_trust", () =>
-    projectTrustMode() === "auto"
-      ? { trusted: "yes", remember: false }
-      : { trusted: "undecided" });
 
   // R-inj (2026-10-10 session audit): CLI @file args arrive as
   // `<file name="/abs/path">\n…content…\n</file>` blocks in the expanded

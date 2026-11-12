@@ -1,5 +1,5 @@
 {
-  "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: destructiveConfirm and commitMessageLint cannot be configured below \"error\". Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names — either spelling works in `rules` (`editRegionGuard` or `AG2`); entries below use the IDs. outputCap/confirm/destructive tune numeric limits and the confirm command list. The docs object maps every rule ID to a one-line description — advisory, never parsed. projectTrust (auto|ask; env PGATE_PROJECT_TRUST) answers pi-core's startup project-trust prompt without asking — only auto/true means auto, everything else asks.",
+  "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: destructiveConfirm and commitMessageLint cannot be configured below \"error\". Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names — either spelling works in `rules` (`editRegionGuard` or `AG2`); entries below use the IDs. outputCap/confirm/destructive tune numeric limits and the confirm command list. The docs object maps every rule ID to a one-line description — advisory, never parsed.",
 
   "rules": {
     "AG": "off",
@@ -77,8 +77,6 @@
   "confirm": {
     "timeoutMs": 300000
   },
-
-  "projectTrust": "auto",
 
   "destructive": {
     "remove": [

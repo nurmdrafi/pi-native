@@ -85,17 +85,15 @@ It is runtime-only: severities on disk never move, so `/yolo off` restores exact
 session starts with the gate fully on. Output caps and scrubbing are not permissions and stay on. Pinning
 tests: `tests/extensions/permission-gate-yolo.test.mjs`.
 
-### Project trust — no startup ask
+### Project trust — handled natively by pi
 
-pi-core asks "Do you trust this project?" at startup for any cwd with `.pi/` resources (settings, mcp,
-extensions, skills, prompts, themes, `SYSTEM.md`) or an `.agents/skills` dir, before loading them. The gate
-answers that ask in-process when `config.json` sets `"projectTrust": "auto"` (the shipped state): the
-`project_trust` handler returns `{ trusted: "yes", remember: false }` — no prompt, and nothing written to
-pi-core's `trust.json` store (that file was removed; every run decides fresh). Any other value, a missing key,
-or `PGATE_PROJECT_TRUST=ask` fails closed to pi's own prompt. First decided extension answer wins, so this
-replaces the ask entirely; `--approve`/`-a` on the CLI still forces trust, `-na` forces distrust. Consequence:
-a project's `.pi/` extensions and settings auto-load without a per-project decision — the same trade every
-auto-trust flag makes. Pinning tests: `tests/extensions/permission-gate-trust.test.mjs`.
+pi-core owns the startup project-trust ask (any cwd with `.pi/` resources or an `.agents/skills` dir), the
+`trust.json` store, and the `defaultProjectTrust` setting (`ask` | `always` | `never`). `settings.json` ships
+`"defaultProjectTrust": "always"`: every project resolves trusted before the prompt runs, and nothing is
+written to `trust.json` (that store stays gone). The gate deliberately registers no `project_trust` handler —
+vendor behavior, vendor knob, changeable per machine from `/settings`. Consequence: a project's `.pi/`
+extensions and settings auto-load without a per-project decision — the trade every auto-trust mode makes.
+Pinning tests: `tests/gate/project-trust-native.test.mjs`.
 
 ### Managing the destructive command list (1a)
 
