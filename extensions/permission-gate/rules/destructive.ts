@@ -146,28 +146,42 @@ export const confirmEntryIds = (): string[] => CONFIRM_SET.map((e) => e.id);
 // corpus, 2026-10-26). MUTATING stays ungrouped because it always was.
 const DESTRUCTIVE_CORE_SRC = `(?:${CONFIRM_SET.map((e) => e.re).join("|")})`;
 
-const DESTRUCTIVE_BASH = new RegExp(
+/** /yolo lane (user direction 2026-11-12): the git-family confirm entries
+ * are part of the bypass, so the except-git judge needs the same
+ * construction over the non-git entries only. Empty (config removed every
+ * non-git id) matches nothing — never widens. */
+const CONFIRM_SET_NON_GIT = CONFIRM_SET.filter((e) => !e.id.startsWith("git-"));
+const DESTRUCTIVE_CORE_NON_GIT_SRC = CONFIRM_SET_NON_GIT.length
+  ? `(?:${CONFIRM_SET_NON_GIT.map((e) => e.re).join("|")})`
+  : "(?!)";
+
+const DESTRUCTIVE_BASH_SUFFIX =
+  // S4 fix 5 (2026-10-15, spec §6.5): a $VAR/${VAR} COMMAND WORD is
+  // unclassifiable — it confirms, never silently allows. Anchored like the
+  // core but NOT inside it: DESTRUCTIVE_ANYWHERE would then fire on every
+  // $arg expansion (sed … $f, awk '{print $1}')
+  String.raw`|` +
   CMD_POS_SRC +
-    DESTRUCTIVE_CORE_SRC +
-    // S4 fix 5 (2026-10-15, spec §6.5): a $VAR/${VAR} COMMAND WORD is
-    // unclassifiable — it confirms, never silently allows. Anchored like the
-    // core but NOT inside it: DESTRUCTIVE_ANYWHERE would then fire on every
-    // $arg expansion (sed … $f, awk '{print $1}')
-    String.raw`|` +
-    CMD_POS_SRC +
-    String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)` +
-    // S4 fix 6 (§6.6): pipe-to-interpreter — unanchored on purpose (matches
-    // anywhere in the segment, incl. inside sh -c "…" payloads); `bash
-    // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed.
-    // 2026-11-07 HIGH fix: the family after the pipe extends past sh — a
-    // decoded payload piped into any script interpreter (`echo <b64> |
-    // base64 -d | node`) is the same unscannable-exec lane as curl|sh. The
-    // new words require whitespace BEFORE the bar: real shell pipes leave
-    // one, while a quoted pattern's alternation inside a word
-    // (`rg "node -e|python3 -c"`, 16.3 pin) does not.
-    String.raw`|\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
-    String.raw`|(?<=\s)\|\s*(?:node(?:js)?|python3?|perl|ruby|php|deno|bun)\b(?![\w-])` +
-    String.raw`|\b(?:DROP\s+(?:TABLE|DATABASE)|DELETE\s+FROM)\b|\bfind\b[^|;&]*\s-[a-zA-Z]*delete\b`,
+  String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)` +
+  // S4 fix 6 (§6.6): pipe-to-interpreter — unanchored on purpose (matches
+  // anywhere in the segment, incl. inside sh -c "…" payloads); `bash
+  // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed.
+  // 2026-11-07 HIGH fix: the family after the pipe extends past sh — a
+  // decoded payload piped into any script interpreter (`echo <b64> |
+  // base64 -d | node`) is the same unscannable-exec lane as curl|sh. The
+  // new words require whitespace BEFORE the bar: real shell pipes leave
+  // one, while a quoted pattern's alternation inside a word
+  // (`rg "node -e|python3 -c"`, 16.3 pin) does not.
+  String.raw`|\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
+  String.raw`|(?<=\s)\|\s*(?:node(?:js)?|python3?|perl|ruby|php|deno|bun)\b(?![\w-])` +
+  String.raw`|\b(?:DROP\s+(?:TABLE|DATABASE)|DELETE\s+FROM)\b|\bfind\b[^|;&]*\s-[a-zA-Z]*delete\b`;
+
+const DESTRUCTIVE_BASH = new RegExp(
+  CMD_POS_SRC + DESTRUCTIVE_CORE_SRC + DESTRUCTIVE_BASH_SUFFIX,
+  "i",
+);
+const DESTRUCTIVE_BASH_NON_GIT = new RegExp(
+  CMD_POS_SRC + DESTRUCTIVE_CORE_NON_GIT_SRC + DESTRUCTIVE_BASH_SUFFIX,
   "i",
 );
 /** bash/sh -c "…" and $(…) hide payloads inside quotes — for wrapped segments the bare core is scanned anywhere */
@@ -273,30 +287,43 @@ const scratchWriteOnly = (seg: string): boolean => {
 const INTERP_BODY_DESTRUCTIVE =
   /\b(?:rmSync|rmdirSync|unlinkSync|shutil\.rmtree|os\.remove)\b|\brm\s+-[a-zA-Z]*[rRf]/;
 
+/** Structural destructive signals shared by both judges: protected
+ * redirect/tee targets, wrapped payloads, interpreter escapes, encoded
+ * eval, alias indirection. One home — the judges never drift. */
+const structuralDestructive = (s: string): boolean =>
+  // S4 fix 7 (§6.7): persistence redirect/tee targets — same protected-prefix
+  // source as the write/edit realpath check (replaces the old /etc-only
+  // redirect alternative)
+  [...s.matchAll(REDIRECT_TARGET)].some((m) =>
+    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
+  ) ||
+  [...s.matchAll(TEE_TARGET)].some((m) =>
+    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
+  ) ||
+  (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
+  // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
+  // 2026-11-07 HIGH fix: scratch destinations exempt only benign bodies —
+  // a destructive interpreter payload confirms regardless of where its
+  // redirects or tees land.
+  (INTERP_INLINE.test(s) &&
+    (!scratchWriteOnly(s) || INTERP_BODY_DESTRUCTIVE.test(s))) ||
+  EVAL_ENCODED.test(s) ||
+  (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s));
+
 export const segmentDestructive = (seg: string): boolean => {
   // S4 fix 9 (2026-10-18): NFKC fold first — homoglyph command words (ｒｍ) match
   const s = seg.normalize("NFKC");
-  return (
-    DESTRUCTIVE_BASH.test(s) ||
-    // S4 fix 7 (§6.7): persistence redirect/tee targets — same protected-prefix
-    // source as the write/edit realpath check (replaces the old /etc-only
-    // redirect alternative)
-    [...s.matchAll(REDIRECT_TARGET)].some((m) =>
-      PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-    ) ||
-    [...s.matchAll(TEE_TARGET)].some((m) =>
-      PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-    ) ||
-    (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
-    // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
-    // 2026-11-07 HIGH fix: scratch destinations exempt only benign bodies —
-    // a destructive interpreter payload confirms regardless of where its
-    // redirects or tees land.
-    (INTERP_INLINE.test(s) &&
-      (!scratchWriteOnly(s) || INTERP_BODY_DESTRUCTIVE.test(s))) ||
-    EVAL_ENCODED.test(s) ||
-    (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s))
-  );
+  return DESTRUCTIVE_BASH.test(s) || structuralDestructive(s);
+};
+
+/** /yolo judge (user direction 2026-11-12): identical to
+ * segmentDestructive except the git-family confirm entries are exempt —
+ * git push/history asks auto-approve under the bypass. A segment matching
+ * a git entry AND any other signal (sudo, rm, protected redirect, …)
+ * still confirms: only git-only segments pass. */
+export const segmentDestructiveExceptGit = (seg: string): boolean => {
+  const s = seg.normalize("NFKC");
+  return DESTRUCTIVE_BASH_NON_GIT.test(s) || structuralDestructive(s);
 };
 export const APPROVED_WINDOW_MS = 2 * 60_000;
 
