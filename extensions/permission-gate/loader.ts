@@ -182,6 +182,7 @@ export interface GateConfig {
   outputCap: { maxLines: number; maxBytes: number };
   confirm: { timeoutMs: number };
   destructive: DestructiveOverrides;
+  projectTrust: ProjectTrustMode;
 }
 
 /** Redirectable so a test can exercise a config without touching the tracked
@@ -224,6 +225,23 @@ function asPosInt(v: unknown, where: string, max: number): number | undefined {
     return undefined;
   }
   return n;
+}
+
+/** Startup project-trust ask: "auto" answers pi-core's `project_trust`
+ * prompt in-process ("yes", nothing remembered to disk — the vendor
+ * trust.json store stays gone); "ask" defers to pi's own prompt. Not a
+ * severity: it gates a startup ask, not a tool call. Fail closed — only an
+ * explicit affirmative means auto; missing, misspelled, or false asks. */
+export type ProjectTrustMode = "auto" | "ask";
+
+export function parseProjectTrustMode(v: unknown, where = "projectTrust"): ProjectTrustMode {
+  if (v === true) return "auto";
+  if (v === false) return "ask";
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (s === "auto" || s === "yes" || s === "on" || s === "true") return "auto";
+  if (s === "" || s === "ask" || s === "no" || s === "off" || s === "false") return "ask";
+  warn(`ignoring ${where}=${JSON.stringify(v)} (must be auto or ask) — asking`);
+  return "ask";
 }
 
 /** 1a (2026-10-26): managed destructive list — `remove` drops builtin entry
@@ -306,6 +324,13 @@ function loadGateConfig(): GateConfig {
     if (b !== undefined) rules[key] = b;
   }
 
+  // Startup project-trust ask: env beats file; anything unrecognized asks.
+  const trustEnv = process.env.PGATE_PROJECT_TRUST;
+  const projectTrust =
+    trustEnv !== undefined
+      ? parseProjectTrustMode(trustEnv, "PGATE_PROJECT_TRUST")
+      : parseProjectTrustMode(raw.projectTrust);
+
   const oc = (raw.outputCap ?? {}) as Record<string, unknown>;
   const cf = (raw.confirm ?? {}) as Record<string, unknown>;
   const de = raw.destructive;
@@ -330,11 +355,17 @@ function loadGateConfig(): GateConfig {
       timeoutMs: asPosInt(cf.timeoutMs, "confirm.timeoutMs", 3_600_000) ?? DEFAULT_CONFIRM.timeoutMs,
     },
     destructive: parseDestructive(de),
+    projectTrust,
   };
 }
 
 /** Loaded once per process; the gate reads `config.rules.<key>` at each check. */
 export const config: GateConfig = loadGateConfig();
+
+/** Effective startup project-trust mode ("auto" answers the pi-core ask). */
+export function projectTrustMode(): ProjectTrustMode {
+  return config.projectTrust;
+}
 
 /** /yolo (2026-11-12): session-scoped runtime bypass of the gate's
  * per-action asks, toggled by the `/yolo` slash command (registered in
