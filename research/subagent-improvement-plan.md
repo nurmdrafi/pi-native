@@ -77,7 +77,7 @@ outputs?: string[];                          // top-level files under artifacts/
 ```
 
 - **No migration**: optional field; old JSONL lines simply lack it; drain keys on `id`; compaction rewrites empty-only; `feeds.mjs` whitelists keys.
-- Spawn-time baseline: `git -C repoRoot status --porcelain=v1 -z --untracked-files=all` → `artifacts/<parentId>/<id>.git-baseline.json`; path to child via `PI_SUBAGENT_BASELINE` (`index.ts:2090` pattern). Durable — survives parent death for the reconcile path.
+- Spawn-time baseline: in repoRoot, `git status --porcelain=v1 -z --untracked-files=all` → `artifacts/<parentId>/<id>.git-baseline.json`; path to child via `PI_SUBAGENT_BASELINE` (`index.ts:2090` pattern). Durable — survives parent death for the reconcile path.
 - Child (`subagent-done.ts:127`) and parent (`index.ts:2367`) both diff end-status vs the same baseline → consistent values modulo seconds of skew. Git runner injectable for tests.
 - No git / no baseline / git failure → fields omitted. Over-attribution mitigation (validated risk: whole-repo baseline, siblings in one repo pollute each other — `inbox.ts:49-57`, no per-child isolation today): when the child has a scope, **intersect the git delta with the scope paths**; unscoped children emit the raw delta and the provenance marker keeps it advisory.
 - Git runs **exclusively in extension processes** (parent at launch, child via `subagent-done.ts` loaded with `-e`) — never through a child tool call: a ~200-file porcelain output (~8KB) would exceed the 2KB bash-kind gate cap and truncate `files_changed`.

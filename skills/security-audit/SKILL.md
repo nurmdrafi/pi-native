@@ -17,7 +17,7 @@ For each finding record: package, installed version, fixed version, which layer 
 
 ## 2 — Baseline
 
-```bash
+```text
 docker scout cves <image>:<tag> --only-severity critical,high                    # triage subset
 docker scout cves <image>:<tag> --format json > /tmp/scan-before.ndjson          # full inventory
 docker scout sbom <image>:<tag> --format json > /tmp/sbom-before.json
@@ -43,7 +43,7 @@ An exclusion or override can pass build and tests while breaking the server at b
 2. Boot the container, check the health route and the main page returns 200.
 3. Rescan and diff:
 
-```bash
+```text
 docker scout cves <image>:<tag> --format json > /tmp/scan-after.ndjson
 ```
 

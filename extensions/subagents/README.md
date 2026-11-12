@@ -166,7 +166,9 @@ in it, and the injected prior-work block is a possibly stale summary — verify
 before relying. The fields are omitted when the baseline or git is unavailable:
 spawning never depends on git. A declared `files` scope trims the delta to
 itself — sibling edits outside the scope are not attributed to the child; a
-parsed scope does not trim.
+parsed scope does not trim. The baseline snapshot's path rides the child
+pane env as `PI_SUBAGENT_BASELINE` (`index.ts`, set at spawn); delivery
+diffs against that file for `files_changed`.
 
 Every result appends a line to `<repo-root>/.pi/subagent-history.jsonl`
 shaped `{id, ts, name, files_changed, files_read, diff, summary, turns,
@@ -175,7 +177,10 @@ self-report and the parent's delivery append; the parent's line is the rich
 one (`files_read` — paths the child read — capped at 50, `diff` at 1500
 chars, `summary` at 300 chars). The file is append-only and survives
 result-inbox drain and compaction; past 1000 lines it keeps the most recent
-500 before the next append.
+500 before the next append. `PI_SUBAGENT_INBOX` (absolute file path)
+overrides the default result-inbox location per process, so an isolated run
+captures every result append without touching the repo's real inbox
+(`inbox.ts`).
 
 The `subagent_result` renderer shows at most 20 changed paths, then
 `… +N more`; the full list stays in the message details.
@@ -277,6 +282,14 @@ when a near-identical same-agent task is already running — steer that child
 instead of respawning — or a near-identical task ran before — re-check that
 result before respawning. Both are hints, not blocks; the orchestrator
 decides whether the re-run is legitimate.
+
+Stall knobs: `PI_SUBAGENT_STALL_ACTIVE_MS` (default 600000) — phase-active
+silence before a child flags stalled; `PI_SUBAGENT_STALL_START_MS`
+(default 180000) — watchdog for a child still starting or with a
+missing/invalid snapshot (`status.ts`; the dashboard feeds reader resolves
+the same `PI_SUBAGENT_STALL_*` pair). A nudged child gets
+`PI_SUBAGENT_STALL_RECOVERY_GRACE_MS` (default 120000) to resume before
+recovery escalates to a restart (`index.ts`).
 
 ## Pane recovery
 

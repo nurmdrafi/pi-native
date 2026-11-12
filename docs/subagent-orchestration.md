@@ -11,6 +11,9 @@ Spawn tools inactive (zero prompt tokens) until `/subagents on|off`, any `/subag
 - Unscoped spawns never queue: always declare `files`, or two writers collide silently.
 - `PI_SUBAGENTS_EXTRA_EXTENSIONS` replaces the default permission-gate entry — omit the gate path, child runs ungated.
 - Cleanup is pane-scoped: background jobs, servers, browsers can outlive the child.
+- A short parent window makes the launch split fail (`no space for a new pane`): enlarge the window before spawning; on failure list panes, kill an idle shell pane by id, retry once.
+- Live TUI state is not observable from inside the session: capture widget and pane symptoms from the host terminal, not through tool calls.
+- A child from an earlier run can still hold a shared file: check `subagents_list` across sessions before editing shared prompts or docs.
 
 Terms: fork clone = child cloning the current session (unrestricted toolset). Wave ledger = `plan.md` + `status.jsonl`. Cache = recovered results and history rows.
 
@@ -54,6 +57,8 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 - Tasks scope-driven and measurable. Before spawning: check ledger, history, cache for equivalent work; reuse, don't duplicate. Plan-driven implementation: confirm the gap is real (git log -S on the plan's key symbols, or one rg) before spawning.
 - Wave autonomy: pending work + free file-set → start immediately; ask only scope, priority, cost, or safety decisions the user must own; on wave completion dispatch the next unblocked wave without prompting.
 - While children run, the parent keeps its own lane full (ledger rows, next-wave briefs, inline micro-fixes) — a parent that only waits serializes everything behind the children. Delegation health is measured: steers ≥ spawns at wave end = briefs or partition failed → next wave re-chunks (facts sweep first) or goes linear. Before every spawn, clear stale locks: a delivered child must not hold its write scope, or spawns queue behind a ghost.
+- An `@`-mention attachment can differ from disk HEAD: diff the attachment against the file before trusting it.
+- Stagger heavy concurrent children — parallel waves hit provider 429 and die without a failure line; back off, re-check live state, then resume.
 - One child result = one parent turn: append the ledger line, run the machine check, dispatch the next unblocked wave — boundary turns are idle wall clock.
 - End every wave with an independent check before the next; never merge unverified parallel work. Scale: small diffs (under a few hundred lines) or machine-checkable criteria → verification command inline by the orchestrator; larger or subjective → reviewer for diffs, verifier for criteria.
 
