@@ -9,7 +9,7 @@
  *     tool error — never a confirm; absolute targets stay the gate's lane.
  *
  *   gate layer (permission-gate): piwrite/piedit targets resolving outside
- *     the session cwd — minus the harness ledger tree ~/.pi/efforts — and
+ *     the session cwd — and
  *     piwrite overwrites of EXISTING files confirm through the H2 ladder;
  *     the built-in write/edit lanes keep their existing verdicts.
  *
@@ -50,10 +50,15 @@ if (!existsSync(join(pkgLink, "package.json"))) {
 }
 
 if (process.argv[2] === "--child=gate") {
-  await runGateChild();
+  await runGateChild(false);
+} else if (process.argv[2] === "--child=gate-wboff") {
+  // WB disabled end-to-end: env override beats the fixture — with nothing
+  // owning overwrite binding, the WC overwrite confirm must come back
+  process.env.PGATE_WRITE_BINDING_GUARD = "off";
+  await runGateChild(true);
 }
 
-async function runGateChild() {
+async function runGateChild(wbOff) {
   delete process.env.PI_SUBAGENT_NAME; // scrub a host subagent marker: confirms must not go fail-closed
   process.env.HOME = mkdtempSync(join(tmpdir(), "wc-home-")); // decision log off the real home
   const gate = await import("../../extensions/permission-gate/index.ts");
@@ -86,7 +91,9 @@ async function runGateChild() {
   mkdirSync(efforts, { recursive: true });
 
   let failed = 0;
+  let ran = 0;
   const check = (name, cond, extra = "") => {
+    ran++;
     console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? `  ${extra}` : ""}`);
     if (!cond) failed++;
   };
@@ -135,6 +142,18 @@ async function runGateChild() {
     return "edit ok";
   }
 
+  /** Fire a bash-kind tool_call (confirm-lane view: no result fired). The
+   * native name keeps the P2 pibash-first rule out of the probe. */
+  async function bash(command, ctx) {
+    const toolCallId = `tc${++seqId}`;
+    const block = await pi.invoke(
+      "tool_call",
+      { type: "tool_call", toolName: "pibash", toolCallId, input: { command, timeout: 30 } },
+      ctx,
+    );
+    return block ? `BLOCKED: ${block.reason}` : "bash ok";
+  }
+
   const inCwd = { cwd: session };
 
   // g1 — in-cwd NEW file: confinement is silent
@@ -143,14 +162,37 @@ async function runGateChild() {
     check("g1 piwrite new in-cwd file passes (no confirm)", r === "write ok", r);
   }
 
-  // g2 — in-cwd EXISTING file: overwrite confirms (WC, ahead of WB)
+  // g2 — in-cwd EXISTING file, never read: with WB active (fixture: error)
+  // the binding owns the overwrite — an Unread block with a re-read fix, no
+  // destructive confirm; with WB off the WC overwrite confirm returns
   {
     const p = join(session, "existing.md");
     writeFileSync(p, "old");
     const r = await write("piwrite", p, "new", inCwd);
     check(
-      "g2 piwrite existing in-cwd file confirms (overwrite)",
-      r.startsWith("BLOCKED: Permission Gate (Destructive): piwrite") && r.includes("existing file (overwrite)"),
+      wbOff
+        ? "g2 piwrite overwrite confirms while writeBindingGuard is off"
+        : "g2 piwrite overwrite hits WB Unread (no confirm) while WB is active",
+      wbOff
+        ? r.startsWith("BLOCKED: Permission Gate (Destructive): piwrite") && r.includes("existing file (overwrite)")
+        : r.startsWith("BLOCKED: Anchor Guard (Unread)"),
+      r,
+    );
+  }
+
+  // g2b — read-certified overwrite: WB active → silent pass (binding
+  // satisfied, no dialog); WB off → the WC confirm returns even though the
+  // file was read — nothing analytical owns the overwrite then
+  {
+    const p = join(session, "certified.md");
+    writeFileSync(p, "old\n");
+    const rr = await read("piread", p, inCwd);
+    const r = rr === "read ok" ? await write("piwrite", p, "new", inCwd) : rr;
+    check(
+      wbOff
+        ? "g2b read-certified overwrite still confirms while WB is off"
+        : "g2b read-certified overwrite passes with no confirm while WB is active",
+      wbOff ? r.startsWith("BLOCKED: Permission Gate (Destructive): piwrite") : r === "write ok",
       r,
     );
   }
@@ -180,10 +222,16 @@ async function runGateChild() {
     );
   }
 
-  // g5 — the AGENTS-mandated ledger tree ~/.pi/efforts is allowlisted
+  // g5 — ~/.pi/efforts lost its allowlist (user direction 2026-11-12): it
+  // sits outside the session cwd, so it confirms like any other out-of-cwd
+  // target — in every mode, yolo included (out-of-cwd is yolo floor)
   {
     const r = await write("piwrite", join(efforts, "task.md"), "ledger", inCwd);
-    check("g5 piwrite ~/.pi/efforts path is allowlisted (no confirm)", r === "write ok", r);
+    check(
+      "g5 piwrite ~/.pi/efforts target now confirms (out-of-cwd)",
+      r.startsWith("BLOCKED: Permission Gate (Destructive): piwrite") && r.includes("outside the session directory"),
+      r,
+    );
   }
 
   // g6 — parity with the stubbed harnesses: no ctx.cwd → nothing to confine against
@@ -198,8 +246,10 @@ async function runGateChild() {
     writeFileSync(p, "old");
     const r = await write("write", p, "new", inCwd);
     check(
-      "g7 built-in write never-read overwrite still blocks as WB (Unread)",
-      r.startsWith("BLOCKED: Anchor Guard (Unread)"),
+      wbOff
+        ? "g7 built-in write never-read overwrite passes while WB is off (shipped policy)"
+        : "g7 built-in write never-read overwrite still blocks as WB (Unread)",
+      wbOff ? r === "write ok" : r.startsWith("BLOCKED: Anchor Guard (Unread)"),
       r,
     );
   }
@@ -230,8 +280,45 @@ async function runGateChild() {
     check("g9 piedit in-cwd (read-certified) passes without a confirm", r === "edit ok", r);
   }
 
-  const total = 9;
-  console.log(failed === 0 ? `${total}/${total} gate checks PASS` : `${total - failed}/${total} gate checks PASS`);
+  // g10 — yolo + WB configured active (fixture: error): the overwrite
+  // confirm must NOT resurrect — it is WB's fallback, not part of the yolo
+  // floor (loader.ts YOLO_FLOOR), and WB itself is silenced by the bypass,
+  // so nothing may ask or block on an in-cwd overwrite. Skipped in the
+  // wboff run: with WB configured off the confirm is the intended owner
+  if (!wbOff) {
+    const loader = await import("../../extensions/permission-gate/loader.ts");
+    loader.setYolo(true);
+    try {
+      const p = join(session, "yolo.md");
+      writeFileSync(p, "old");
+      const r = await write("piwrite", p, "new", inCwd);
+      check("g10 yolo overwrite passes with no confirm and no WB block", r === "write ok", r);
+    } finally {
+      loader.setYolo(false);
+    }
+  }
+
+  // g11 — yolo auto-approves the git-family confirm entries (user
+  // direction 2026-11-12) while the non-git destructive floor and the
+  // normal-mode confirm stay armed
+  {
+    const loader = await import("../../extensions/permission-gate/loader.ts");
+    const git = "git reset --hard HEAD~1";
+    const rmf = "rm -rf /tmp/wc-g11-probe";
+    const normal = await bash(git, inCwd);
+    check("g11 normal mode: git history ask still confirms", normal.startsWith("BLOCKED: Permission Gate (Destructive)"), normal);
+    loader.setYolo(true);
+    try {
+      const g = await bash(git, inCwd);
+      check("g11 yolo: git-family ask is auto-approved", g === "bash ok", g);
+      const d = await bash(rmf, inCwd);
+      check("g11 yolo: non-git destructive still confirms", d.startsWith("BLOCKED: Permission Gate (Destructive)"), d);
+    } finally {
+      loader.setYolo(false);
+    }
+  }
+
+  console.log(failed === 0 ? `${ran}/${ran} gate checks PASS` : `${ran - failed}/${ran} gate checks PASS`);
   process.exit(failed === 0 ? 0 : 1);
 }
 
@@ -316,6 +403,18 @@ test("piedit: relative ../ traversal out of the session cwd is rejected", async 
 
 test("gate layer: WC confinement + unchanged built-in lanes (child phase)", () => {
   const r = spawnSync(process.execPath, [self, "--child=gate"], {
+    env: { ...process.env, PGATE_CONFIG: fixture },
+    encoding: "utf8",
+    timeout: 120_000,
+  });
+  process.stdout.write(r.stdout ?? "");
+  process.stderr.write(r.stderr ?? "");
+  assert.equal(r.status, 0, `child exited ${r.status}; its FAIL lines are above`);
+  assert.ok(!/^\s*FAIL/m.test(r.stdout ?? ""), "no FAIL line may remain");
+});
+
+test("gate layer: WC overwrite confirm returns when writeBindingGuard is off (child phase)", () => {
+  const r = spawnSync(process.execPath, [self, "--child=gate-wboff"], {
     env: { ...process.env, PGATE_CONFIG: fixture },
     encoding: "utf8",
     timeout: 120_000,

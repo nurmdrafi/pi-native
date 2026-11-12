@@ -10,7 +10,7 @@
  * git log.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { config, ruleBlocks, ruleEnabled, ruleSeverity } from "./loader.ts";
+import { config, ruleBlocks, ruleEnabled, ruleSeverity, setYolo, yoloActive, YOLO_FLOOR } from "./loader.ts";
 import { CADENCE_CTX_TOKENS, CADENCE_TURNS } from "./cadence.ts";
 
 /** Bash-kind predicate: `bash` plus the native `pibash` tool (2026-10-18
@@ -50,6 +50,7 @@ import {
   isMutatingCommand,
   normalizeSegment,
   segmentDestructive,
+  segmentDestructiveExceptGit,
   splitSegments,
 } from "./rules/destructive.ts";
 import { validateCommitMessages } from "./rules/commitlint.ts";
@@ -331,7 +332,15 @@ export default function (pi: ExtensionAPI) {
     key: Parameters<typeof ruleSeverity>[0],
     reason: string,
     id?: string,
-  ): { block: true; reason: string } | undefined => (ruleBlocks(key) ? blockCall(reason) : warnCall(reason, id));
+  ): { block: true; reason: string } | undefined =>
+    // /yolo: while the bypass is active the gate goes silent — no blocks,
+    // no warn notes — for every non-floor rule; YOLO_FLOOR rules (the
+    // destructive/protected confirm ladder) keep their severity (loader.ts)
+    yoloActive() && !YOLO_FLOOR.has(key)
+      ? undefined
+      : ruleBlocks(key)
+        ? blockCall(reason)
+        : warnCall(reason, id);
   // S4 fix 1 (2026-10-15, spec §5.2): fail-closed handler wrap — an unexpected
   // exception in ANY handler must never fail open. tool_call → generic internal
   // block (the call never runs; a rejected handler otherwise lets the tool
@@ -368,6 +377,36 @@ export default function (pi: ExtensionAPI) {
       event as never,
       guarded(event, handler as never) as never,
     )) as typeof pi.on;
+  // ---- /yolo (2026-11-12): session-scoped full permission bypass ----
+  /** One switch for "do not ask anything": every per-action ask — blocks,
+   * warn notes, preference and hygiene rules — goes silent until toggled
+   * back or the session ends (session_start resets it; the state itself
+   * lives in loader.ts). Industry floor stays: the destructive/protected
+   * confirm ladder (YOLO_FLOOR) keeps blocking, matching what bypass
+   * modes keep elsewhere. Output caps and scrub stay on: they cap context
+   * size, they never ask permission. Explicit "on"/"off" or a bare
+   * toggle; anything else is a usage hint. */
+  // optional call: stubbed harnesses (tests) may provide `on` only — the
+  // bypass seam lives in loader.ts, so a harness without commands loses
+  // just the /yolo switch, never the gate
+  pi.registerCommand?.("yolo", {
+    description: "Toggle full permission bypass for this session (on|off)",
+    handler: async (args, ctx) => {
+      const a = args.trim().toLowerCase();
+      const next = a === "" ? !yoloActive() : a === "on" ? true : a === "off" ? false : undefined;
+      if (next === undefined) {
+        ctx.ui.notify("Usage: /yolo [on|off] — no argument toggles", "error");
+        return;
+      }
+      setYolo(next);
+      ctx.ui.notify(
+        next
+          ? "yolo ON: permission asks are off for this session (destructive/protected confirm stays) — /yolo off restores"
+          : "yolo OFF: permission gates restored",
+        next ? "warning" : "info",
+      );
+    },
+  });
   // module scope: one process can host several sessions (ctx.newSession, e.g.
   // /handoff, replaces the session in-process) — injection stays suppressed for
   // the replacement session; accepted for now, name documents the scope
@@ -403,10 +442,12 @@ export default function (pi: ExtensionAPI) {
    * ladder (the destructiveConfirm rule — the same switch that arms the
    * protected-prefix confirm, a safety floor that cannot ship below error),
    * and a piwrite overwrite of an EXISTING file confirms too — silent
-   * overwrite is the finding's failure class and the WB binding that used
-   * to catch it is user policy that ships "off". Allowlist: the session
-   * cwd tree itself and the harness ledger tree ~/.pi/efforts (ledgers are
-   * written there by design). The confinement root is the handler ctx cwd —
+   * overwrite is the finding's failure class — but only while WB's
+   * configured severity is off; with the binding active WB owns overwrites
+   * analytically (shipped "warn") and the confirm stands down. Allowlist:
+   * the session cwd tree itself. (The ~/.pi/efforts ledger exemption was
+   * removed 2026-11-12 by user direction: effort ledgers sit outside the
+   * session cwd and confirm like any other out-of-cwd target, every mode.) The confinement root is the handler ctx cwd —
    * a context without one (stubbed harnesses) has nothing to confine
    * against, so the rule skips; the tools' own resolution rung still
    * rejects ../ escapes outright. Returns the H2 confirm subject when the
@@ -438,11 +479,8 @@ export default function (pi: ExtensionAPI) {
       root = cwd;
     }
     const real = realpathish(abs);
-    if (!underRoot(real, root)) {
-      const efforts = realpathish(join(homedir(), ".pi", "efforts"));
-      if (!underRoot(real, efforts))
-        return `${tool} '${abs.slice(0, 28)}' → outside the session directory and`;
-    }
+    if (!underRoot(real, root))
+      return `${tool} '${abs.slice(0, 28)}' → outside the session directory and`;
     if (overwrite)
       return `${tool} '${abs.slice(0, 28)}' → an existing file (overwrite) and`;
     return undefined;
@@ -863,11 +901,22 @@ export default function (pi: ExtensionAPI) {
         const r = await confirmDestructive(`write:${path}`, prot, ctx);
         if (r) return blockCall(r);
       }
-      // WC: native-name confinement — outside-cwd targets and existing-file
-      // overwrites confirm through the same ladder (see the helper above)
+      // WC: native-name confinement — outside-cwd targets confirm through
+      // the same ladder (see the helper above). The existing-file overwrite
+      // confirm arms ONLY while WB's CONFIGURED severity is off (config or
+      // env, before any yolo effect): with the binding active WB owns
+      // overwrite protection analytically, so the confirm would be a
+      // redundant ask on top of an already-enforced rule. Configured, not
+      // ruleEnabled: yolo silences WB at runtime, and the fallback must not
+      // resurrect under the bypass — overwrites are not in the yolo floor
       if (event.toolName === "piwrite") {
         const wc = ruleEnabled("destructiveConfirm")
-          ? writeConfinementReason("piwrite", path, ctx?.cwd, existsSync(path))
+          ? writeConfinementReason(
+              "piwrite",
+              path,
+              ctx?.cwd,
+              existsSync(path) && config.severity.writeBindingGuard === "off",
+            )
           : undefined;
         if (wc) {
           const r = await confirmDestructive(`piwrite:${path}`, wc, ctx);
@@ -1075,7 +1124,11 @@ export default function (pi: ExtensionAPI) {
     // S4 (2026-10-15): ladder extracted into confirmDestructive(), shared
     // with the write/edit protected-path confirm (fix 8); strict `=== true`
     // approval (fix 2) lives there.
-    if (ruleEnabled("destructiveConfirm") && normSegs.some(segmentDestructive)) {
+    // /yolo (user direction 2026-11-12): git-family confirm entries join the
+    // bypass — git push/history asks auto-approve; git commit keeps its gate
+    // via commitMessageLint in YOLO_FLOOR. Non-git signals confirm as before.
+    const destructiveJudge = yoloActive() ? segmentDestructiveExceptGit : segmentDestructive;
+    if (ruleEnabled("destructiveConfirm") && normSegs.some(destructiveJudge)) {
       const r = await confirmDestructive(
         cmd,
         `'${cmd.slice(0, 33)}' mutates files, deps, or history and`, // 33c clamp: reason stays ≤ the 220c diet cap for any cmd length
@@ -1693,6 +1746,9 @@ export default function (pi: ExtensionAPI) {
   // stat-mismatch check at the next read attempt.
   on("session_start", async (event, ctx) => {
     void event;
+    // /yolo is session-scoped: a new (or in-process replaced) session never
+    // inherits the previous session's bypass
+    setYolo(false);
     // in-process switches reuse this module — drop the previous session's
     // coverage/pending state so only the new session's branch is certified
     coverage.clear();
