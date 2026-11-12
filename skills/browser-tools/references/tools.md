@@ -2,6 +2,16 @@
 
 Chrome DevTools Protocol tools for agent-assisted web automation. Connect to Chrome on `:9222` with remote debugging. macOS + Linux. `{baseDir}` = this skill's root.
 
+## Attach to the user's existing browser (Chrome >= 136)
+
+Chrome 136+ ignores `--remote-debugging-port`/`--pipe` on the default user-data-dir (anti-cookie-theft change; no setting, flag, or policy lifts it — verified against developer.chrome.com/blog/remote-debugging-port). The sanctioned way to drive the user's real, logged-in profile:
+
+1. One-time, user-side: enable remote debugging at `chrome://inspect/#remote-debugging`. Chrome must run with NO debug flags — a stale ignored `--remote-debugging-port` hangs the internal server at "starting" (clean relaunch writes `DevToolsActivePort` at once).
+2. Agent-side driver (installed): `~/.pi/agent/tools/chrome-devtools-mcp/mcp-drive.mjs 'tool:{json-args}' ...` — spawns `chrome-devtools-mcp --autoConnect --channel=stable`, one connection per run, executes tools in order. Chrome pops a permission dialog; the user clicks Allow. Tools: `list_pages`, `navigate_page` (needs numeric pageId from list_pages), `take_snapshot`, `evaluate_script`, `click`, `fill`, ... (33 total).
+3. Full runbook: `~/.pi/agent/tools/chrome-devtools-mcp/SETUP.md`.
+
+Use this route whenever the task needs the user's real session (logins, personal state). The scripts below remain for debug-dir/fresh-profile work.
+
 ## Setup
 
 Run once before first use (deps not committed):
