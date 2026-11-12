@@ -59,6 +59,7 @@ Native tools register unconditionally and always run the Rust binary; nothing op
 | `sessions/`               | Session history, keyed by absolute project paths → per-machine                    |
 | `audit-reports/`, `handoff/` | Dated audit artifacts and handoff drafts; reports name private projects        |
 | `*.log`, `logs/`          | Debug logs only — no gate telemetry writer (that store was removed)               |
+| `trust.json`             | pi-core project-trust store — removed; the pi binary recreates it only when a project with `.pi/` resources is approved interactively. Vendor-owned (`ProjectTrustStore` in pi-core); `-na`/`--no-approve` distrusts a run |
 
 Everything else — `AGENTS.md`, `docs/`, `settings.json`, `models.json`, `skills/`, `extensions/`, `agents/`, `prompts/`, `tests/`, `rust-tools/` (workspace + lockfile), `.github/workflows/`, `package.json`, `CHANGELOG.md`, `LICENSE`, `.nvmrc` — is tracked in git and portable across OSes.
 

@@ -56,6 +56,10 @@ target/
 # Local lesson log (append-only, machine-local; never committed)
 lessons/harness.ndjson
 
+# pi-core project-trust store (vendor-owned; only recreated when a project is
+# approved interactively — see docs/development.md)
+trust.json
+
 # Tool-call observability event streams (regenerable; SCHEMA: benchmark/observability/SCHEMA.md)
 benchmark/observability/events/
 
