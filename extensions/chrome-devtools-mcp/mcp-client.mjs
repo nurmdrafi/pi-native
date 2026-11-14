@@ -36,5 +36,5 @@ conn.on('data', (d) => {
     step();
   }
 });
-conn.on('error', (e) => { console.error('bridge not reachable:', e.code, '- start with: nohup node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-bridge.mjs >/tmp/mcp-bridge.log 2>&1 &'); process.exit(1); });
+conn.on('error', (e) => { console.error('bridge not reachable:', e.code, '- start with: nohup node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-bridge.mjs >/tmp/mcp-bridge.log 2>&1 &'); process.exit(1); });
 setTimeout(() => { console.error('bridge timeout'); process.exit(1); }, 110000);

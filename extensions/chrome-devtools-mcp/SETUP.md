@@ -24,10 +24,10 @@ user-data-dir (verified: developer.chrome.com/blog/remote-debugging-port).
 ## Per-session usage (preferred: bridge = ONE Allow-click per session)
 
 ```bash
-nohup node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-bridge.mjs >/tmp/mcp-bridge.log 2>&1 &
-node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-client.mjs 'list_pages:{}' \
+nohup node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-bridge.mjs >/tmp/mcp-bridge.log 2>&1 &
+node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-client.mjs 'list_pages:{}' \
   'navigate_page:{"pageId":1,"url":"https://www.linkedin.com/"}' 'take_snapshot:{}'
-node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-client.mjs '__quit__'   # stop: drops banner
+node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-client.mjs '__quit__'   # stop: drops banner
 ```
 
 - Bridge holds one MCP connection open: Chrome asks Allow ONCE per session,
@@ -39,7 +39,7 @@ node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-client.mjs '__quit__'   # stop: d
 ## Per-run usage (one-shot fallback; one dialog per run)
 
 ```bash
-node ~/.pi/agent/tools/chrome-devtools-mcp/mcp-drive.mjs \
+node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-drive.mjs \
   'list_pages:{}' \
   'navigate_page:{"pageId":1,"url":"https://www.linkedin.com/"}' \
   'take_snapshot:{}'
