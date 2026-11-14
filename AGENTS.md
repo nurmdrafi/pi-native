@@ -17,6 +17,7 @@
 
 ## Workflow & TDD
 - Commit subject and body: no `#` character anywhere. Shape per `prompts/ship.md`: `type(scope): imperative summary`, body as multi-line `-` bullets, one per change, ≤100 chars per line, standard conventional type. Gates pass → commit and push without waiting for approval.
+- Never hand-count commit-message lines: compose the message in a file, gate it with `awk 'length>100 || index($0,"#") {print "line " FNR ": " length " chars or contains #"; exit 1}' <msgfile>`, then `git commit -F <msgfile>` — in the same shell call as `git add` (a rejected commit drops the staged index across calls).
 - Merge commits: subject names the deliverable, changelog deduped; never git's default `Merge branch …` template. Never commit pasted CI or webhook text — link the commit it announces.
 - TDD always: failing test → watch it fail → minimum code → refactor.
 - Bug fix → write a failing repro test first (no probe test).
