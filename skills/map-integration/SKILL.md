@@ -14,7 +14,7 @@ Check project `package.json`, bundler aliases, existing map components before wr
 
 - `react-bkoi-gl` (current gen — Barikoi's React wrapper): react-map-gl-style API (`Map`, `useMap`, `useControl`, `Source`/`Layer`) + `DrawControl` (draw built in — but callback-only, [references/known-pitfalls.md](references/known-pitfalls.md) #10), `MinimapControl`/`Minimap`, `GlobeControl`, `TerrainControl`, `LogoControl`, `CanvasSource`. Engine (`maplibre-gl@6`) ships as own dep — import everything from `react-bkoi-gl`, never `maplibre-gl` directly; engine utils re-exported. **Its `Map`/`Marker`/`Popup`/controls are React components — engine constructors NOT exported** ([references/known-pitfalls.md](references/known-pitfalls.md) #9), so imperative code (`new Map(...)`, `marker.on('dragend')`) can't run on it. CSS: `import "react-bkoi-gl/styles"`.
 - `bkoi-gl` (vanilla JS — Barikoi's MapLibre v6 build): engine constructors live here (`Map` with `BkoiMapOptions` incl. `accessToken`/`style`). Bundles engine + self-contained worker (no maplibre install, no worker hosting); `bkoi-gl/worker` only for strict-CSP apps. CSS: `bkoi-gl/style.css`. React apps prefer `react-bkoi-gl` — but legacy imperative components (class components hand-building maps) need this package. `bkoi-gl-js` = CDN dist name (`cdn.barikoi.com/bkoi-gl-js/...`), NOT npm; npm name `bkoi-gl`.
-- Legacy: `react-map-gl` + `maplibre-gl` / `mapbox-gl` (some pin `mapbox-gl@1.13.3` or alias `mapbox-gl → maplibre-gl`). Same react-map-gl API surface.
+- Legacy: `react-map-gl` + `maplibre-gl` / `mapbox-gl` (some pin `mapbox-gl@1.13.3` or alias `mapbox-gl → maplibre-gl`). Same react-map-gl API surface. Migration recipe to react-bkoi-gl: [references/engine-migration.md](references/engine-migration.md).
 - `@deck.gl/*` (overlays), `@turf/turf` (geometry), `@mapbox/mapbox-gl-draw` (editing), `mqtt`/`socket.io-client` (real-time), `geo-polyline-tools` (route polylines).
 
 Sibling dashboards = forks of one shared template — before writing new map code, `rg` nearest sibling for existing idiom.
@@ -37,7 +37,7 @@ Never let `mapbox-gl` drift to v3 via transitive deps — v3 demands Mapbox toke
 ### Barikoi styles + keys
 
 - Style URL: `https://map.barikoi.com/styles/{name}/style.json?key=$BARIKOI_API_KEY` — key rides as `?key=` query param. Only key channel under react-bkoi-gl (its MapProps has no accessToken field — stock maplibre-gl dep; bkoi-gl's engine Map does accept accessToken). Styles in use: `osm-liberty` (default), `osm_barikoi_v1`, `planet_map`, `barikoi-light`, `barikoi-dark`, `barikoi-dark-mode`. Served by self-hosted `tileserver-gl` (barikoi/tileserver-gl).
-- Style switching: `mapbox-gl-style-switcher` (`MapboxStyleSwitcherControl(styles, { defaultStyle: 'OSM Liberty' })`) mounted via `useControl`, usually wrapped in `StyleControl`; style list in `App.config`/`app.config` (`MAP.STYLES`).
+- Style switching: the legacy `mapbox-gl-style-switcher` plugin is dead under the maplibre v6 engine — replace with a faithful port of its control (same DOM/behaviour/CSS, `maplibregl-` prefix, `useControl` + `{ position }`): [references/engine-migration.md](references/engine-migration.md) §4. Style list in `App.config`/`app.config` (`MAP.STYLES`); switching via `mapRef?.getMap().setStyle(uri)` — `setStyle` is skipped on `MapRef`.
 - Search/geocode/routing/geofence APIs: base `https://barikoi.xyz`, same key (endpoint spec: `barikoiapis/openapi/barikoi-api-spec.yaml`). Docs: docs.barikoi.com; keys: developer.barikoi.com.
 
 ## 4. deck.gl overlays (established pattern)
@@ -187,6 +187,7 @@ Realtime & render prevention (from the repo review audit):
 
 - Equivalent Layer/hook/util exists in this repo (or sibling/fork)? Reuse first — sibling dashboards = forks of same template.
 - Barikoi repos: import map code from `react-bkoi-gl`/`bkoi-gl` only (never `maplibre-gl` directly); style key in `?key=` query param; check sibling dashboard's DeckGLMap template before starting fresh.
+- Migrating engines or React mappers (react-map-gl / mapbox-gl / CDN engine → react-bkoi-gl): follow [references/engine-migration.md](references/engine-migration.md) — port `.mapboxgl-*` CSS overrides to `.maplibregl-*` AND sweep selectors/e2e locators repo-wide ([known-pitfalls.md](references/known-pitfalls.md) #17, silent breaker); draw choice per [known-pitfalls.md](references/known-pitfalls.md) #10; no per-frame resize / drag-time hit-testing (#16); marker drag handlers read `event.target.getLngLat()` (#18); replaced controls keep pixel parity (engine-migration §4/§8).
 - Coord order `[lng, lat]`. Validate before flyTo/bounds.
 - Guard `queryRenderedFeatures` / any style-dependent call.
 - Real-time: batch messages, LRU-cap markers, guard subscriptions, cleanup on unmount.
@@ -195,4 +196,4 @@ Realtime & render prevention (from the repo review audit):
 - Draw/edit flows: idempotent polygon-sync upsert covering all three triggers ([known-pitfalls.md](references/known-pitfalls.md) #5); guarded geometry loads with failure-path clearing (#6); resets touch every derived field; markers capture `dragend`, draw-clears propagate to parent state (#7–8).
 - CI touched: secrets step-scoped, actions SHA-pinned, least-privilege permissions (§11).
 - No provider key literal in source or bundled config (`app.config.ts` etc.) — keys ride env vars; anything `NEXT_PUBLIC_*` or client-imported = public by definition. Server-side Barikoi/routing calls via API proxy, never client-held key.
-- Layers/scenes rebuild on data/selection change, not hover/zoom/tick; heavy math off main thread; no O(N²) scans or pagination.
+- Layers/scenes rebuild on data/selection change, not hover/zoom/tick; heavy math off main thread; no O(N²) scans or pagination; no `setState` from per-frame/per-move map handlers — rerender rules per [known-pitfalls.md](references/known-pitfalls.md) #19.

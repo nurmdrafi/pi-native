@@ -37,6 +37,8 @@ Record counts per severity plus the package names, and keep the files: the after
 
 An exclusion or override can pass build and tests while breaking the server at boot or on first use: a framework that eagerly requires a package then fails with `MODULE_NOT_FOUND` / a config-load `TypeError`. Boot the image and hit a real route before calling it fixed. If a fix breaks the app, record the failing signature in a code comment beside the exclusion so the next reviewer does not re-attempt it.
 
+For dependency-audit runs under any package manager (npm, pnpm, Yarn, bun), the manager mechanics behind the transitive and direct rows — audit/override surfaces, quarantine units, peer-dep traps, meta-to-granular swaps, reify husks, lockstep pins, and a verification ladder — live in [references/dependency-audit-fixes.md](references/dependency-audit-fixes.md).
+
 ## 4 — Verify the remediation
 
 1. Rebuild (use `--no-cache` once to prove the result does not depend on layer cache; static generation may OOM on constrained hosts — a retry is a legitimate second attempt).
