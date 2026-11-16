@@ -35,6 +35,19 @@ Wrap everything in an IIFE for multi-statement code:
 })()
 ```
 
+## Filter at the source, return a summary
+
+When the task is "collect then separate matches": run the filter INSIDE the
+eval — the page already holds the text. Return only counts, discard
+breakdown, and top-N matches (~2KB ceiling — pipeline output gets truncated
+beyond that). Bulk payloads (full raw harvest) are written to a durable file
+in the SAME shell command via stdout redirect. Never harvest → tmp → re-read
+→ filter: that double-handles content and burns context twice.
+
+Scroll/collection loops: break on a number extracted from output (jq or a
+tested literal), never an untested regex — a dead break condition silently
+runs the loop to its cap.
+
 ## Batch interactions
 
 Never separate calls per click. Batch:

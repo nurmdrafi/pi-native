@@ -4,8 +4,8 @@
   "status": "current",
   "command": "deliver",
   "type": "architecture",
-  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
-  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+  "input": "<agent-home>/docs/assets/diagrams/pi-native-architecture.json",
+  "output": "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
   "specification": {
     "sha256": "5ee048131e16480548daee5f698ea7f1861ee6ffaeb3871b02fd5f42e6f080c0",
     "bytes": 3034

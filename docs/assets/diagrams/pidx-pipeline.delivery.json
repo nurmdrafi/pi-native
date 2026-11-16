@@ -4,8 +4,8 @@
   "status": "current",
   "command": "deliver",
   "type": "workflow",
-  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
-  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+  "input": "<agent-home>/docs/assets/diagrams/pidx-pipeline.workflow.json",
+  "output": "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
   "specification": {
     "sha256": "ed28d1fdc73eff23d75bb918c5461ef7eb2226bb0e1b90428483ecf0e0ac8f1b",
     "bytes": 1790

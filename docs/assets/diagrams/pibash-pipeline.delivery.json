@@ -4,8 +4,8 @@
   "status": "current",
   "command": "deliver",
   "type": "workflow",
-  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
-  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+  "input": "<agent-home>/docs/assets/diagrams/pibash-pipeline.workflow.json",
+  "output": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
   "specification": {
     "sha256": "097d2ca83d769ad66d981609e4a46aa553d78f13ef8284a27f3304b79429c551",
     "bytes": 3541

@@ -370,6 +370,21 @@ export function isTransientProviderError(message: string): boolean {
   );
 }
 
+/** Default ceiling on automatic resumes of one child after transient
+ *  provider errors. Each resume replays the durable session file, so the
+ *  child keeps its context — but a provider that keeps failing must not burn
+ *  the parent's wall clock in a blind resume loop. Env-tunable at call time
+ *  (PI_SUBAGENT_MAX_AUTO_RESUMES). */
+const DEFAULT_MAX_AUTO_RESUMES = 2;
+
+function resolveMaxAutoResumes(env: { [key: string]: string | undefined } = process.env): number {
+  const raw = env.PI_SUBAGENT_MAX_AUTO_RESUMES;
+  const value = Number(raw);
+  return raw != null && raw !== "" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : DEFAULT_MAX_AUTO_RESUMES;
+}
+
 /**
  * When this process was spawned as a restricted subagent, the parent pins the
  * set of agents it may itself spawn via PI_SUBAGENT_ALLOWED. `null` means no
@@ -952,7 +967,14 @@ function capResultSummary(summary: string): string {
 function resolveResultPresentation(
   result: Pick<
     SubagentResult,
-    "exitCode" | "elapsed" | "summary" | "sessionFile" | "sessionId" | "errorMessage" | "error"
+    | "exitCode"
+    | "elapsed"
+    | "summary"
+    | "sessionFile"
+    | "sessionId"
+    | "errorMessage"
+    | "autoResumeCount"
+    | "error"
   >,
   name: string,
 ): string {
@@ -998,9 +1020,18 @@ function resolveResultPresentation(
     // failure so the orchestrator can decide whether to retry, resume, or
     // change approach instead of silently treating the run as completed.
     const transient = isTransientProviderError(result.errorMessage);
+    // When the parent already auto-resumed this child and the provider error
+    // still came back, say so with the count: the orchestrator must see that
+    // the resume budget is spent, not that resuming is still the next move.
+    const resumes = result.autoResumeCount;
+    const headline =
+      resumes != null
+        ? `Sub-agent "${name}" failed after ${formatElapsed(result.elapsed)} — ` +
+          `the provider error persisted after ${resumes} automatic resume${resumes === 1 ? "" : "s"}.`
+        : `Sub-agent "${name}" failed after ${formatElapsed(result.elapsed)} ` +
+          `(provider/agent error — auto-retry exhausted).`;
     return (
-      `Sub-agent "${name}" failed after ${formatElapsed(result.elapsed)} ` +
-      `(provider/agent error — auto-retry exhausted).\n\n` +
+      `${headline}\n\n` +
       `Error: ${result.errorMessage}\n\n` +
       `The subagent did not produce a result, but its session file is intact. ` +
       (transient
@@ -1034,6 +1065,10 @@ interface SubagentResult {
   error?: string;
   /** Provider/agent error message when auto-retry exhausted (overload, rate limit, etc.). */
   errorMessage?: string;
+  /** Set at delivery when a transient provider error outlived the automatic
+   *  resume budget: the number of automatic resumes attempted for this
+   *  child session. */
+  autoResumeCount?: number;
   /** Aggregate usage/model/tool stats parsed from the completed session file. */
   stats?: SessionStats;
   /** Repo-relative paths added/removed/status-changed since the spawn-time git
@@ -1120,6 +1155,12 @@ interface RunningSubagent {
   /** Pane-loss restart bookkeeping: set when the single restart attempt
    *  began; `respawnedAt` added once a replacement pane is actually running. */
   restart?: { attemptedAt: number; respawnedAt?: number };
+  /** Transient-provider-error auto-resume bookkeeping: automatic resumes
+   *  claimed for this child session (bounded by resolveMaxAutoResumes).
+   *  Claimed synchronously at attempt time, so racing callers (watcher +
+   *  sweep) can never exceed the budget. Fresh per spawned entry; restarts
+   *  mutate the entry in place, so resumes of one session accumulate. */
+  autoResumeCount?: number;
   /** Cancel intent (subagent_control cancel), set BEFORE the stop so the
    *  pane-loss restart gates refuse the child and any racing loss
    *  synthesis reports cancelled_by_parent instead of pane_lost. */
@@ -1249,23 +1290,23 @@ const reportedDiagnostics = new Set<string>();
  *  diagnostic must never raw-print while an interactive session may still
  *  be alive: hold it for the next context — a UI context flushes it inline
  *  through notify, a confirmed-headless context flushes it to stderr. */
-const pendingDiagnostics: string[] = [];
+const pendingDiagnostics: { message: string; severity: "error" | "info" }[] = [];
 const PENDING_DIAGNOSTICS_MAX = 50;
 
-function enqueueDiagnostic(message: string): void {
-  pendingDiagnostics.push(message);
+function enqueueDiagnostic(message: string, severity: "error" | "info" = "error"): void {
+  pendingDiagnostics.push({ message, severity });
   if (pendingDiagnostics.length > PENDING_DIAGNOSTICS_MAX) pendingDiagnostics.shift();
 }
 
 /** Route one diagnostic to its surface: inline notify when a UI exists,
  *  held in the queue while no context has answered, stderr only once a
  *  context confirms no UI exists (no TUI to corrupt). */
-function routeDiagnostic(message: string): void {
+function routeDiagnostic(message: string, severity: "error" | "info" = "error"): void {
   let sawUI = false;
   try {
     const ui = latestCtx?.ui as { notify?: (text: string, severity?: string) => void } | undefined;
     if (latestCtx?.hasUI && typeof ui?.notify === "function") {
-      ui.notify(message, "error");
+      ui.notify(message, severity);
       return;
     }
     sawUI = latestCtx?.hasUI === true;
@@ -1273,14 +1314,14 @@ function routeDiagnostic(message: string): void {
     // A torn-down context throws on the hasUI read (a session reaped right
     // after a run). The host TUI may still be alive — hold the diagnostic
     // for the next context instead of raw-printing over the input editor.
-    enqueueDiagnostic(message);
+    enqueueDiagnostic(message, severity);
     return;
   }
   if (latestCtx == null || sawUI) {
     // No context yet (before session_start, or after an extension reload),
     // or a live UI that cannot take notifications: hold, never stderr on
     // the strength of a context's absence.
-    enqueueDiagnostic(message);
+    enqueueDiagnostic(message, severity);
     return;
   }
   console.error(message);
@@ -1291,13 +1332,22 @@ function routeDiagnostic(message: string): void {
 function flushPendingDiagnostics(): void {
   if (pendingDiagnostics.length === 0) return;
   const held = pendingDiagnostics.splice(0, pendingDiagnostics.length);
-  for (const message of held) routeDiagnostic(message);
+  for (const entry of held) routeDiagnostic(entry.message, entry.severity);
 }
 
 function reportDiagnostic(message: string): void {
   if (reportedDiagnostics.has(message)) return;
   reportedDiagnostics.add(message);
   routeDiagnostic(message);
+}
+
+/** Report a recoverable event (an automatic resume) through the same channel
+ *  as a diagnostic — same routing, holding, and dedup — but as informational:
+ *  an event the parent need not act on must not render as an error line. */
+function reportInformational(message: string): void {
+  if (reportedDiagnostics.has(message)) return;
+  reportedDiagnostics.add(message);
+  routeDiagnostic(message, "info");
 }
 
 /** Disarm this instance's 1s timers and abort its poll loops — the same
@@ -2591,7 +2641,10 @@ export const __test__ = {
   reservedNames,
   synthesizeLostResult,
   canRestartLostPane,
+  canAutoResume,
   restartLostPane,
+  resolveMaxAutoResumes,
+  reportInformational,
   finalizeLostSubagent,
   reportPaneErrorRow,
   renderSubagentPaneError,
@@ -2624,7 +2677,7 @@ export const __test__ = {
   deliverPendingQuestion,
   setLatestPi: setLatestPiForTest,
   setUiContext: setLatestCtxForTest,
-  pendingDiagnostics: (): string[] => [...pendingDiagnostics],
+  pendingDiagnostics: (): string[] => pendingDiagnostics.map((entry) => entry.message),
   resetChannelState: resetChannelStateForTest,
   startWidgetRefresh,
   startStatusRefresh,
@@ -3445,33 +3498,44 @@ function deliverSubagentResult(
   running: RunningSubagent,
   result: SubagentResult,
   synthesized?: "pane_lost" | "stalled" | "cancelled_by_parent",
+  deps: RestartDeps = {},
 ): void {
   if (running.delivered) return; // sweep or watcher already finalized this entry
   // Transient provider death (429 / 5xx / overload): the session file already
-  // holds the child's context, so one automatic resume of the SAME session
+  // holds the child's context, so automatically resuming the SAME session
   // beats delivering a failure the orchestrator would answer with a fresh
-  // spawn — that re-pays the whole context. canRestartLostPane caps this at
-  // one attempt per child and refuses when the sandbox snapshot is missing;
-  // the second call falls through to delivery (restart flag now set).
-  if (
-    result.errorMessage &&
-    isTransientProviderError(result.errorMessage) &&
-    canRestartLostPane(running)
-  ) {
-    void restartLostPane(running)
-      .then((respawned) => {
-        if (respawned) {
-          reportDiagnostic(
-            `[pi-subagents] "${running.name}" hit a transient provider error — resuming its session instead of failing it`,
-          );
-          return;
-        }
-        if (!running.delivered) deliverSubagentResult(pi, running, result);
-      })
-      .catch(() => {
-        if (!running.delivered) deliverSubagentResult(pi, running, result);
-      });
-    return;
+  // spawn — that re-pays the whole context. The resume budget is bounded
+  // (resolveMaxAutoResumes, default 2) and claimed synchronously per attempt,
+  // so racing callers (watcher + sweep) can never exceed it; each attempt
+  // reports an informational notice, and once the budget is spent the result
+  // delivers with the resume count spelled out.
+  if (result.errorMessage && isTransientProviderError(result.errorMessage)) {
+    const maxAutoResumes = resolveMaxAutoResumes();
+    const resumeAttempt = (running.autoResumeCount ?? 0) + 1;
+    if (resumeAttempt <= maxAutoResumes && canAutoResume(running)) {
+      running.autoResumeCount = resumeAttempt;
+      const restart =
+        deps.restart ??
+        ((r: RunningSubagent, d: RestartDeps) => restartLostPane(r, d, canAutoResume));
+      void restart(running, deps)
+        .then((respawned) => {
+          if (respawned) {
+            reportInformational(
+              `[pi-subagents] "${running.name}" hit a transient provider error — automatically resuming its session (attempt ${resumeAttempt} of ${maxAutoResumes})`,
+            );
+            return;
+          }
+          if (!running.delivered) deliverSubagentResult(pi, running, result, synthesized, deps);
+        })
+        .catch(() => {
+          if (!running.delivered) deliverSubagentResult(pi, running, result, synthesized, deps);
+        });
+      return;
+    }
+    // Budget spent (or the gates refused) after earlier resumes: deliver the
+    // final failure with the resume count, so the orchestrator sees that
+    // automatic recovery is exhausted — not that it was never tried.
+    if ((running.autoResumeCount ?? 0) > 0) result.autoResumeCount = running.autoResumeCount;
   }
   running.delivered = true;
   // Final meter read (O(delta) since the last poll tick): the turn count the
@@ -3599,8 +3663,17 @@ interface StallRecoveryDeps extends RestartDeps {
  *  by its own budget (a budget stop is intentional — restarting would
  *  bypass it). */
 function canRestartLostPane(running: RunningSubagent): boolean {
-  if (running.delivered) return false;
   if (running.restart) return false; // exactly one attempt per child
+  return passesRestartGates(running);
+}
+
+/** The gates every automatic pane replacement must pass: not delivered, not
+ *  cancelled by the parent, a self-terminating pi child, not stopped by its
+ *  own budget, and real progress worth resuming in the session file. Shared
+ *  by the one-shot pane-loss restart and the budgeted transient-provider
+ *  resume. */
+function passesRestartGates(running: RunningSubagent): boolean {
+  if (running.delivered) return false;
   if (running.cancelledAt) return false; // parent cancelled it — never resurrect
   if (running.interactive || !running.autoExit) return false;
   if (running.cli === "claude") return false;
@@ -3616,6 +3689,17 @@ function canRestartLostPane(running: RunningSubagent): boolean {
   return findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) !== null;
 }
 
+/** Whether a transient provider error still earns an automatic resume: the
+ *  shared restart gates, bounded by the auto-resume budget. Unlike the
+ *  pane-loss restart, a completed earlier respawn does not by itself
+ *  disqualify (the budget does); a restart still in flight — or one that
+ *  already failed — always does. */
+function canAutoResume(running: RunningSubagent): boolean {
+  if (running.restart && !running.restart.respawnedAt) return false;
+  if ((running.autoResumeCount ?? 0) >= resolveMaxAutoResumes()) return false;
+  return passesRestartGates(running);
+}
+
 /** Restart a pane-lost child: create a pane born resuming its durable session
  *  file with the sandbox snapshot recorded at spawn (mirrors the
  *  subagent_message resume construction). Returns true when a replacement
@@ -3625,8 +3709,9 @@ function canRestartLostPane(running: RunningSubagent): boolean {
 async function restartLostPane(
   running: RunningSubagent,
   deps: RestartDeps = {},
+  gate: (running: RunningSubagent) => boolean = canRestartLostPane,
 ): Promise<boolean> {
-  if (!canRestartLostPane(running)) return false;
+  if (!gate(running)) return false;
   running.restart = { attemptedAt: Date.now() };
 
   const spawnRunning = deps.createSurfaceRunning ?? createSurfaceRunning;

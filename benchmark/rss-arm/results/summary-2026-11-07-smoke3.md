@@ -3,7 +3,7 @@
 - generated: 2026-11-07T15:59:25.168Z
 - node: v24.21.0
 - /usr/bin/time: GNU time 1.7
-- binaries: piread=/home/nurmdrafi/.pi/agent/bin/piread pibash=/home/nurmdrafi/.pi/agent/bin/pibash piwrite=/home/nurmdrafi/.pi/agent/bin/piwrite
+- binaries: piread=<agent-home>/bin/piread pibash=<agent-home>/bin/pibash piwrite=<agent-home>/bin/piwrite
 - mode: smoke tag: smoke3
 
 ## workload=read-window

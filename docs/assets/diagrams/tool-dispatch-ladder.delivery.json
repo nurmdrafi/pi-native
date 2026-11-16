@@ -4,8 +4,8 @@
   "status": "current",
   "command": "deliver",
   "type": "workflow",
-  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
-  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+  "input": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
+  "output": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
   "specification": {
     "sha256": "8db7a40df004d80fa01f13d269ab93d45cc60fa3846dab7f63b31e0cba0a3d88",
     "bytes": 2208

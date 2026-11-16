@@ -2,7 +2,7 @@
 
 - generated: 2026-11-05T17:27:52.962Z
 - node: v24.21.0
-- PI_WRITE_BIN: <unset; default /home/nurmdrafi/.pi/agent/bin/piwrite>
+- PI_WRITE_BIN: <unset; default <agent-home>/bin/piwrite>
 - tag: rawframe
 
 ## mode=--full

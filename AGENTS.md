@@ -6,7 +6,7 @@
 - Ambiguous "continue"/"proceed" → confirm scope first.
 
 ## Safety
-- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps, anything public, out-of-scope edits.
+- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps (except a ship run whose gates pass — commit and push immediately), anything public, out-of-scope edits.
 - Never without explicit approval: secrets (`.env`, `~/.ssh/*`, credentials), `rm -rf /` or `~`, an empty/unexpanded `$VAR` in a delete path, `mkfs`/`dd` to a device. A denial is final — no retries or disguises.
 
 ## Communication
@@ -16,8 +16,9 @@
 - Between tool calls: one sentence, ≤20 words.
 
 ## Workflow & TDD
-- Commit messages: no `#` — chat webhooks render `#` lines as headings.
-- Merge commits: write a subject naming the deliverable; never keep git's default `Merge branch …` + conflicts template.
+- Commit subject and body: no `#` character anywhere. Shape per `prompts/ship.md`: `type(scope): imperative summary`, body as multi-line `-` bullets, one per change, ≤100 chars per line, standard conventional type. Gates pass → commit and push without waiting for approval.
+- Never hand-count commit-message lines: compose the message in a file, gate it with `awk 'length>100 || index($0,"#") {print "line " FNR ": " length " chars or contains #"; exit 1}' <msgfile>`, then `git commit -F <msgfile>` — in the same shell call as `git add` (a rejected commit drops the staged index across calls).
+- Merge commits: subject names the deliverable, changelog deduped; never git's default `Merge branch …` template. Never commit pasted CI or webhook text — link the commit it announces.
 - TDD always: failing test → watch it fail → minimum code → refactor.
 - Bug fix → write a failing repro test first (no probe test).
 - Untestable (config/docs/infra) → state why, proceed.
@@ -27,6 +28,7 @@
 - Loop: plan → do → verify (scope per § Verification).
 - Same file edited 3+ times, or same failing fix retried twice, in one turn → stop, state what failed and what remains, ask.
 - Logs and temp/intermediate data for later retrieval → NDJSON, one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
+- Guard every `>>` append: confirm the target file ends in a newline first (`tail -c 1`); a missing final newline glues the append onto the last line.
 
 ### Subagents
 - Off until `/subagents on`; until then work linearly, never spawn unasked. After `/subagents on`, task pane handover → load the `tmux-panes` skill.
@@ -46,11 +48,14 @@
 - Apply `~/.pi/agent/docs/portability.md` before shell/path work.
 - Repo paths cited in these instructions and their docs (docs, tests, benchmarks) resolve under the agent home (`~/.pi/agent`), never the session cwd. Skill-body paths (`scripts/`, `references/`, `assets/`) resolve under the invoked skill's directory (`location` on the injected skill tag; project skills live in `.pi/skills/`).
 - Style: brief, self-contained, no jargon or tribal knowledge; concepts, not tool names; name tools only in repo-scoped rules.
-- In any file (docs, comments, tests, fixtures, notes, changelog), neutralize project/session/artifact references as `<project-a>`, `<vendor>`, `<org>`, `<project-root>`; keep dates. Fixture names describe shape, never the incident's source. Exception: a skill about a named stack names it.
+- The pi-native repo (agent home) is public — every file in it is world-readable; project repos where pi is initialized may be private — never assume public there. Sensitive data never enters any file (docs, comments, tests, fixtures, notes, changelog, prompts, skill bodies): secrets, tokens, and internal/self-hosted infrastructure hostnames or endpoints — reference those via env vars read at runtime (e.g. `$SENTRY_URL` from the agent-home secrets file), never written out. Concrete absolute paths — user, device, or machine specific (`/Users/<name>`, `/home/<name>`, hostnames) — never enter any file either: paths stay dynamic and OS/device-agnostic (`~`/`$HOME`-relative, repo-relative, or env-derived, per `docs/portability.md`); quote historical paths with `<home>`/`<user>` placeholders. In the public agent home, public facts may stay: org/vendor names, public repo and project slugs, public API endpoints, public usernames; keep dates. When a reference must be neutralized, use `<project-a>`, `<vendor>`, `<org>`, `<project-root>`. Fixture names describe shape, never the incident's source. A skill about a named stack names that stack.
 - Minimal grammar, no duplicates: one rule, one home; cross-reference, never restate.
+- A cross-reference is a resolvable path from the referring file (markdown link or repo path), never a bare code span naming a file that lives elsewhere.
+- Slash-command bodies pass arguments only through `$ARGUMENTS`/`$@`/`${N}` placeholders — a body without one silently drops the invoked argument.
+- Prompt frontmatter values are quoted strings (`argument-hint: "[lite|full]"`); an unquoted `[` parses as a YAML flow sequence and breaks the prompt at load.
 
 ## Harness tool discipline
-- Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push.
+- Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push. Compose the line with `jq -c -n` — printf mangles inner quotes and `$( )` at write time.
 - Tool-defect lessons carry path, file size, and exact payload (anchor text or hash) so a replay reproduces it.
 - A tool writing output/state to a chosen path keeps it inside agent home — outside paths are refused.
-- File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`.
+- File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`. Overwriting an existing path trips the destructive gate: check for the twin first (`fd <basename>`), then write a fresh path or rewrite the original deliberately.

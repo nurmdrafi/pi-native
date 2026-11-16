@@ -100,6 +100,14 @@ if [ -n "$CARGO" ]; then
   echo "== outline: built + installed to bin/outline"
 fi
 
+# 6c. docheck (doc-consistency validator — `npm run doc:check` runs
+#    bin/docheck; plain CLI, not an extension)
+if [ -n "$CARGO" ]; then
+  (cd rust-tools && "$CARGO" build --release -p docheck)
+  install_native rust-tools/target/release/docheck bin/docheck
+  echo "== docheck: built + installed to bin/docheck"
+fi
+
 # 7. dashboard UI (dashboard/dist is gitignored; the dashboard server serves
 #    it, so a fresh clone has source but no UI until this builds it)
 (cd dashboard && npm install --no-audit --no-fund && npm run build)

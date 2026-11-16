@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "88e55adc-95fe-420c-a7ad-98029b96d221",
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
     "sha256": "e1ecf4217399612599fb7bb770a02123fa54bb77ffa41a484834dd88d6d84908",
     "bytes": 845509
   },

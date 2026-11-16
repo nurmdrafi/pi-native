@@ -35,6 +35,9 @@
 - Keep each mutation in its own single-purpose call — chained substitution plus append trips the destructive gate; for small files a full write-tool rewrite preserving existing lines is the append fallback.
 - Wrap long foreground jobs in a timeout: `timeout(1)` where present, else the pibash `timeout` parameter (macOS hosts lack the binary); make one-shot CLI scripts exit explicitly (`process.exit(0)`), not linger on open sockets.
 - Toolchain pins: `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before node/npm/npx; missing → create one pinning the running `node --version` first. Same pattern for `.python-version`, `rust-toolchain.toml`, …; no pin convention → installed version.
+- Each shell call is a fresh process at the session cwd: use absolute paths, never a path relative to an earlier `cd`.
+- `nvm` is absent from non-interactive shells: `source "$HOME/.nvm/nvm.sh"` in the same call as the node/npm work — an export in one call never reaches the next.
+- `pnpm` in a worktree whose `node_modules` symlinks the main checkout trips verify-deps-before-run and stalls: run from the main checkout or disable that hook.
 
 ## Blocks & recovery
 - A block names a step: do it (read, narrower window, changed command), then retry once corrected; never resend verbatim. A second block on the same target is not a retry.

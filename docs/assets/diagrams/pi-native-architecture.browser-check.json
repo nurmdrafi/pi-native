@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "11b87626-b914-4442-b451-45219d962166",
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+    "path": "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
     "sha256": "6b7faceea3c604c5b26c6a1a3dbc463d81825b6b2ad575636a92331613b0e990",
     "bytes": 849638
   },

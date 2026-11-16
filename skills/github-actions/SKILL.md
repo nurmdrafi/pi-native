@@ -1,6 +1,6 @@
 ---
 name: github-actions
-description: Authors and hardens GitHub Actions workflow files (.github/workflows) — pins actions to commit SHAs via gh api tag resolution, scopes secrets out of workflow-level env, applies least-privilege permissions via workflow/job-level only, validates with actionlint. Use when creating, editing, or fixing CI workflows, when removing or restructuring jobs (auditing `needs:` and lost toolchain setup), when a release pipeline derives a version or tag from CHANGELOG.md, when a review or issue flags unpinned actions, secret exposure, over-broad permissions, missing build gates, or tag overwriting. NOT for general pre-push diff review (use code-reviewer) or non-GitHub CI systems.
+description: Authors and hardens GitHub Actions workflow files (.github/workflows) — pins actions to commit SHAs via gh api tag resolution, scopes secrets out of workflow-level env, applies least-privilege permissions via workflow/job-level only, validates with actionlint — and authors .github/dependabot.yml so every ecosystem the build consumes is covered without flooding pull requests. Use when creating, editing, or fixing CI workflows, when removing or restructuring jobs (auditing `needs:` and lost toolchain setup), when a release pipeline derives a version or tag from CHANGELOG.md, when a review or issue flags unpinned actions, secret exposure, over-broad permissions, missing build gates, or tag overwriting, or when dependency-update PRs are missing, too many, or aimed at the wrong branch. NOT for general pre-push diff review (use code-reviewer) or non-GitHub CI systems.
 disable-model-invocation: true
 ---
 
@@ -95,6 +95,10 @@ env:
 - Job removal (dangling `needs:`, lost toolchain) + build-gate deletion + whole-workflow removal → [references/restructuring.md](references/restructuring.md).
 - Version/tag derivation from one parser, tag-overwrite guards, multiline data between jobs → [references/release-versioning.md](references/release-versioning.md).
 
+## 9. Dependency updates (`.github/dependabot.yml`)
+
+Ecosystem values (including `bun` and its lockfile), PR base branch vs the branch the file is read from, volume controls (groups, cooldown, caps, rebase strategy), the minutes model, and the shape test that stands in for a missing schema validator → [references/dependabot.md](references/dependabot.md).
+
 ## Checklist
 
 - [ ] actionlint exit 0, confirmed vs deliberately broken temp copy (pass from non-git dir / valid-but-wrong YAML = meaningless)
@@ -112,3 +116,4 @@ env:
 - [ ] Container/deploy hardening: fail fast on missing/placeholder env, correct escaping, no swallowed errors; healthcheck; memory/heap limits; non-root PID 1; no EOL base; verified toolchain tarball; registry private unless deliberate; no secret in image config
 - [ ] Logs structured + retained; error reporting wired, not stripped in prod
 - [ ] Dirty `.dockerignore`, dep mismatches, commented-out gates = findings, not noise
+- [ ] Dependabot: one entry per shipped ecosystem, value confirmed against the supported-ecosystems table (an unsupported value no-ops silently), PR base branch exists on the remote, shape pinned by a test

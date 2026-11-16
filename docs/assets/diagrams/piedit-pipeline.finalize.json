@@ -7,12 +7,12 @@
   "quality": "standard",
   "startedAt": "2026-10-29T15:54:44.867Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/piedit-pipeline.workflow.json",
     "sha256": "87fffa8d1a2abb035f37acca0b309f3c6e007273f2be54fe0d4bfec6f21a26db",
     "bytes": 3133
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
     "sha256": "e1ecf4217399612599fb7bb770a02123fa54bb77ffa41a484834dd88d6d84908",
     "bytes": 845509
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piedit-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -113,12 +113,12 @@
       "exitCode": 0,
       "durationMs": 1093,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piedit-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -129,8 +129,8 @@
         "ok": true,
         "command": "deliver",
         "type": "workflow",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.workflow.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+        "input": "<agent-home>/docs/assets/diagrams/piedit-pipeline.workflow.json",
+        "output": "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
         "specification": {
           "sha256": "87fffa8d1a2abb035f37acca0b309f3c6e007273f2be54fe0d4bfec6f21a26db",
           "bytes": 3133
@@ -222,15 +222,15 @@
       "exitCode": 0,
       "durationMs": 411,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+        "file": "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
         "artifact": {
           "sha256": "e1ecf4217399612599fb7bb770a02123fa54bb77ffa41a484834dd88d6d84908",
           "bytes": 845509
@@ -416,10 +416,10 @@
       "exitCode": 0,
       "durationMs": 4958,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
         "--json",
         "--require-provenance"
       ],
@@ -434,7 +434,7 @@
         "provenance": "current",
         "deliveryReceiptId": "88e55adc-95fe-420c-a7ad-98029b96d221",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.html",
+          "path": "<agent-home>/docs/assets/diagrams/piedit-pipeline.html",
           "sha256": "e1ecf4217399612599fb7bb770a02123fa54bb77ffa41a484834dd88d6d84908",
           "bytes": 845509
         },
@@ -1645,9 +1645,9 @@
   },
   "diagnostics": [],
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piedit-pipeline.browser-check.json"
+    "receipt": "<agent-home>/docs/assets/diagrams/piedit-pipeline.finalize.json",
+    "summaryReceipt": "<agent-home>/docs/assets/diagrams/piedit-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "<agent-home>/docs/assets/diagrams/piedit-pipeline.browser-check.json"
   },
   "visualReview": "not-requested",
   "finishedAt": "2026-10-29T15:54:51.640Z",

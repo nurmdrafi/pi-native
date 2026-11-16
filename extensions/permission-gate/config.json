@@ -4,7 +4,7 @@
   "rules": {
     "AG": "off",
     "AG2": "off",
-    "WB": "off",
+    "WB": "warn",
     "R1": "error",
     "R1x": "warn",
     "R1b": "warn",
@@ -28,7 +28,7 @@
     "SS4": "warn",
     "PB1": "warn",
     "SE1": "warn",
-    "SE2": "warn",
+    "SE2": "off",
     "CN": "error",
     "LG1": "error",
     "R11": "error",

@@ -97,6 +97,8 @@ Truly environmental / timing-dependent / external:
 
 But: 95% of "no root cause" = incomplete investigation.
 
+Host gaps in a test environment are the real exception. A message the host prints while every assertion passes (a runtime's "Not implemented" for an API it lacks) is the host's missing API, not your bug. Confirm the API is genuinely absent, then substitute at the boundary the tests exercise — and keep an assertion on the substituted call, so the stub proves behaviour instead of hiding it. Patching a prototype fails when the member is non-configurable (`Object.getOwnPropertyDescriptor(Ctor.prototype, name).configurable === false`); redefine the property on the instance the code under test reads instead.
+
 ## Supporting Techniques
 
 - [references/root-cause-tracing.md](references/root-cause-tracing.md) — trace bugs backward through call stack to original trigger

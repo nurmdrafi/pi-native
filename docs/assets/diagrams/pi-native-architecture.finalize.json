@@ -7,12 +7,12 @@
   "quality": "showcase",
   "startedAt": "2026-11-07T15:56:55.526Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
+    "path": "<agent-home>/docs/assets/diagrams/pi-native-architecture.json",
     "sha256": "5ee048131e16480548daee5f698ea7f1861ee6ffaeb3871b02fd5f42e6f080c0",
     "bytes": 3034
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+    "path": "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
     "sha256": "6b7faceea3c604c5b26c6a1a3dbc463d81825b6b2ad575636a92331613b0e990",
     "bytes": 849638
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "architecture",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+        "<agent-home>/docs/assets/diagrams/pi-native-architecture.json",
+        "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
         "--quality",
         "showcase",
         "--json"
@@ -56,12 +56,12 @@
       "exitCode": 0,
       "durationMs": 823,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "architecture",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+        "<agent-home>/docs/assets/diagrams/pi-native-architecture.json",
+        "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
         "--quality",
         "showcase",
         "--json"
@@ -72,8 +72,8 @@
         "ok": true,
         "command": "deliver",
         "type": "architecture",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+        "input": "<agent-home>/docs/assets/diagrams/pi-native-architecture.json",
+        "output": "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
         "specification": {
           "sha256": "5ee048131e16480548daee5f698ea7f1861ee6ffaeb3871b02fd5f42e6f080c0",
           "bytes": 3034
@@ -108,15 +108,15 @@
       "exitCode": 0,
       "durationMs": 278,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+        "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+        "file": "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
         "artifact": {
           "sha256": "6b7faceea3c604c5b26c6a1a3dbc463d81825b6b2ad575636a92331613b0e990",
           "bytes": 849638
@@ -270,10 +270,10 @@
       "exitCode": 0,
       "durationMs": 4059,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+        "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
         "--json",
         "--require-provenance",
         "--out-dir",
@@ -290,7 +290,7 @@
         "provenance": "current",
         "deliveryReceiptId": "11b87626-b914-4442-b451-45219d962166",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pi-native-architecture.html",
+          "path": "<agent-home>/docs/assets/diagrams/pi-native-architecture.html",
           "sha256": "6b7faceea3c604c5b26c6a1a3dbc463d81825b6b2ad575636a92331613b0e990",
           "bytes": 849638
         },

@@ -7,12 +7,12 @@
   "quality": "standard",
   "startedAt": "2026-11-07T15:56:25.271Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.workflow.json",
     "sha256": "441a4632bca55e97b9828cd6c8591e7901240be343b048f8dbdc330e43931911",
     "bytes": 2916
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
     "sha256": "55e7e53bbe4449eb01520c67b595d9c66de2a91d9b11c7cbb33b59e1f05d4f81",
     "bytes": 843409
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -82,12 +82,12 @@
       "exitCode": 0,
       "durationMs": 806,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -98,8 +98,8 @@
         "ok": true,
         "command": "deliver",
         "type": "workflow",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+        "input": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+        "output": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
         "specification": {
           "sha256": "441a4632bca55e97b9828cd6c8591e7901240be343b048f8dbdc330e43931911",
           "bytes": 2916
@@ -160,15 +160,15 @@
       "exitCode": 0,
       "durationMs": 304,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+        "file": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
         "artifact": {
           "sha256": "55e7e53bbe4449eb01520c67b595d9c66de2a91d9b11c7cbb33b59e1f05d4f81",
           "bytes": 843409
@@ -321,10 +321,10 @@
       "exitCode": 0,
       "durationMs": 3610,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
         "--json",
         "--require-provenance",
         "--out-dir",
@@ -341,7 +341,7 @@
         "provenance": "current",
         "deliveryReceiptId": "201975b0-9b18-4e41-a445-5a36ee08bb52",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+          "path": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
           "sha256": "55e7e53bbe4449eb01520c67b595d9c66de2a91d9b11c7cbb33b59e1f05d4f81",
           "bytes": 843409
         },

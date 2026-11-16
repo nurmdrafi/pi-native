@@ -7,12 +7,12 @@
   "quality": "showcase",
   "startedAt": "2026-11-07T15:57:01.139Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
     "sha256": "8db7a40df004d80fa01f13d269ab93d45cc60fa3846dab7f63b31e0cba0a3d88",
     "bytes": 2208
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+    "path": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
     "sha256": "775c4a1bb302f51f5ac7b68c036f794259ae459f6e5e4bf430f53d04be5690f9",
     "bytes": 840439
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+        "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
+        "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
         "--quality",
         "showcase",
         "--json"
@@ -56,12 +56,12 @@
       "exitCode": 0,
       "durationMs": 1102,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+        "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
+        "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
         "--quality",
         "showcase",
         "--json"
@@ -72,8 +72,8 @@
         "ok": true,
         "command": "deliver",
         "type": "workflow",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+        "input": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.workflow.json",
+        "output": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
         "specification": {
           "sha256": "8db7a40df004d80fa01f13d269ab93d45cc60fa3846dab7f63b31e0cba0a3d88",
           "bytes": 2208
@@ -108,15 +108,15 @@
       "exitCode": 0,
       "durationMs": 339,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+        "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+        "file": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
         "artifact": {
           "sha256": "775c4a1bb302f51f5ac7b68c036f794259ae459f6e5e4bf430f53d04be5690f9",
           "bytes": 840439
@@ -244,10 +244,10 @@
       "exitCode": 0,
       "durationMs": 5154,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+        "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
         "--json",
         "--require-provenance",
         "--out-dir",
@@ -264,7 +264,7 @@
         "provenance": "current",
         "deliveryReceiptId": "f45ccb0c-84e0-4134-baa0-8cd3354e93ea",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/tool-dispatch-ladder.html",
+          "path": "<agent-home>/docs/assets/diagrams/tool-dispatch-ladder.html",
           "sha256": "775c4a1bb302f51f5ac7b68c036f794259ae459f6e5e4bf430f53d04be5690f9",
           "bytes": 840439
         },

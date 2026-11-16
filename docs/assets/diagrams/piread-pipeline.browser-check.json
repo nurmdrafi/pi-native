@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "d9db3c3a-9614-4f02-a9bc-5f804ce42f5b",
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
     "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
     "bytes": 845728
   },

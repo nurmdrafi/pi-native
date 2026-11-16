@@ -7,12 +7,12 @@
   "quality": "standard",
   "startedAt": "2026-11-07T15:57:27.435Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/piread-pipeline.workflow.json",
     "sha256": "6072dd8b45dbf8f3d4adb99e30a116cb4bf7941f66092c4bf365580e1e87533d",
     "bytes": 3370
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
     "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
     "bytes": 845728
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piread-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -82,12 +82,12 @@
       "exitCode": 0,
       "durationMs": 895,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piread-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -98,8 +98,8 @@
         "ok": true,
         "command": "deliver",
         "type": "workflow",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.workflow.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+        "input": "<agent-home>/docs/assets/diagrams/piread-pipeline.workflow.json",
+        "output": "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
         "specification": {
           "sha256": "6072dd8b45dbf8f3d4adb99e30a116cb4bf7941f66092c4bf365580e1e87533d",
           "bytes": 3370
@@ -160,15 +160,15 @@
       "exitCode": 0,
       "durationMs": 265,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+        "file": "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
         "artifact": {
           "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
           "bytes": 845728
@@ -321,10 +321,10 @@
       "exitCode": 0,
       "durationMs": 3993,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
         "--json",
         "--require-provenance",
         "--out-dir",
@@ -341,7 +341,7 @@
         "provenance": "current",
         "deliveryReceiptId": "d9db3c3a-9614-4f02-a9bc-5f804ce42f5b",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piread-pipeline.html",
+          "path": "<agent-home>/docs/assets/diagrams/piread-pipeline.html",
           "sha256": "268fa4e07f4c7d97b1d70db8b3f466f2b60aa53dd05bf8de38ad86e5b3bab024",
           "bytes": 845728
         },

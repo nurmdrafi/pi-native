@@ -4,8 +4,8 @@
   "status": "current",
   "command": "deliver",
   "type": "workflow",
-  "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
-  "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+  "input": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+  "output": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
   "specification": {
     "sha256": "441a4632bca55e97b9828cd6c8591e7901240be343b048f8dbdc330e43931911",
     "bytes": 2916

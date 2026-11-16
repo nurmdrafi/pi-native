@@ -6,12 +6,12 @@
   "type": "workflow",
   "quality": "standard",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.workflow.json",
     "sha256": "441a4632bca55e97b9828cd6c8591e7901240be343b048f8dbdc330e43931911",
     "bytes": 2916
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/piwrite-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/piwrite-pipeline.html",
     "sha256": "55e7e53bbe4449eb01520c67b595d9c66de2a91d9b11c7cbb33b59e1f05d4f81",
     "bytes": 843409
   },

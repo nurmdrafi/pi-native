@@ -336,17 +336,58 @@ function loadGateConfig(): GateConfig {
 /** Loaded once per process; the gate reads `config.rules.<key>` at each check. */
 export const config: GateConfig = loadGateConfig();
 
-/** True when the rule runs at all (warn or error). `ruleEnabled("rerunGuard")`. */
-export function ruleEnabled(key: RuleKey): boolean {
-  return config.severity[key] !== "off";
+/** /yolo (2026-11-12): session-scoped runtime bypass of the gate's
+ * per-action asks, toggled by the `/yolo` slash command (registered in
+ * index.ts). Runtime-only: config.json severities and the HARD_RULES floor
+ * stay intact on disk; `setYolo(false)` restores exact prior behavior.
+ * Default off; index.ts resets it at every session_start so no session
+ * inherits a bypass. The accessors below are the single seam — every gate
+ * decision flows through them — so one flag silences blocks, warn notes,
+ * and confirm ladders alike. YOLO_FLOOR is the industry-standard minimum
+ * (Claude Code bypassPermissions keeps protected-path write confirms and
+ * deny rules active in bypass mode; Gemini/Codex full-auto assumes a
+ * sandbox boundary instead): rules there keep their configured severity
+ * even while yolo is on. Output caps and scrubbing are NOT permissions and
+ * stay on. */
+let yolo = false;
+
+/** Rules the /yolo bypass cannot silence: the destructiveConfirm ladder —
+ * catastrophic commands (rm -rf /, mkfs, dd to a device), protected trees
+ * (/etc /usr /var /boot /root, ~/.ssh, ~/.gnupg, shell rc files, systemd),
+ * and out-of-cwd write confinement — plus the commit-message gate
+ * (commitMessageLint). The git-family confirm entries are exempt from the
+ * floor: they auto-approve under the bypass (segmentDestructiveExceptGit,
+ * user direction 2026-11-12 — git commit itself keeps its gate here).
+ * Same shape as HARD_RULES: a floor the mode cannot lower. */
+export const YOLO_FLOOR: ReadonlySet<RuleKey> = new Set([
+  "destructiveConfirm",
+  "commitMessageLint",
+] as RuleKey[]);
+
+/** True while the `/yolo` bypass is active (this process, this session). */
+export function yoloActive(): boolean {
+  return yolo;
 }
 
-/** The rule's severity: `off` skips it, `warn` records and proceeds, `error` blocks. */
+/** Set the bypass state; returns the new state. Non-destructive — the
+ * loaded config severities never move, so toggling back is exact. */
+export function setYolo(on: boolean): boolean {
+  yolo = on;
+  return yolo;
+}
+
+/** The rule's effective severity: floor rules keep their configured
+ * severity in yolo; everything else reads `off` while the bypass is on. */
 export function ruleSeverity(key: RuleKey): Severity {
-  return config.severity[key];
+  return yolo && !YOLO_FLOOR.has(key) ? "off" : config.severity[key];
+}
+
+/** True when the rule runs at all (warn or error). `ruleEnabled("rerunGuard")`. */
+export function ruleEnabled(key: RuleKey): boolean {
+  return ruleSeverity(key) !== "off";
 }
 
 /** True only when the rule should BLOCK (severity `error`). */
 export function ruleBlocks(key: RuleKey): boolean {
-  return config.severity[key] === "error";
+  return ruleSeverity(key) === "error";
 }

@@ -21,15 +21,20 @@ Read-only: no files are written.
 
 import json
 import os
+import os
 import re
 import subprocess
 import sys
 import time
 
-REPO = "/home/nurmdrafi/.pi/agent"
-PIREAD = f"{REPO}/bin/piread"
-RG = f"{REPO}/bin/rg"
-OUTLINE = f"{REPO}/bin/outline"
+REPO = os.path.dirname(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+)
+PIREAD = os.path.join(REPO, "bin", "piread")
+RG = os.path.join(REPO, "bin", "rg")
+OUTLINE = os.path.join(REPO, "bin", "outline")
 CONTEXT = 12
 READ_CAP = 100
 

@@ -2,7 +2,7 @@
 
 - generated: 2026-11-05T17:46:13.602Z
 - node: v24.21.0
-- PI_WRITE_BIN: /home/nurmdrafi/.pi/agent/benchmark/piwrite/shim/piwrite-shim.mjs
+- PI_WRITE_BIN: <agent-home>/benchmark/piwrite/shim/piwrite-shim.mjs
 - tag: v2smoke3
 
 ## mode=--smoke
