@@ -1,6 +1,6 @@
 ---
 name: sentry-triage
-description: Sentry issue triager — pulls unresolved issues from the self-hosted Sentry (org barikoi), maps stacktraces to repo code, ships failing-test-first fixes, resolves verified issues, appends NDJSON audit; use for any Sentry issue task instead of worker
+description: Sentry issue triager — pulls unresolved issues from the self-hosted Sentry (org from SENTRY_ORG in the secrets env), maps stacktraces to repo code, ships failing-test-first fixes, resolves verified issues, appends NDJSON audit; use for any Sentry issue task instead of worker
 tools: piwrite, piread, piedit, pibash
 skills: sentry
 thinking: max

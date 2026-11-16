@@ -1,18 +1,18 @@
 ---
 name: sentry
-description: "Fetch, understand, and resolve issues on the self-hosted Sentry (host from SENTRY_URL in the secrets file, org barikoi) for jti-dashboard and akg-frontend. The agent-home secrets env supplies SENTRY_URL and SENTRY_AUTH_TOKEN; curl/jq against /api/0 is the backbone, the toolkit sentry CLI an optional accelerator. Use for 'triage sentry', 'list sentry issues', 'resolve issue X'. Not for client-side DSN/instrumentation setup."
+description: "Fetch, understand, and resolve issues on the self-hosted Sentry (host from SENTRY_URL, org from SENTRY_ORG, both in the secrets file) for any project the org holds. The agent-home secrets env supplies SENTRY_URL, SENTRY_AUTH_TOKEN, and SENTRY_ORG; curl/jq against /api/0 is the backbone, the toolkit sentry CLI an optional accelerator. Use for 'triage sentry', 'list sentry issues', 'resolve issue X'. Not for client-side DSN/instrumentation setup."
 ---
 
-`<skill-dir>` = this skill's directory. All paths below are absolute; repos live under `~/Barikoi`.
+`<skill-dir>` = this skill's directory. All paths below are absolute; checkout root comes from `SENTRY_CHECKOUTS` in the secrets env (default `~`).
 
-# Sentry triage — self-hosted, org `barikoi`
+# Sentry triage — self-hosted, org from `"$SENTRY_ORG"`
 
 Base URL comes from `SENTRY_URL` in the secrets file (section 1); never write the host out. Any project in the org is triageable — the task names the project slug(s), or `all`; discover slugs via the projects call in section 2.
 
 ## Project → repo mapping
 
-Local checkouts live under `~/Barikoi/`, dir name = project slug by convention.
-1. `[ -d ~/Barikoi/<slug> ]` → that is the repo.
+Local checkouts live under `"$SENTRY_CHECKOUTS"` (secrets env; default `~`), dir name = project slug by convention.
+1. `[ -d "${SENTRY_CHECKOUTS:-$HOME}/<slug>" ]` → that is the repo.
 2. Else `fd -H -t d -d 3 "^<slug>$" ~` — a checkout elsewhere on disk.
 3. No checkout → read-only triage for that project: analyze the event, report findings and a suggested fix, record `skipped` with reason `no local repo`; never edit or resolve without code to fix.
 
@@ -23,10 +23,10 @@ Sentry creds live in `~/.pi/agent/.secrets/sentry.env` (agent home, gitignored) 
 1. Load and call in one shell process, token never echoed:
    ```sh
    set -a; . ~/.pi/agent/.secrets/sentry.env; set +a
-   curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/barikoi/projects/" | jq -r '.[].slug'
+   curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/$SENTRY_ORG/projects/" | jq -r '.[].slug'
    ```
-2. File or `SENTRY_AUTH_TOKEN` missing → stop and tell the user: create a token at the instance's `/settings/account/api/auth-tokens/` page with scopes `org:read project:read project:write event:read event:write`, then write `SENTRY_URL` and `SENTRY_AUTH_TOKEN` lines into `~/.pi/agent/.secrets/sentry.env`.
-3. Client-exposed vars in any repo — any framework public prefix (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`, `VUE_APP_`, `EXPO_PUBLIC_`) and any telemetry name shape (DSN/DNS/CSP-report endpoint) — are irrelevant to triage: never open repo env files (`.env*`) during triage; this holds for every repo and project. Suspected typos in tracked examples (e.g. jti-dashboard's `NEXT_PUBLIC_SENTRY_DNS` for `..._DSN`) are flagged in the report, never silently "fixed".
+2. File, `SENTRY_AUTH_TOKEN`, or `SENTRY_ORG` missing → stop and tell the user: create a token at the instance's `/settings/account/api/auth-tokens/` page with scopes `org:read project:read project:write event:read event:write`, then write `SENTRY_URL`, `SENTRY_AUTH_TOKEN`, and `SENTRY_ORG` lines (plus optional `SENTRY_CHECKOUTS`, default `~`) into `~/.pi/agent/.secrets/sentry.env`.
+3. Client-exposed vars in any repo — any framework public prefix (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`, `VUE_APP_`, `EXPO_PUBLIC_`) and any telemetry name shape (DSN/DNS/CSP-report endpoint) — are irrelevant to triage: never open repo env files (`.env*`) during triage; this holds for every repo and project. Suspected typos in tracked examples (e.g. `NEXT_PUBLIC_SENTRY_DNS` for `..._DSN`) are flagged in the report, never silently "fixed".
 
 Ban: `cat`/`echo`/print of the secrets file, its values, or the token; the token stays inside the shell process.
 
@@ -34,21 +34,21 @@ Ban: `cat`/`echo`/print of the secrets file, its values, or the token; the token
 
 | Need | Call |
 | --- | --- |
-| Project slugs | `GET /api/0/organizations/barikoi/projects/` |
-| Unresolved issues | `GET /api/0/organizations/barikoi/issues/?query=is:unresolved&project=<slug>&statsPeriod=24h&sort=freq` |
-| Issue detail | `GET /api/0/organizations/barikoi/issues/<id>/` |
-| Latest event | `GET /api/0/organizations/barikoi/issues/<id>/events/latest/` |
+| Project slugs | `GET /api/0/organizations/$SENTRY_ORG/projects/` |
+| Unresolved issues | `GET /api/0/organizations/$SENTRY_ORG/issues/?query=is:unresolved&project=<slug>&statsPeriod=24h&sort=freq` |
+| Issue detail | `GET /api/0/organizations/$SENTRY_ORG/issues/<id>/` |
+| Latest event | `GET /api/0/organizations/$SENTRY_ORG/issues/<id>/events/latest/` |
 
 Always pipe through jq and keep only what is needed:
 
 ```sh
-curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/barikoi/issues/?query=is:unresolved&project=$PROJECT_SLUG&statsPeriod=24h&sort=freq" | jq -r '.[] | [.id, .shortId, .level, .count, .userCount, .firstSeen, .lastSeen, .title, .culprit] | @tsv'
+curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/$SENTRY_ORG/issues/?query=is:unresolved&project=$PROJECT_SLUG&statsPeriod=24h&sort=freq" | jq -r '.[] | [.id, .shortId, .level, .count, .userCount, .firstSeen, .lastSeen, .title, .culprit] | @tsv'
 ```
 
 Stacktrace from the latest event — frames are ordered outermost-first; the error site is the last in-app frame:
 
 ```sh
-curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/barikoi/issues/$ISSUE_ID/events/latest/" | jq '.entries[] | select(.type=="exception") | .values[0].stacktrace.frames | map(select(.inApp != false)) | .[-5:]'
+curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/$SENTRY_ORG/issues/$ISSUE_ID/events/latest/" | jq '.entries[] | select(.type=="exception") | .values[0].stacktrace.frames | map(select(.inApp != false)) | .[-5:]'
 ```
 
 ## 3. Understand
@@ -58,7 +58,7 @@ curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organi
 3. Read the mapped file plus its callers before concluding anything — behavior claims need the consumption site.
 4. Evidence beyond the stack — same latest-event call or one extra call:
    - Breadcrumbs (user actions before the error): `jq '.entries[] | select(.type=="breadcrumbs") | .values[-10:]'`
-   - Tag distributions — impact scope (browser, environment, url, release): `GET /api/0/organizations/barikoi/issues/<id>/tags/` and `.../tags/<key>/`
+   - Tag distributions — impact scope (browser, environment, url, release): `GET /api/0/organizations/$SENTRY_ORG/issues/<id>/tags/` and `.../tags/<key>/`
    - Event context: `jq '{user, release, environment, tags}'` on the latest event
    - PII rule: event data may carry credentials/tokens/PII — note presence and type, never reproduce values in output
 5. Root-cause hypothesis before any edit, four lines: error summary; immediate cause (code path that threw); hypothesis (why it reached that state); strongest alternative and why rejected.
