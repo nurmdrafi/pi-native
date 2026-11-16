@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { canonicalFuturePath, pathsAlias, resolveNativeOutputDirectory, resolveOutputPath } from '../renderers/shared/output-path.mjs';
+import { displayPath } from '../renderers/shared/portable-path.mjs';
 import { boundedSidecarStem } from '../renderers/shared/sidecar-path.mjs';
 import {
   captureAtomicOutput, captureRegularFileBinding, publishRegularFileBinding,
@@ -29,9 +30,9 @@ function sha256(buffer) {
 function identity(file) {
   try {
     const bytes = fs.readFileSync(file);
-    return { path: path.resolve(file), sha256: sha256(bytes), bytes: bytes.byteLength };
+    return { path: displayPath(file), sha256: sha256(bytes), bytes: bytes.byteLength };
   } catch {
-    return { path: path.resolve(file) };
+    return { path: displayPath(file) };
   }
 }
 

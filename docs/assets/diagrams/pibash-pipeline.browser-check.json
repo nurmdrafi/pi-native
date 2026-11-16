@@ -8,7 +8,7 @@
   "provenance": "current",
   "deliveryReceiptId": "86e03482-f811-41b5-83da-0ee4b49fed01",
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
     "sha256": "ab4783af9aff79be3b307227b8a3695b116c01b46d108abe4e9f80d5b650ca89",
     "bytes": 848061
   },

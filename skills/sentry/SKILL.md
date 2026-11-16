@@ -1,32 +1,32 @@
 ---
 name: sentry
-description: "Fetch, understand, and resolve issues on the self-hosted Sentry at https://sentry.barikoimaps.com (org barikoi) for jti-dashboard and akg-frontend. Per-repo .env supplies SENTRY_URL and SENTRY_AUTH_TOKEN; curl/jq against /api/0 is the backbone, the toolkit sentry CLI an optional accelerator. Use for 'triage sentry', 'list sentry issues', 'resolve issue X'. Not for client-side DSN/instrumentation setup."
+description: "Fetch, understand, and resolve issues on the self-hosted Sentry (host from SENTRY_URL in the secrets file, org barikoi) for jti-dashboard and akg-frontend. The agent-home secrets env supplies SENTRY_URL and SENTRY_AUTH_TOKEN; curl/jq against /api/0 is the backbone, the toolkit sentry CLI an optional accelerator. Use for 'triage sentry', 'list sentry issues', 'resolve issue X'. Not for client-side DSN/instrumentation setup."
 ---
 
-`<skill-dir>` = this skill's directory. All paths below are absolute; repos live under `/Users/nur/Barikoi`.
+`<skill-dir>` = this skill's directory. All paths below are absolute; repos live under `~/Barikoi`.
 
 # Sentry triage — self-hosted, org `barikoi`
 
-Base URL `https://sentry.barikoimaps.com`. Any project in the org is triageable — the task names the project slug(s), or `all`; discover slugs via the projects call in section 2.
+Base URL comes from `SENTRY_URL` in the secrets file (section 1); never write the host out. Any project in the org is triageable — the task names the project slug(s), or `all`; discover slugs via the projects call in section 2.
 
 ## Project → repo mapping
 
-Local checkouts live under `/Users/nur/Barikoi/`, dir name = project slug by convention.
-1. `[ -d /Users/nur/Barikoi/<slug> ]` → that is the repo.
-2. Else `fd -H -t d -d 3 "^<slug>$" /Users/nur` — a checkout elsewhere on disk.
+Local checkouts live under `~/Barikoi/`, dir name = project slug by convention.
+1. `[ -d ~/Barikoi/<slug> ]` → that is the repo.
+2. Else `fd -H -t d -d 3 "^<slug>$" ~` — a checkout elsewhere on disk.
 3. No checkout → read-only triage for that project: analyze the event, report findings and a suggested fix, record `skipped` with reason `no local repo`; never edit or resolve without code to fix.
 
 ## 1. Environment — pi-native secrets file, never printed
 
-Sentry creds live in `/Users/nur/.pi/agent/.secrets/sentry.env` (agent home, gitignored) — never in the repos, never in repo env files.
+Sentry creds live in `~/.pi/agent/.secrets/sentry.env` (agent home, gitignored) — never in the repos, never in repo env files.
 
 1. Load and call in one shell process, token never echoed:
    ```sh
-   set -a; . /Users/nur/.pi/agent/.secrets/sentry.env; set +a
+   set -a; . ~/.pi/agent/.secrets/sentry.env; set +a
    curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/barikoi/projects/" | jq -r '.[].slug'
    ```
-2. File or `SENTRY_AUTH_TOKEN` missing → stop and tell the user: create a token at `https://sentry.barikoimaps.com/settings/account/api/auth-tokens/` with scopes `org:read project:read project:write event:read event:write`, then write `SENTRY_URL` and `SENTRY_AUTH_TOKEN` lines into `/Users/nur/.pi/agent/.secrets/sentry.env`.
-3. Client vars in repos (`NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_CSP_REPORT_ENDPOINT`) are irrelevant to triage — do not read repo env files. Known repo quirk: jti-dashboard's example defines `NEXT_PUBLIC_SENTRY_DNS` (typo of `DSN`) — flag it, do not silently "fix" it.
+2. File or `SENTRY_AUTH_TOKEN` missing → stop and tell the user: create a token at the instance's `/settings/account/api/auth-tokens/` page with scopes `org:read project:read project:write event:read event:write`, then write `SENTRY_URL` and `SENTRY_AUTH_TOKEN` lines into `~/.pi/agent/.secrets/sentry.env`.
+3. Client-exposed vars in any repo — any framework public prefix (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`, `VUE_APP_`, `EXPO_PUBLIC_`) and any telemetry name shape (DSN/DNS/CSP-report endpoint) — are irrelevant to triage: never open repo env files (`.env*`) during triage; this holds for every repo and project. Suspected typos in tracked examples (e.g. jti-dashboard's `NEXT_PUBLIC_SENTRY_DNS` for `..._DSN`) are flagged in the report, never silently "fixed".
 
 Ban: `cat`/`echo`/print of the secrets file, its values, or the token; the token stays inside the shell process.
 
@@ -77,7 +77,7 @@ Order is fixed: reproduce → fix → verify → resolve → audit.
      -d '{"status":"resolved"}' "$SENTRY_URL/api/0/issues/<id>/" | jq -r '.status'
    ```
 3. Verify: re-run the section-2 issue list; the id must be gone from `is:unresolved`.
-4. Audit — append one NDJSON line to `/Users/nur/.pi/agent/logs/sentry-triage.ndjson`:
+4. Audit — append one NDJSON line to `~/.pi/agent/logs/sentry-triage.ndjson`:
    ```json
    {"ts":"<iso>","repo":"<repo>","project":"<slug>","issue_id":"<id>","short_id":"<shortId>","title":"...","culprit":"...","fix_commit":"<sha-or-null>","action":"resolved"}
    ```

@@ -64,7 +64,7 @@ test("checkLine flags naive and future timestamps as BAD_TS", () => {
 
 test("checkLine flags absolute user paths as IDENTITY", () => {
   const mac = checkLine(
-    { ts: "2026-11-02T06:00:00Z", source: "a", lesson: "crash under /Users/nur/proj" },
+    { ts: "2026-11-02T06:00:00Z", source: "a", lesson: "crash under /Users/alice/proj" },
     { now: NOW },
   );
   assert.equal(mac[0].code, "IDENTITY");
@@ -110,7 +110,7 @@ test("BAD_TS: a future timestamp fails at file level", () => {
 
 test("IDENTITY: an absolute user path fails at file level", () => {
   const res = checkFile(
-    [L("2026-11-02T06:00:00Z", "a", "log at /Users/nur/agent/lessons")],
+    [L("2026-11-02T06:00:00Z", "a", "log at /Users/alice/agent/lessons")],
     NOW,
   );
   assert.deepEqual(codes(res, "FAIL", 1), ["IDENTITY"]);
@@ -197,7 +197,7 @@ test("dirty file: one line per FAIL and WARN code, ordered findings, summary", (
       "not-json{",
       '{"ts":"2027-02-01T00:00:00Z","source":"e"}',
       L("2028-01-01T00:00:00Z", "f", "future stamp topic"),
-      L("2027-03-01T00:00:00Z", "g", "mentions /Users/nur/agent once"),
+      L("2027-03-01T00:00:00Z", "g", "mentions /Users/alice/agent once"),
     ],
     later,
   );

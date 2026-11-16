@@ -6,12 +6,12 @@
   "type": "workflow",
   "quality": "standard",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/pibash-pipeline.workflow.json",
     "sha256": "097d2ca83d769ad66d981609e4a46aa553d78f13ef8284a27f3304b79429c551",
     "bytes": 3541
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
     "sha256": "ab4783af9aff79be3b307227b8a3695b116c01b46d108abe4e9f80d5b650ca89",
     "bytes": 848061
   },
@@ -28,9 +28,9 @@
     "truncated": false
   },
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.browser-check.json"
+    "receipt": "<agent-home>/docs/assets/diagrams/pibash-pipeline.finalize.json",
+    "summaryReceipt": "<agent-home>/docs/assets/diagrams/pibash-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "<agent-home>/docs/assets/diagrams/pibash-pipeline.browser-check.json"
   },
   "update": {
     "status": "current",

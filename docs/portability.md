@@ -1,7 +1,6 @@
 # Portability
-- No absolute user/machine paths anywhere (code, tests, fixtures, docs, generated files). Derive paths at runtime (`import.meta.url`, `$HOME`/`env.HOME`, argv, `command -v`); tracked files byte-identical on all machines; roots via argv/env, never baked.
+- No absolute user/machine/device paths anywhere (code, tests, fixtures, docs, generated files, recorded artifacts such as benchmark summaries and workflow/diagram manifests). Derive at runtime (`import.meta.url`, `$HOME`/`env.HOME`, `os.homedir()`, `process.execPath`, argv, `command -v`); tracked files byte-identical on every machine, OS, and device; roots via argv/env, never baked. Recorded output stores repo-relative or `~`-relative paths — never the producing machine's home. Quoting a historical path in prose uses placeholders (`<home>`, `<user>`), never a real username.
 - Target: macOS+Linux — portable BSD/GNU subset only; where they differ, branch explicitly.
-- Written output: `~`/`$HOME` or script-relative, never absolute user paths.
 - No single-quoted `python3 -c` with embedded quotes — use `rg` or a heredoc.
 - No hardcoded `/bin/sh`: probe (`process.platform !== 'win32' && existsSync('/bin/sh')`), fall back to `PATH` resolution (see `~/.pi/agent/skills/pidoc/scripts/pidoc.mjs`). Windows unsupported, but the health check and Node scripts degrade, never crash.
 - `scripts/bootstrap.sh` and `scripts/after-pull.sh`: POSIX `sh`. `pidx`: OS-agnostic Rust (std + mtime, no watchers); store is explicit little-endian — macOS and Linux share one path/format.

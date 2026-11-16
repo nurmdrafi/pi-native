@@ -14,7 +14,7 @@ Research note, 2026-10-27.
 
 Scope: one design flaw in the permission-gate — the gap between what a
 compacted `piread` result puts in context and what the Anchor Guard (AG) accepts as an edit anchor.
-Research only; no code, SYSTEM.md, or tests were changed. All paths are relative to `/Users/nur/.pi/agent`
+Research only; no code, SYSTEM.md, or tests were changed. All paths are relative to the agent home (`~/.pi/agent`)
 unless absolute. Session cites are 1-based JSONL line numbers in
 `sessions/<project>/<2026-10-26 session>.jsonl`.
 

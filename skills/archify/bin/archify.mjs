@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
+import { displayPath } from '../renderers/shared/portable-path.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -5961,8 +5962,8 @@ async function commandFinalize(rawArgs) {
       status: 'fail',
       type,
       quality: qualityArgs.quality || 'showcase',
-      specification: { path: path.resolve(input) },
-      artifact: { path: path.resolve(output) },
+      specification: { path: displayPath(input) },
+      artifact: { path: displayPath(output) },
       gates: Object.fromEntries(['validate', 'deliver', 'check', 'browser-check'].map((stage) => [stage, 'not-run'])),
       browserCheck: {requested:type !== 'explainer' || candidateArgs.rest.includes('--browser-check'),ran:false},
       diagnostics: error.archifyDiagnostics || [{
@@ -7136,7 +7137,7 @@ async function commandValidate(args, invocation = {}) {
         const engineeringProfile = engineeringProfileFromArtifact(fs.readFileSync(out));
         if (json) {
           const candidate = {
-            path: path.resolve(input),
+            path: displayPath(input),
             ...artifactIdentity(specification),
           };
           const resolvedQuality = quality || result.composition.profile || 'standard';

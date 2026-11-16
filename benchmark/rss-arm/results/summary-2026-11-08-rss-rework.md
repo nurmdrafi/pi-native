@@ -3,7 +3,7 @@
 - generated: 2026-11-08T18:40:18.413Z
 - node: v24.21.0
 - /usr/bin/time: GNU time 1.7
-- binaries: piread=/home/nurmdrafi/.pi/agent/bin/piread pibash=/home/nurmdrafi/.pi/agent/bin/pibash piwrite=/home/nurmdrafi/.pi/agent/bin/piwrite
+- binaries: piread=<agent-home>/bin/piread pibash=<agent-home>/bin/pibash piwrite=<agent-home>/bin/piwrite
 - mode: full tag: rss-rework
 
 ## workload=read-window

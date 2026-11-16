@@ -7,12 +7,12 @@
   "quality": "standard",
   "startedAt": "2026-10-29T15:52:41.661Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/pibash-pipeline.workflow.json",
     "sha256": "097d2ca83d769ad66d981609e4a46aa553d78f13ef8284a27f3304b79429c551",
     "bytes": 3541
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
     "sha256": "ab4783af9aff79be3b307227b8a3695b116c01b46d108abe4e9f80d5b650ca89",
     "bytes": 848061
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pibash-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -113,12 +113,12 @@
       "exitCode": 0,
       "durationMs": 1286,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pibash-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
         "--quality",
         "standard",
         "--json"
@@ -129,8 +129,8 @@
         "ok": true,
         "command": "deliver",
         "type": "workflow",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.workflow.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+        "input": "<agent-home>/docs/assets/diagrams/pibash-pipeline.workflow.json",
+        "output": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
         "specification": {
           "sha256": "097d2ca83d769ad66d981609e4a46aa553d78f13ef8284a27f3304b79429c551",
           "bytes": 3541
@@ -222,15 +222,15 @@
       "exitCode": 0,
       "durationMs": 340,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+        "file": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
         "artifact": {
           "sha256": "ab4783af9aff79be3b307227b8a3695b116c01b46d108abe4e9f80d5b650ca89",
           "bytes": 848061
@@ -416,10 +416,10 @@
       "exitCode": 0,
       "durationMs": 4593,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
         "--json",
         "--require-provenance"
       ],
@@ -434,7 +434,7 @@
         "provenance": "current",
         "deliveryReceiptId": "86e03482-f811-41b5-83da-0ee4b49fed01",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.html",
+          "path": "<agent-home>/docs/assets/diagrams/pibash-pipeline.html",
           "sha256": "ab4783af9aff79be3b307227b8a3695b116c01b46d108abe4e9f80d5b650ca89",
           "bytes": 848061
         },
@@ -1657,9 +1657,9 @@
   },
   "diagnostics": [],
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pibash-pipeline.browser-check.json"
+    "receipt": "<agent-home>/docs/assets/diagrams/pibash-pipeline.finalize.json",
+    "summaryReceipt": "<agent-home>/docs/assets/diagrams/pibash-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "<agent-home>/docs/assets/diagrams/pibash-pipeline.browser-check.json"
   },
   "visualReview": "not-requested",
   "finishedAt": "2026-10-29T15:52:48.257Z",

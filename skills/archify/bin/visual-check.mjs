@@ -1,4 +1,5 @@
 import { softwareNoticesHtml } from '../renderers/shared/software-notices.mjs';
+import { displayPath } from '../renderers/shared/portable-path.mjs';
 import { spawn } from 'node:child_process';
 import { isExplainerHtml } from '../explainer/check.mjs';
 import { EXPLAINER_VIEWPORTS, inspectExplainerBrowser, explainerObservation, explainerObservationDiagnostics } from '../explainer/browser-check.mjs';
@@ -2398,7 +2399,7 @@ function persistBrowserEvidenceFailure(
     ok: false, status: 'fail',
     ...(artifactBytes ? {
       artifact: {
-        path: path.resolve(artifactPath),
+        path: displayPath(artifactPath),
         sha256: sha256(artifactBytes),
         bytes: artifactBytes.byteLength,
       },

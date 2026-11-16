@@ -82,8 +82,18 @@ const DEFAULT_BIN = {
   bash: path.join(REPO, "bin", "pibash"),
   write: path.join(REPO, "bin", "piwrite"),
 };
-const DIST_TOOLS =
-  "/home/nurmdrafi/.nvm/versions/node/v24.21.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/tools";
+// Global pi install beside the running node (nvm layout: <prefix>/lib/node_modules);
+// override with PI_DIST_TOOLS. Never a baked machine path.
+const DIST_TOOLS = path.join(
+  path.dirname(path.dirname(process.execPath)),
+  "lib",
+  "node_modules",
+  "@earendil-works",
+  "pi-coding-agent",
+  "dist",
+  "core",
+  "tools",
+);
 
 const CORPUS_LINES = 150_000;
 const READ_OFFSET = 60_000; // 1-based
@@ -293,7 +303,8 @@ function writeSummaryMd(agg, meta) {
   L.push(`- generated: ${nowIso()}`);
   L.push(`- node: ${process.version}`);
   L.push(`- /usr/bin/time: ${meta.gnuTimeVersion}`);
-  L.push(`- binaries: piread=${meta.bins.read} pibash=${meta.bins.bash} piwrite=${meta.bins.write}`);
+  const rel = (p) => (p.startsWith(REPO + path.sep) ? p.slice(REPO.length + 1) : p);
+  L.push(`- binaries: piread=${rel(meta.bins.read)} pibash=${rel(meta.bins.bash)} piwrite=${rel(meta.bins.write)}`);
   L.push(`- mode: ${meta.mode}${meta.tag ? ` tag: ${meta.tag}` : ""}`);
   L.push("");
   for (const w of agg.workloads) {

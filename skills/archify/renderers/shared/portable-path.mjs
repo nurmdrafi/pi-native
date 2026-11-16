@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 const PORTABLE_PATH_PROFILES = new Set(['output', 'repo', 'archive']);
 const WINDOWS_SAFE_PROFILES = new Set(['output', 'archive']);
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu;
@@ -66,6 +68,12 @@ function assertProfile(profile) {
     'profile',
     `Portable path profile must be one of: ${[...PORTABLE_PATH_PROFILES].join(', ')}.`,
   );
+}
+
+export function displayPath(file) {
+  const abs = path.resolve(file);
+  const home = process.env.HOME;
+  return home && abs.startsWith(home + path.sep) ? `~${abs.slice(home.length)}` : abs;
 }
 
 export function validatePortablePath(value, options = {}) {

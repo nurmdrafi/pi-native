@@ -7,12 +7,12 @@
   "quality": "showcase",
   "startedAt": "2026-10-29T15:52:08.785Z",
   "specification": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
+    "path": "<agent-home>/docs/assets/diagrams/pidx-pipeline.workflow.json",
     "sha256": "ed28d1fdc73eff23d75bb918c5461ef7eb2226bb0e1b90428483ecf0e0ac8f1b",
     "bytes": 1790
   },
   "artifact": {
-    "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+    "path": "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
     "sha256": "27890b47f9e9b357acad82635cf5f3397d524fb5130a7486db91fe38a24b7ae3",
     "bytes": 833815
   },
@@ -23,12 +23,12 @@
       "durationMs": null,
       "execution": "embedded-in-deliver",
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pidx-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
         "--quality",
         "showcase",
         "--json"
@@ -56,12 +56,12 @@
       "exitCode": 0,
       "durationMs": 905,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "deliver",
         "workflow",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pidx-pipeline.workflow.json",
+        "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
         "--quality",
         "showcase",
         "--json"
@@ -72,8 +72,8 @@
         "ok": true,
         "command": "deliver",
         "type": "workflow",
-        "input": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.workflow.json",
-        "output": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+        "input": "<agent-home>/docs/assets/diagrams/pidx-pipeline.workflow.json",
+        "output": "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
         "specification": {
           "sha256": "ed28d1fdc73eff23d75bb918c5461ef7eb2226bb0e1b90428483ecf0e0ac8f1b",
           "bytes": 1790
@@ -108,15 +108,15 @@
       "exitCode": 0,
       "durationMs": 333,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
         "--require-provenance"
       ],
       "receipt": {
         "ok": true,
-        "file": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+        "file": "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
         "artifact": {
           "sha256": "27890b47f9e9b357acad82635cf5f3397d524fb5130a7486db91fe38a24b7ae3",
           "bytes": 833815
@@ -244,10 +244,10 @@
       "exitCode": 0,
       "durationMs": 4799,
       "command": [
-        "/home/nurmdrafi/.nvm/versions/node/v24.21.0/bin/node",
-        "/home/nurmdrafi/.pi/agent/skills/archify/bin/archify.mjs",
+        "<home>/.nvm/versions/node/v24.21.0/bin/node",
+        "<agent-home>/skills/archify/bin/archify.mjs",
         "browser-check",
-        "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+        "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
         "--json",
         "--require-provenance"
       ],
@@ -262,7 +262,7 @@
         "provenance": "current",
         "deliveryReceiptId": "e80409a7-26dd-455a-88ef-f67dbdb458ab",
         "artifact": {
-          "path": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.html",
+          "path": "<agent-home>/docs/assets/diagrams/pidx-pipeline.html",
           "sha256": "27890b47f9e9b357acad82635cf5f3397d524fb5130a7486db91fe38a24b7ae3",
           "bytes": 833815
         },
@@ -1401,9 +1401,9 @@
   },
   "diagnostics": [],
   "evidence": {
-    "receipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.finalize.json",
-    "summaryReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.finalize-summary.json",
-    "browserCheckReceipt": "/home/nurmdrafi/.pi/agent/docs/assets/diagrams/pidx-pipeline.browser-check.json"
+    "receipt": "<agent-home>/docs/assets/diagrams/pidx-pipeline.finalize.json",
+    "summaryReceipt": "<agent-home>/docs/assets/diagrams/pidx-pipeline.finalize-summary.json",
+    "browserCheckReceipt": "<agent-home>/docs/assets/diagrams/pidx-pipeline.browser-check.json"
   },
   "visualReview": "not-requested",
   "finishedAt": "2026-10-29T15:52:15.160Z",

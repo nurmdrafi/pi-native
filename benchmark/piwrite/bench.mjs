@@ -70,8 +70,19 @@ const RESULTS_DIR = path.join(HERE, "results");
 const TMP_ROOT = path.join(HERE, "tmp");
 const SHIM_PATH = path.join(HERE, "shim", "piwrite-shim.mjs");
 const DEFAULT_BIN = path.join(REPO, "bin", "piwrite");
-const BUILTIN_DEFAULT =
-  "/home/nurmdrafi/.nvm/versions/node/v24.21.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/write.js";
+// Global pi install beside the running node (nvm layout: <prefix>/lib/node_modules);
+// override with PI_WRITE_BUILTIN. Never a baked machine path.
+const BUILTIN_DEFAULT = path.join(
+  path.dirname(path.dirname(process.execPath)),
+  "lib",
+  "node_modules",
+  "@earendil-works",
+  "pi-coding-agent",
+  "dist",
+  "core",
+  "tools",
+  "write.js",
+);
 
 const KB = 1024;
 const MB = 1024 * 1024;
