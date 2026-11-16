@@ -28,6 +28,7 @@
 - Loop: plan → do → verify (scope per § Verification).
 - Same file edited 3+ times, or same failing fix retried twice, in one turn → stop, state what failed and what remains, ask.
 - Logs and temp/intermediate data for later retrieval → NDJSON, one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
+- Guard every `>>` append: confirm the target file ends in a newline first (`tail -c 1`); a missing final newline glues the append onto the last line.
 
 ### Subagents
 - Off until `/subagents on`; until then work linearly, never spawn unasked. After `/subagents on`, task pane handover → load the `tmux-panes` skill.
@@ -51,9 +52,10 @@
 - Minimal grammar, no duplicates: one rule, one home; cross-reference, never restate.
 - A cross-reference is a resolvable path from the referring file (markdown link or repo path), never a bare code span naming a file that lives elsewhere.
 - Slash-command bodies pass arguments only through `$ARGUMENTS`/`$@`/`${N}` placeholders — a body without one silently drops the invoked argument.
+- Prompt frontmatter values are quoted strings (`argument-hint: "[lite|full]"`); an unquoted `[` parses as a YAML flow sequence and breaks the prompt at load.
 
 ## Harness tool discipline
-- Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push.
+- Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push. Compose the line with `jq -c -n` — printf mangles inner quotes and `$( )` at write time.
 - Tool-defect lessons carry path, file size, and exact payload (anchor text or hash) so a replay reproduces it.
 - A tool writing output/state to a chosen path keeps it inside agent home — outside paths are refused.
 - File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`. Overwriting an existing path trips the destructive gate: check for the twin first (`fd <basename>`), then write a fresh path or rewrite the original deliberately.

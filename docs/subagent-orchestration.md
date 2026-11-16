@@ -9,6 +9,7 @@ Spawn tools inactive (zero prompt tokens) until `/subagents on|off`, any `/subag
 - Shipped roles take `budget: none`: no ceiling settable, aggregate wave spend unbounded.
 - `files_changed` = hashless git-status delta: concurrent siblings land in it; prior-work injection may be stale — verify before relying.
 - Unscoped spawns never queue: always declare `files`, or two writers collide silently.
+- A queued spawn is not yet a session: `subagent_message` cannot address it ("No subagent named X") and only `subagent_control` can cancel it. Absorb the queued task by steering the running owner; if the residue launches, stand it down.
 - `PI_SUBAGENTS_EXTRA_EXTENSIONS` replaces the default permission-gate entry — omit the gate path, child runs ungated.
 - Cleanup is pane-scoped: background jobs, servers, browsers can outlive the child.
 - A short parent window makes the launch split fail (`no space for a new pane`): enlarge the window before spawning; on failure list panes, kill an idle shell pane by id, retry once.
