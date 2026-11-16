@@ -1,6 +1,6 @@
 ---
 description: Standup — dash-only bullet report from nurmdrafi commits in Barikoi repos, commit message/body only
-argument-hint: [since-date[..until-date]] [repo-path ...]
+argument-hint: "[since-date[..until-date]] [repo-path ...]"
 ---
 
 Standup report from git history.
