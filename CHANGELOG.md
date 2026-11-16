@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.77.0] - 16-11-2026
+
+### Added
+
+- **Sentry triage skill.** `skills/sentry` fetches, analyzes, and resolves issues on the self-hosted
+  Sentry (org `barikoi`) via the stable `/api/0` REST API — any org project, runtime project-to-repo
+  mapping, read-only triage when no local checkout exists. Analysis patterns (breadcrumbs, tag
+  distributions, impact scoping, PII handling) ported from `getsentry/sentry-agent-skills` (Apache-2.0).
+- **`sentry-triage` agent.** `agents/sentry-triage.md` runs the skill's loop with failing-test-first
+  fixes, NDJSON audit to `logs/sentry-triage.ndjson`, and no-resolve-without-fix guardrails; roster
+  row added in `docs/subagent-orchestration.md`.
+- **Pi-native Sentry secrets.** `.secrets/` (gitignored) holds `SENTRY_URL`/`SENTRY_AUTH_TOKEN`; the
+  skill sources credentials from there and never prints them.
+
 ## [1.76.0] - 12-11-2026
 
 ### Added
