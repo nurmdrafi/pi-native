@@ -42,13 +42,13 @@ Ban: `cat`/`echo`/print of the secrets file, its values, or the token; the token
 Always pipe through jq and keep only what is needed:
 
 ```sh
-.../issues/?query=is:unresolved... | jq -r '.[] | [.id, .shortId, .level, .count, .userCount, .firstSeen, .lastSeen, .title, .culprit] | @tsv'
+curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/barikoi/issues/?query=is:unresolved&project=$PROJECT_SLUG&statsPeriod=24h&sort=freq" | jq -r '.[] | [.id, .shortId, .level, .count, .userCount, .firstSeen, .lastSeen, .title, .culprit] | @tsv'
 ```
 
 Stacktrace from the latest event — frames are ordered outermost-first; the error site is the last in-app frame:
 
 ```sh
-.../events/latest/ | jq '.entries[] | select(.type=="exception") | .values[0].stacktrace.frames | map(select(.inApp != false)) | .[-5:]'
+curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/barikoi/issues/$ISSUE_ID/events/latest/" | jq '.entries[] | select(.type=="exception") | .values[0].stacktrace.frames | map(select(.inApp != false)) | .[-5:]'
 ```
 
 ## 3. Understand
