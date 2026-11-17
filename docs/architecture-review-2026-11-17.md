@@ -45,6 +45,25 @@ The tool dispatch, policy, and execution boundaries are documented and mostly
 match the repository layout. This review found no other actionable project-wide
 architecture issue within the inspected scope.
 
+## Security review
+
+A read-only security reviewer examined permission enforcement, native execution,
+filesystem mutation, daemon protocols, environment handling, and dashboard
+exposure. It found no substantiated vulnerabilities in the reviewed project.
+
+## Performance review
+
+### Medium: dashboard startup bundles code for inactive tabs
+
+[`App.tsx`](../dashboard/src/App.tsx) statically imported every tab and the
+session-detail panel, even though only one tab is rendered at a time. The
+production build emitted a single 978.13 kB JavaScript chunk (292.89 kB gzip)
+and warned that it exceeded the 500 kB chunk threshold. This bundles and parses
+code for views that users may not open.
+
+**Correction applied:** defer tab and session-detail modules until rendered,
+with accessible loading fallbacks.
+
 ## Correction and verification
 
 The root `check` gate now includes the dashboard build. CI installs dashboard
@@ -53,6 +72,10 @@ test, typecheck, and agent-lint steps.
 
 - `npm run dashboard:build`: passed, including TypeScript checking and Vite
   production bundling.
+- The dashboard entry chunk fell from 978.13 kB to 440.18 kB (55% smaller);
+  chart, tab, and detail modules now build as separate chunks. No chunk exceeds
+  Vite's 500 kB warning threshold.
+- Dashboard tests: 130 of 130 passed.
 - Root TypeScript checking and agent lint: passed.
 - `npm test`: 589 of 590 tests passed. The remaining test expects `/bin/true`,
   which is absent on this macOS host.
