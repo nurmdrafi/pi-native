@@ -12,6 +12,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gateFamilyOf } from '../gate-labels.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const pkgLink = join(ROOT, 'node_modules', '@earendil-works', 'pi-coding-agent');
@@ -77,5 +78,5 @@ export async function runBash(pi, command, { isError = false, content = 'out', c
 
 /** reason-prefix family, e.g. "Token Economy (Reading)" */
 export function familyOfReason(reason) {
-  return /^(Token Economy \([^)]*\)|Anchor Guard|Commitlint)/.exec(reason ?? '')?.[1] ?? null;
+  return gateFamilyOf(reason ?? '');
 }

@@ -9,7 +9,7 @@ const { checkLine, checkFile } = await import(BIN);
 
 const NOW = new Date("2026-11-02T08:00:00Z");
 const L = (ts, source, lesson, extra = {}) =>
-  JSON.stringify({ ts, source, lesson, ...extra });
+  JSON.stringify({ ts, source, session_id: "session-test", lesson, ...extra });
 
 const codes = (res, level, line) =>
   res.findings
@@ -32,18 +32,33 @@ test("clean three-line file: no findings, clean summary, no fails", () => {
 });
 
 test("checkLine accepts a well-formed object", () => {
-  const obj = { ts: "2026-11-02T06:00:00Z", source: "a", lesson: "fine" };
+  const obj = { ts: "2026-11-02T06:00:00Z", source: "a", session_id: "session-123", lesson: "fine" };
   assert.deepEqual(checkLine(obj, { now: NOW }), []);
 });
 
-test("checkLine flags keys that are not exactly ts,source,lesson", () => {
+test("checkLine accepts a lesson with a session reference", () => {
+  const obj = {
+    ts: "2026-11-02T06:00:00Z",
+    source: "a",
+    session_id: "session-123",
+    lesson: "fine",
+  };
+  assert.deepEqual(checkLine(obj, { now: NOW }), []);
+  const empty = checkLine(
+    { ...obj, session_id: "  " },
+    { now: NOW },
+  );
+  assert.deepEqual(empty.map((f) => f.code), ["BAD_SESSION_ID"]);
+});
+
+test("checkLine flags keys that are not exactly ts,session_id,source,lesson", () => {
   const missing = checkLine(
-    { ts: "2026-11-02T06:00:00Z", source: "a" },
+    { ts: "2026-11-02T06:00:00Z", source: "a", session_id: "session-123" },
     { now: NOW },
   );
   assert.deepEqual(missing.map((f) => f.code), ["BAD_KEYS"]);
   const extra = checkLine(
-    { ts: "2026-11-02T06:00:00Z", source: "a", lesson: "b", note: "x" },
+    { ts: "2026-11-02T06:00:00Z", source: "a", session_id: "session-123", lesson: "b", note: "x" },
     { now: NOW },
   );
   assert.deepEqual(extra.map((f) => f.code), ["BAD_KEYS"]);
@@ -51,12 +66,12 @@ test("checkLine flags keys that are not exactly ts,source,lesson", () => {
 
 test("checkLine flags naive and future timestamps as BAD_TS", () => {
   const naive = checkLine(
-    { ts: "2026-11-02T06:00:00", source: "a", lesson: "b" },
+    { ts: "2026-11-02T06:00:00", source: "a", session_id: "session-123", lesson: "b" },
     { now: NOW },
   );
   assert.equal(naive[0].code, "BAD_TS");
   const future = checkLine(
-    { ts: "2026-11-02T09:00:00Z", source: "a", lesson: "b" },
+    { ts: "2026-11-02T09:00:00Z", source: "a", session_id: "session-123", lesson: "b" },
     { now: NOW },
   );
   assert.equal(future[0].code, "BAD_TS");
@@ -64,12 +79,12 @@ test("checkLine flags naive and future timestamps as BAD_TS", () => {
 
 test("checkLine flags absolute user paths as IDENTITY", () => {
   const mac = checkLine(
-    { ts: "2026-11-02T06:00:00Z", source: "a", lesson: "crash under /Users/alice/proj" },
+    { ts: "2026-11-02T06:00:00Z", source: "a", session_id: "session-123", lesson: "crash under /Users/alice/proj" },
     { now: NOW },
   );
   assert.equal(mac[0].code, "IDENTITY");
   const linux = checkLine(
-    { ts: "2026-11-02T06:00:00Z", source: "a", lesson: "crash under /home/bob/proj" },
+    { ts: "2026-11-02T06:00:00Z", source: "a", session_id: "session-123", lesson: "crash under /home/bob/proj" },
     { now: NOW },
   );
   assert.equal(linux[0].code, "IDENTITY");
@@ -80,6 +95,7 @@ test("checkLine allows neutral path shapes", () => {
     {
       ts: "2026-11-02T06:00:00Z",
       source: "a",
+      session_id: "session-123",
       lesson: "use ~/.pi/agent, <project-root>/wt/x, relative/x.ts, /tmp/out.md",
     },
     { now: NOW },
@@ -99,7 +115,7 @@ test("BAD_JSON: a JSON value that is not an object fails", () => {
 });
 
 test("BAD_KEYS: a missing lesson key fails at file level", () => {
-  const res = checkFile(['{"ts":"2026-11-02T06:00:00Z","source":"a"}'], NOW);
+  const res = checkFile(['{"ts":"2026-11-02T06:00:00Z","source":"a","session_id":"session-test"}'], NOW);
   assert.deepEqual(codes(res, "FAIL", 1), ["BAD_KEYS"]);
 });
 
@@ -195,7 +211,7 @@ test("dirty file: one line per FAIL and WARN code, ordered findings, summary", (
       L("2026-11-02T06:00:30Z", "c", "unrelated subject about pane sizing"),
       L("2027-01-05T00:00:00Z", "d", "another unrelated subject about logs"),
       "not-json{",
-      '{"ts":"2027-02-01T00:00:00Z","source":"e"}',
+      '{"ts":"2027-02-01T00:00:00Z","source":"e","session_id":"session-test"}',
       L("2028-01-01T00:00:00Z", "f", "future stamp topic"),
       L("2027-03-01T00:00:00Z", "g", "mentions /Users/alice/agent once"),
     ],

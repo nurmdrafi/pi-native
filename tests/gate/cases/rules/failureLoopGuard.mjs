@@ -47,4 +47,72 @@ export const cases = [
       return bash(pi, "npx vitest run sub5");
     },
   ],
+  // ---- Cross-turn streak (2026-11-17 telemetry): the observed circling spans
+  // user turns — one session logged 6 consecutive failures with R11 never
+  // firing, because the per-turn reset wiped the counter. The streak is
+  // mutation-aware, not turn-bound: only a landed change disarms it. ----
+  [
+    "R11: failures spanning user turns still reach the threshold",
+    "blocked",
+    async (pi) => {
+      for (let i = 1; i <= 6; i++) {
+        await runBash(pi, `npx vitest run turn${i}`, { error: true });
+        await pi.invoke("before_agent_start", {
+          type: "before_agent_start",
+          messageType: "user",
+          prompt: "go on",
+          systemPromptOptions: {},
+        });
+      }
+      return bash(pi, "npx vitest run turn7");
+    },
+  ],
+  [
+    "R11: a landed mutation between cross-turn failures disarms the streak",
+    "pass",
+    async (pi) => {
+      const dir = mkdtempSync(join(tmpdir(), "r11-turn-"));
+      const f = join(dir, "fix.md");
+      writeFileSync(f, "A1\nA2\nA3\n");
+      await read(pi, f);
+      for (let i = 1; i <= 4; i++) {
+        await runBash(pi, `npx vitest run mix${i}`, { error: true });
+        await pi.invoke("before_agent_start", {
+          type: "before_agent_start",
+          messageType: "user",
+          prompt: "go on",
+          systemPromptOptions: {},
+        });
+      }
+      const r = await editApplied(pi, f, "A1", "A1x");
+      if (r.blocked)
+        return { blocked: true, reason: `edit must pass: ${r.reason.slice(0, 60)}` };
+      for (let i = 1; i <= 3; i++) {
+        await runBash(pi, `npx vitest run after${i}`, { error: true });
+        await pi.invoke("before_agent_start", {
+          type: "before_agent_start",
+          messageType: "user",
+          prompt: "go on",
+          systemPromptOptions: {},
+        });
+      }
+      return bash(pi, "npx vitest run after4");
+    },
+  ],
+  [
+    "R11: fewer than 5 failures across turns stay below the threshold",
+    "pass",
+    async (pi) => {
+      for (let i = 1; i <= 4; i++) {
+        await runBash(pi, `npx vitest run short${i}`, { error: true });
+        await pi.invoke("before_agent_start", {
+          type: "before_agent_start",
+          messageType: "user",
+          prompt: "go on",
+          systemPromptOptions: {},
+        });
+      }
+      return bash(pi, "npx vitest run short5");
+    },
+  ],
 ];

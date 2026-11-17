@@ -1,52 +1,42 @@
-# Role & Execution Principles
+# Tool Calling
 
-## Read and edit prerequisites
-- Anchor edits only on lines shown this turn (read, search, earlier edit, attached file); otherwise read first.
-- Compaction gap anchors nothing: locate the symbol, read the sub-window, then edit.
-- Before first reading a path (script-created included), run a search naming it exactly as the read call spells it; shell listings don't count. Read-gate locate credit is per-turn; edit-gate read credit persists.
-- Before re-editing a file changed earlier or by a half-failed batch, re-read every target region.
-- Anchor text comes only from printed lines. Failed edit → retry with the printed lines verbatim; an anchor echoed in an error is your text, not file content — rebuild from actual bytes.
+This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior. Registered tools and extensions are authoritative for controls they enforce; do not restate those controls here. Hold only how to call tools; put behavior rules (safety, communication, workflow, verification, lessons) in `AGENTS.md`. One rule, one home.
 
 ## Call economy
 - Batch independent calls into one block; one search covers every target a question needs.
 - Search where the target sits — conversation or file; locate only what context lacks.
 - A call needs a gap: no path → locate; no region → one `piread` window; no exact lines → read them.
 - One edit call per file: all regions together, bottom-up; blocked edit → resend only that region.
-- Never re-read replaced content (unless the same-target rule requires it); never slice an elided window into repeated reads.
 - Continue a stopped read at its named offset, never a printed range.
-- First try, every time: `piread` for text, `pibash` for shell, locate before wide read; change the command instead of re-running; change approach after two non-block failures.
 - Don't widen: locate the next symbol; probe size first (line count, counting search) when unsure.
 
 ## File lookup
-- Locate with `rg -n <term> <path>`, or one `piread {path, hits}` (names its own path, no separate search). `hits` = one literal string, no `offset`/`limit`; multi-term or pattern windows → scoped `rg -n`.
-- Whole unit: `outline --show <file> <symbol>`; raw ranges → `piread` window.
+- Resolve unknown paths before reading them; do not guess filenames.
+- Use semantic search or LSP for symbols, `piread` hit mode for one literal, and `outline --show <file> <symbol>` for whole units.
+- Use `piread` for raw ranges and continue a stopped read from its named offset.
 - Many targets in one file: `outline` once, then `--show` each; never re-walk an outlined file.
 
-## Context budget
-- Past ~150K tokens (`pidx --report usage`) or a compaction notice → propose compaction or a fresh session.
-
 ## Bash
-- Use `sed` only to filter output a command already produced. Overlong line: read the window with `piread`; fetch the fragment with one targeted search (`rg -o`, `rg -A`/`-B`). Copy the whole body once via `fold -w 200 file > /tmp/view.txt`; re-copy after the file changes.
-- A reader-bypass flag firing on a payload that merely contains a view-command substring (even quoted) is a known false positive — verify an actual view ran before correcting.
-- Output needing a second look → write to a file and read in windows; one head/tail trim of a command's own output is fine.
-- Keep analysis feeding only the next computation in one process (read, compute, print) — dump files cost a write, a read, a cleanup, and the write can be refused.
-- Machine-retrieval files (logs, temp data): NDJSON, one JSON object per line; skip malformed lines on read.
-- No `|| true` on cleanup: let the exit code surface, or check it.
-- Keep each mutation in its own single-purpose call — chained substitution plus append trips the destructive gate; for small files a full write-tool rewrite preserving existing lines is the append fallback.
-- Wrap long foreground jobs in a timeout: `timeout(1)` where present, else the pibash `timeout` parameter (macOS hosts lack the binary); make one-shot CLI scripts exit explicitly (`process.exit(0)`), not linger on open sockets.
-- Toolchain pins: `.nvmrc` present → `nvm use "$(cat .nvmrc)"` before node/npm/npx; missing → create one pinning the running `node --version` first. Same pattern for `.python-version`, `rust-toolchain.toml`, …; no pin convention → installed version.
+- For long lines, use a targeted window or search. For output needing a second look, save it and inspect bounded windows.
+- Respect repository-declared toolchain versions.
 - Each shell call is a fresh process at the session cwd: use absolute paths, never a path relative to an earlier `cd`.
 - `nvm` is absent from non-interactive shells: `source "$HOME/.nvm/nvm.sh"` in the same call as the node/npm work — an export in one call never reaches the next.
 - `pnpm` in a worktree whose `node_modules` symlinks the main checkout trips verify-deps-before-run and stalls: run from the main checkout or disable that hook.
 
-## Blocks & recovery
-- A block names a step: do it (read, narrower window, changed command), then retry once corrected; never resend verbatim. A second block on the same target is not a retry.
-- Same target blocked twice: stop, re-read every touched region, make one corrected call. No loops.
-- A tool-result warning about a hidden mistake (file printed through `sed`) counts as a block: first time corrects the call; second time on the same file → stop and `piread` it.
-- Guard misfire (unique anchor refused twice, or pre-edit read not credited): log to lessons, then one deterministic rewrite asserting the anchor occurs exactly once in the same command. Never resend a third time.
-- Three probes on one fact: stop. A probe = one call answering one open question (target + question identify the fact; different questions = different facts). Third time: one command printing every value, or state unresolved and ask.
+## Recovery
+- Follow a tool block's corrective instruction; do not resend an unchanged call.
+- After two non-block failures, change approach. After three probes of one fact, combine remaining checks or report it unresolved.
 
-## Shell preferences
-- Use `fd`, not `find`; `rg`, not `grep` (never `grep -P`); `jq` for JSON.
-- Scope every search: path or glob, never bare recursive.
-- `rg -r` = `--replace`, not recursion — it rewrites reported text; the reader-bypass check flags it.
+## Delegated calls
+- Read `~/.pi/agent/docs/subagent-orchestration.md` before the first spawn. Avoid invoking missing CLIs through `npx`, which may fetch packages.
+
+## Lesson-log calls
+- Before planning from lesson records, inspect the log tail; compose new records with `jq -c -n`. Check the final byte before appending with `>>`; add a newline first if the file is non-empty and lacks one.
+
+## Commit calls
+- Write the commit message to a file and validate every line with:
+  `awk 'length>100 || index($0,"#") {print "line " FNR ": " length " chars or contains #"; exit 1}' <msgfile>`
+- Run `git add` and `git commit -F <msgfile>` in one shell call.
+
+## Portability
+- Apply `~/.pi/agent/docs/portability.md` before shell or path work.

@@ -129,7 +129,7 @@ test("rule IDs are unique", () => {
 // disabled, and locate-first certification disabled 2026-11-04 c4eaa82).
 // Everything else ships warn/error; an off outside this list is
 // config drift the test below catches.
-const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "locateFirst", "readerBypass"];
+const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "locateFirst"];
 
 test("tracked config.json loads every rule at warn or error (explicit off allowlist)", () => {
   const { config } = loadConfig();

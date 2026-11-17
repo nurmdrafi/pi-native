@@ -5,7 +5,7 @@
   "theme": "dark",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.3",
-  "defaultThinkingLevel": "max",
+  "defaultThinkingLevel": "high",
   "modelThinkingLevels": {
     "deepseek/deepseek-flash": "off",
     "deepseek/deepseek-v4-pro": "off"
@@ -19,6 +19,7 @@
   ],
   "packages": [],
   "compaction": {
+    "enabled": false,
     "modelOverrides": {
       "zai/glm-5.3": {
         "reserveTokens": 845000

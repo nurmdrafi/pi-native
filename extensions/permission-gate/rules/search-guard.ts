@@ -94,10 +94,12 @@ const SS3_MSG =
   "Search (fd-first): 'find' is the fallback, not the default — use 'fd PATTERN path/' (regex pattern; -e exact, -H hidden, -t f files). If fd genuinely errored, say so in chat and wait for approval before using find.";
 
 /** SS4 (2026-11-01): `-r` is a grep habit, not an rg recursion flag — rg recurses
- * by default and reads `-r`/`--replace` as display substitution, so the search
- * still runs but answers the wrong question and costs a re-run. */
+ * by default and reads `-r`/`--replace` as display substitution, so the common
+ * `rg -rn PATTERN f` prints substituted matches instead of numbered lines and
+ * costs a re-run. 2026-11-17: the reason names that symptom (42 warns a week)
+ * instead of describing the flag's origin. */
 const SS4_MSG =
-  "Search (rg -r): '-r' on rg is --replace (display substitution), not recursion — rg already recurses, so drop it: 'rg PATTERN path/'. The flag comes from grep idioms and silently changes what the command reports.";
+  "Search (rg -r): '-r' is rg's --replace, not recursion — 'rg -rn foo f' substitutes into the matches it prints instead of numbering lines. rg recurses already: 'rg -n PATTERN path/'.";
 
 /**
  * SS1's crawl-cost premise applies to all searches.
@@ -127,28 +129,72 @@ export function swallowCheck(seg: string): string | undefined {
 
 /** SE2 (2026-10-28): read windows belong to piread — sed is a pipeline
  * stage, never a reader. Command-level check (segments split on pipes).
- * Warn by default; the reason rides the result as a note. Reconciled with
- * view-command credit (2026-10-29): the preference stands — piread gives
- * offset windows and compaction markers, bash output is capped and
- * unnumbered — but the printed lines of a mappable single-file view DO
+ * Reconciled with view-command credit (2026-10-29): the preference stands —
+ * piread gives offset windows and compaction markers, bash output is capped
+ * and unnumbered — but the printed lines of a mappable single-file view DO
  * certify spans, so the reason must not claim they seed nothing.
  *
- * The rule text and this check must agree on two shapes (2026-11-01):
- * a `|`-prefixed `sed -n` filters output a command already produced, which
- * the shell rules allow, so only a read-position `sed -n` (start, `;`,
- * `&&`, `||`, `do`, `then`) is flagged; and `cat` used as a writer
- * (`cat > f`, `cat >> f`, `cat <<EOF`, or bare `cat` piping stdin) reads no
- * window, so only a `cat` with a real operand is flagged. */
+ * Fail-closed (2026-11-17 telemetry): the note was non-binding, so 107
+ * read-in-shell calls landed in one week while the rule taught nothing new.
+ * `error` now blocks with the piread call that replaces the shape.
+ *
+ * The rule text and this check must agree on these shapes (2026-11-01,
+ * extended 2026-11-17):
+ * - a `|`-prefixed `sed -n`/`head`/`tail` filters output a command already
+ *   produced, which the shell rules allow, so only a read-position reader
+ *   (start, `;`, `&&`, `||`, `do`, `then`) is flagged;
+ * - `cat` used as a writer (`cat > f`, `cat >> f`, `cat <<EOF`, a bare
+ *   `cat` piping stdin, or operands feeding a mid-segment `>`/`>>` such as
+ *   `cat a b > c`) reads no window, so only a `cat` with a real
+ *   operand is flagged; the same redirect exclusion covers `sed -n … > g`;
+ * - `head`/`tail` flag only in the single-file view shape — see
+ *   headTailReadsFile. */
 export function readerBypassCheck(cmd: string): string | undefined {
   const reason =
-    "Hygiene (Reader-bypass): read windows go through piread — not cat/sed; a view command prints lines but is not the read tool.";
+    "Hygiene (Reader-bypass): read file windows with piread — offset/limit for a range, hits for a search with context, 'outline --show <file> <sym>' for a unit; cat/sed/head/tail print bytes without offsets.";
   const head = String.raw`(?:^|&&|\|\||;|\bdo\b|\bthen\b)\s*`;
-  const sedReader = new RegExp(String.raw`${head}sed\s+[^|;&]*-n\b`);
-  const catReader = new RegExp(String.raw`${head}cat\s+(?![<>|])`);
+  const seg = String.raw`[^|;&]*`;
+  const sedReader = new RegExp(String.raw`${head}(sed\s+${seg}-n\b${seg})`, "g");
+  const catReader = new RegExp(String.raw`${head}(cat\s+(?![<>|])${seg})`, "g");
   const pipedCat = /\|\s*cat\s+(?![<>|])/;
-  return sedReader.test(cmd) || catReader.test(cmd) || pipedCat.test(cmd)
+  // A `>`/`>>` after the operands (not `2>`/`&>` stderr forms) makes the
+  // segment a writer (`cat a b > c` concatenates, `sed -n 1,5p f > g` extracts)
+  // — there is no piread window to name, so the segment is not a read.
+  const writesOutput = (s: string) => /(?<![\d&])>{1,2}[^>]/.test(s) || /(?<![\d&])>>$/.test(s);
+  const viewReader = new RegExp(String.raw`${head}((?:head|tail)\b[^|;&]*)`, "g");
+  const headTailReader = [...cmd.matchAll(viewReader)].some((m) => headTailReadsFile(m[1] ?? ""));
+  const readsSegment = (re: RegExp) =>
+    [...cmd.matchAll(re)].some((m) => !writesOutput(m[1] ?? ""));
+  return readsSegment(sedReader) || readsSegment(catReader) || pipedCat.test(cmd) || headTailReader
     ? reason
     : undefined;
+}
+
+/** SE2: the single-file view shape of a read-position `head`/`tail` — its
+ * printed lines map onto file lines (VC credits them), so the gate can name
+ * the piread window that replaces it. Excluded shapes read no file: a bare
+ * `head`/`tail` with no operand reads stdin, `tail -f` follows a log rather
+ * than reading a window, and any pipe or redirection in the segment means
+ * the command is filtering or writing rather than reading. */
+function headTailReadsFile(seg: string): boolean {
+  const toks = tokens(seg);
+  const head = toks[0];
+  if (head !== "head" && head !== "tail") return false;
+  let operand = false;
+  for (let i = 1; i < toks.length; i++) {
+    const t = toks[i]!;
+    if (t === "|" || t === ">" || t === "<") return false;
+    if (!t.startsWith("-")) {
+      operand = true;
+      continue;
+    }
+    if (t === "-n" || t === "--lines" || t === "-c" || t === "--bytes") {
+      i++; // the count is a flag value, not an operand
+      continue;
+    }
+    if (/[fF]/.test(t)) return false; // -f/--follow: a watcher, not a read
+  }
+  return operand;
 }
 
 export function searchCheck(

@@ -164,6 +164,31 @@ describe("atomic pane launch", () => {
     assert.match(cmdArg, /bash .+\.sh/, "the split runs the launch script itself");
   });
 
+  it("records monotonic spawn-stage offsets for the latency export", async () => {
+    const { agentDir, ctx } = freshRoot("worker");
+    savedEnv.PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    const fake = fakeTmux({ splitPanes: ["%100"] });
+    __surfaceTest__.setTmuxRunner(fake.runner);
+
+    const running = await __test__.launchSubagent(
+      { agent: "worker", task: "stage stamps", name: "timed" } as never,
+      ctx as never,
+    );
+
+    const stages = running.spawnStages as Record<string, number>;
+    assert.ok(stages, "the launch records its stages");
+    const keys = ["config", "session", "loadout", "env", "prompts", "pane"];
+    assert.deepEqual(Object.keys(stages), keys, "every launch step is stamped");
+    for (const k of keys) assert.ok(Number.isFinite(stages[k]) && stages[k] >= 0, `${k} offset`);
+    for (let i = 1; i < keys.length; i++)
+      assert.ok(
+        stages[keys[i]] >= stages[keys[i - 1]],
+        `${keys[i]} cannot precede ${keys[i - 1]}`,
+      );
+  });
+
   it("does not wait out the shell-ready delay before launching", async () => {
     const { agentDir, ctx } = freshRoot("worker");
     savedEnv.PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;

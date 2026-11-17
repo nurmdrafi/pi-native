@@ -87,8 +87,8 @@ export const RULE_IDS = {
   /** Bash (reblock) — RB: verbatim re-send of a just-blocked command
    *  escalates with a dedicated reason. */
   reblockEscalation: "RB",
-  /** Toolchain (pnpm pin) — TC1: npm/npx/yarn in a pnpm-pinned repo blocks;
-   *  use `pnpm run`/`exec`/`dlx`. */
+  /** Toolchain (pnpm pin) — TC1: npm/npx/yarn in a pnpm-pinned repo blocks,
+   * except read-only `npm view`; use `pnpm run`/`exec`/`dlx`. */
   toolchainPnpm: "TC1",
   /** Toolchain (node pin) — TC2: node-family binary missing the exact
    *  `.nvmrc`/`engines` pin warns; prefix `nvm use <pin> &&`. */
@@ -108,8 +108,8 @@ export const RULE_IDS = {
   /** Hygiene (error swallow) — SE1: non-blocking note when a command tails
    *  `|| true`, hiding the real error. */
   errorSwallow: "SE1",
-  /** Hygiene (reader-bypass) — SE2: non-blocking note when `sed -n`/`cat`
-   *  reads a file — the printed lines still certify. */
+  /** Hygiene (reader-bypass) — SE2: a read-position `cat`/`sed -n`/`head`/`tail`
+   *  reading a file blocks; the reason names the piread call that replaces it. */
   readerBypass: "SE2",
   /** Hygiene (view credit) — VC: printed lines of a mappable view command
    *  (head/tail/sed -n/cat) certify read spans; any non-"off" enables. */

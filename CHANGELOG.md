@@ -7,6 +7,18 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.78.0] - 17-11-2026
+
+### Changed
+
+- **Permission-gate block audit.** Count only error results, recognize current
+  gate families across session logs, and report rule and subtype recovery. Added
+  `npm run audit:blocks`.
+- **Historical bash replay.** Add `--all` for complete session coverage, exclude
+  P2 when native-tool registration is unknown, and classify malformed-input
+  blocks as intended rather than false positives.
+- **TC1 package-manager check.** Allow read-only `npm view` in pnpm repositories
+  while continuing to flag package-mutating npm commands.
 
 ## [1.77.0] - 16-11-2026
 

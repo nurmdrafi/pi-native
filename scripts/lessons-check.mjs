@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Append-time validator for the NDJSON lessons log (default ~/.pi/agent/lessons/harness.ndjson).
-// Each line must be one JSON object with exactly the keys ts, source, lesson.
+// Each line must be one JSON object with exactly the keys ts, source, session_id, lesson.
 // Usage: bin/lessons-check [path]
 //   Exit 0 = clean or warnings only; exit 1 = any failure.
 //   Prints one line per finding: "FAIL <line> <code> <detail>" or "WARN <line> <code> <detail>",
@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 
 const FAIL = "FAIL";
 const WARN = "WARN";
-const WANT_KEYS = ["lesson", "source", "ts"]; // sorted
+const WANT_KEYS = ["lesson", "session_id", "source", "ts"]; // sorted
 const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 // Absolute user home path: /Users/<name>/ or /home/<name>/. Neutral shapes
 // (~/.pi/agent, <project-root>, relative paths, /tmp) never match.
@@ -45,7 +45,7 @@ function validTs(ts) {
   return typeof ts === "string" && TS_RE.test(ts) && Number.isFinite(Date.parse(ts));
 }
 
-/** Check one parsed entry: returns [{code, detail}] for FAIL-level issues (BAD_KEYS, BAD_TS, IDENTITY). */
+/** Check one parsed entry: returns [{code, detail}] for FAIL-level issues. */
 export function checkLine(obj, ctx = {}) {
   const findings = [];
   const now = ctx.now instanceof Date ? ctx.now : new Date();
@@ -53,7 +53,13 @@ export function checkLine(obj, ctx = {}) {
   if (keys.join(",") !== WANT_KEYS.join(",")) {
     findings.push({
       code: "BAD_KEYS",
-      detail: `keys are [${keys.join(", ") || "none"}], want exactly [ts, source, lesson]`,
+      detail: `keys are [${keys.join(", ") || "none"}], want exactly [ts, source, session_id, lesson]`,
+    });
+  }
+  if (typeof obj.session_id !== "string" || obj.session_id.trim() === "") {
+    findings.push({
+      code: "BAD_SESSION_ID",
+      detail: "session_id must be a non-empty identifier that resolves to session history",
     });
   }
   if (!validTs(obj.ts)) {

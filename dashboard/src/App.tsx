@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bell,
@@ -17,20 +17,30 @@ import {
   Download,
 } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { LiveTab, type FeedItem } from "@/components/LiveTab";
-import { OverviewTab } from "@/components/OverviewTab";
-import { GateTab } from "@/components/GateTab";
-import { SessionsTab } from "@/components/SessionsTab";
-import { SubagentsTab } from "@/components/SubagentsTab";
+import type { FeedItem } from "@/components/LiveTab";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { SessionDetailPanel } from "@/components/SessionDetail";
 import { connect, fetchDetail, fetchSnapshot, type DateRange } from "@/lib/api";
 import { buildPayload, downloadFile, exportBaseName, payloadToCsv } from "@/lib/export";
+
+const LiveTab = lazy(() => import("@/components/LiveTab").then((mod) => ({ default: mod.LiveTab })));
+const OverviewTab = lazy(() =>
+  import("@/components/OverviewTab").then((mod) => ({ default: mod.OverviewTab })),
+);
+const GateTab = lazy(() => import("@/components/GateTab").then((mod) => ({ default: mod.GateTab })));
+const SessionsTab = lazy(() =>
+  import("@/components/SessionsTab").then((mod) => ({ default: mod.SessionsTab })),
+);
+const SubagentsTab = lazy(() =>
+  import("@/components/SubagentsTab").then((mod) => ({ default: mod.SubagentsTab })),
+);
+const SessionDetailPanel = lazy(() =>
+  import("@/components/SessionDetail").then((mod) => ({ default: mod.SessionDetailPanel })),
+);
 
 const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
@@ -673,20 +683,28 @@ export default function App() {
 
         <main className="min-w-0 p-4 lg:p-6">
           <ErrorBoundary key={tab} label={`${tab} tab`}>
-            {tab === "overview" && <OverviewTab snapshot={snapshot} onOpenSession={openSessionDeep} />}
-            {tab === "sessions" && <SessionsTab snapshot={snapshot} />}
-            {tab === "subagents" && (
-              <SubagentsTab snapshot={snapshot} onOpenSession={openSessionDeep} />
-            )}
-            {tab === "gate" && <GateTab snapshot={snapshot} />}
-            {tab === "live" && (
-              <LiveTab
-                snapshot={snapshot}
-                feed={feed}
-                connected={connected}
-                onOpenSession={openSessionDeep}
-              />
-            )}
+            <Suspense
+              fallback={
+                <div className="space-y-3" aria-busy="true" aria-label="loading tab">
+                  <Skeleton className="h-24 w-full" />
+                </div>
+              }
+            >
+              {tab === "overview" && <OverviewTab snapshot={snapshot} onOpenSession={openSessionDeep} />}
+              {tab === "sessions" && <SessionsTab snapshot={snapshot} />}
+              {tab === "subagents" && (
+                <SubagentsTab snapshot={snapshot} onOpenSession={openSessionDeep} />
+              )}
+              {tab === "gate" && <GateTab snapshot={snapshot} />}
+              {tab === "live" && (
+                <LiveTab
+                  snapshot={snapshot}
+                  feed={feed}
+                  connected={connected}
+                  onOpenSession={openSessionDeep}
+                />
+              )}
+            </Suspense>
           </ErrorBoundary>
         </main>
       </div>
@@ -727,12 +745,20 @@ export default function App() {
             </div>
           )}
           {detail ? (
-            <SessionDetailPanel
-              key={detail.sessionId}
-              detail={detail}
-              onClose={closeSessionDetail}
-              onOpenSession={openSessionDeep}
-            />
+            <Suspense
+              fallback={
+                <div aria-busy="true" aria-label="loading session detail">
+                  <Skeleton className="h-44 w-full" />
+                </div>
+              }
+            >
+              <SessionDetailPanel
+                key={detail.sessionId}
+                detail={detail}
+                onClose={closeSessionDetail}
+                onOpenSession={openSessionDeep}
+              />
+            </Suspense>
           ) : null}
         </DialogContent>
       </Dialog>

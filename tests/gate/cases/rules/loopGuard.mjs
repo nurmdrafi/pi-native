@@ -145,4 +145,24 @@ export const cases = [
         : { blocked: false };
     },
   ],
+  [
+    "LG1: an error streak crossing a user turn still gets its note",
+    "pass",
+    async (pi) => {
+      await runBash(pi, "ls /lg1-x1", { error: true });
+      await runBash(pi, "ls /lg1-x2", { error: true });
+      await pi.invoke("before_agent_start", {
+        type: "before_agent_start", messageType: "user", prompt: "go on",
+        systemPromptOptions: {},
+      });
+      const noted = (r) =>
+        !!r?.content?.some(
+          (c) => c.type === "text" && c.text.includes("Loop Guard (LG1)"),
+        );
+      const r3 = await runBash(pi, "ls /lg1-x3", { error: true });
+      return noted(r3)
+        ? { blocked: false }
+        : { blocked: true, reason: "no LG1 note for a 3-error streak crossing a turn" };
+    },
+  ],
 ];

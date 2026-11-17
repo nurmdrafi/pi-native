@@ -10,7 +10,7 @@
  * git log.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import { config, ruleBlocks, ruleEnabled, ruleSeverity, setYolo, yoloActive, YOLO_FLOOR } from "./loader.ts";
+import { config, ruleBlocks, ruleEnabled, ruleSeverity, setYolo, yoloActive } from "./loader.ts";
 import { CADENCE_CTX_TOKENS, CADENCE_TURNS } from "./cadence.ts";
 
 /** Bash-kind predicate: `bash` plus the native `pibash` tool (2026-10-18
@@ -326,21 +326,23 @@ export default function (pi: ExtensionAPI) {
   };
   /**
    * Apply a rule decision at its configured severity: `error` blocks, `warn`
-   * records the reason against the call id (when given) and proceeds.
+   * records the reason against the call id (when given) and proceeds, `off`
+   * stays silent.
+   *
+   * 2026-11-17: the ladder used to test only `ruleBlocks`, so `off` fell
+   * through to warnCall — an off rule still noted on every match (107
+   * reader-bypass warns shipped while config.json said `off`, and `warn`
+   * looked identical). The enabled check is the one gate every severity
+   * decision passes through, so no call site can drift from the config again.
+   * /yolo reads as `off` for every non-floor rule (ruleSeverity), so the
+   * bypass needs no separate branch here.
    */
   const enforce = (
     key: Parameters<typeof ruleSeverity>[0],
     reason: string,
     id?: string,
   ): { block: true; reason: string } | undefined =>
-    // /yolo: while the bypass is active the gate goes silent — no blocks,
-    // no warn notes — for every non-floor rule; YOLO_FLOOR rules (the
-    // destructive/protected confirm ladder) keep their severity (loader.ts)
-    yoloActive() && !YOLO_FLOOR.has(key)
-      ? undefined
-      : ruleBlocks(key)
-        ? blockCall(reason)
-        : warnCall(reason, id);
+    ruleBlocks(key) ? blockCall(reason) : ruleEnabled(key) ? warnCall(reason, id) : undefined;
   // S4 fix 1 (2026-10-15, spec §5.2): fail-closed handler wrap — an unexpected
   // exception in ANY handler must never fail open. tool_call → generic internal
   // block (the call never runs; a rejected handler otherwise lets the tool
@@ -1252,11 +1254,11 @@ export default function (pi: ExtensionAPI) {
   // View-command span credit (2026-10-29): the printed lines of a
   // single-file view (head/tail/sed -n N,Mp/cat) enter context like a read
   // window — certify them so a later edit anchored on them skips the forced
-  // re-read (Claude Code parity). SE2 still prefers piread (structured
-  // windows, no cap); the warn teaches the preference, this credits what
-  // was actually seen. Registered before the H1 cap like the searchHits
-  // handler; clamped to the H1-visible line budget so capped-off lines
-  // never certify. Stat-only, like plain reads (spec §7 R2).
+  // re-read (Claude Code parity). SE2 blocks those readers at error, so this
+  // credit matters when SE2 sits at warn/off; it also keeps the spans of a
+  // view whose note the model saw. Registered before the H1 cap like the
+  // searchHits handler; clamped to the H1-visible line budget so capped-off
+  // lines never certify. Stat-only, like plain reads (spec §7 R2).
   on("tool_result", async (event) => {
     const view = pendingViews.get(event.toolCallId);
     if (!view) return;
