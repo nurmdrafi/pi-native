@@ -19,6 +19,7 @@
   ],
   "packages": [],
   "compaction": {
+    "enabled": false,
     "modelOverrides": {
       "zai/glm-5.3": {
         "reserveTokens": 845000
