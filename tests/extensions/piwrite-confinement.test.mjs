@@ -222,16 +222,15 @@ async function runGateChild(wbOff) {
     );
   }
 
-  // g5 — ~/.pi/efforts lost its allowlist (user direction 2026-11-12): it
-  // sits outside the session cwd, so it confirms like any other out-of-cwd
-  // target — in every mode, yolo included (out-of-cwd is yolo floor)
+  // g5 — ~/.pi/efforts is allowlisted again (user direction 2026-11-17,
+  // reinstating the 2026-11-12 removal): effort ledgers live there and
+  // every ledger write confirms — so the tree is exempt from out-of-cwd
+  // AND overwrite confirms, in every mode
   {
-    const r = await write("piwrite", join(efforts, "task.md"), "ledger", inCwd);
-    check(
-      "g5 piwrite ~/.pi/efforts target now confirms (out-of-cwd)",
-      r.startsWith("BLOCKED: Permission Gate (Destructive): piwrite") && r.includes("outside the session directory"),
-      r,
-    );
+    const r = await write("piwrite", join(efforts, "task.md"), "ledger", inCwd, true);
+    check("g5 piwrite ~/.pi/efforts target passes (allowlisted)", r === "write ok", r);
+    const r2 = await write("piwrite", join(efforts, "task.md"), "ledger2", inCwd, true);
+    check("g5b piwrite ~/.pi/efforts overwrite passes (allowlisted)", r2 === "write ok", r2);
   }
 
   // g6 — parity with the stubbed harnesses: no ctx.cwd → nothing to confine against

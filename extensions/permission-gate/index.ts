@@ -447,9 +447,10 @@ export default function (pi: ExtensionAPI) {
    * overwrite is the finding's failure class — but only while WB's
    * configured severity is off; with the binding active WB owns overwrites
    * analytically (shipped "warn") and the confirm stands down. Allowlist:
-   * the session cwd tree itself. (The ~/.pi/efforts ledger exemption was
-   * removed 2026-11-12 by user direction: effort ledgers sit outside the
-   * session cwd and confirm like any other out-of-cwd target, every mode.) The confinement root is the handler ctx cwd —
+   * session cwd tree itself, plus the ~/.pi/efforts ledger tree (reinstated
+   * by user direction 2026-11-17: effort ledgers are routine agent scratch
+   * and every write confirmed; the exemption covers out-of-cwd AND
+   * overwrite, every mode). The confinement root is the handler ctx cwd —
    * a context without one (stubbed harnesses) has nothing to confine
    * against, so the rule skips; the tools' own resolution rung still
    * rejects ../ escapes outright. Returns the H2 confirm subject when the
@@ -467,6 +468,10 @@ export default function (pi: ExtensionAPI) {
   };
   const underRoot = (p: string, root: string): boolean =>
     p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
+  /** ~/.pi/efforts allowlist root, judged in the same realpath space as the
+   * target: a symlinked home still matches, and a not-yet-created efforts
+   * dir falls back to its realpathed parent + basename. */
+  const effortsRoot = (): string => realpathish(join(homedir(), ".pi", "efforts"));
   const writeConfinementReason = (
     tool: string,
     abs: string,
@@ -481,6 +486,7 @@ export default function (pi: ExtensionAPI) {
       root = cwd;
     }
     const real = realpathish(abs);
+    if (underRoot(real, effortsRoot())) return undefined; // efforts ledger tree
     if (!underRoot(real, root))
       return `${tool} '${abs.slice(0, 28)}' → outside the session directory and`;
     if (overwrite)
