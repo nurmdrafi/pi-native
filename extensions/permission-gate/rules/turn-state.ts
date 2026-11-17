@@ -54,7 +54,8 @@ export interface TurnState {
   /** LG1: path whose next mutation is blocked once. */
   lg1Armed: string | undefined;
   /** LG1/R11: consecutive tool errors. The counter runs even when loopGuard is
-   * off so failureLoopGuard can be enabled on its own. */
+   * off so failureLoopGuard can be enabled on its own. Crosses user turns —
+   * only a non-error result clears it (2026-11-17). */
   lg1ErrStreak: number;
   lg1ErrNoted: boolean;
   /** R11: mutationSeq when the current streak began — a landed mutation since
@@ -83,15 +84,16 @@ export function createTurnState(): TurnState {
   };
 }
 
-/** LG1/PH1/R11 per-turn reset. `mutationSeq` is deliberately kept — it is the
- * "nothing landed since" evidence, not a turn counter. */
+/** LG1/PH1 per-turn reset. `mutationSeq` is deliberately kept — it is the
+ * "nothing landed since" evidence, not a turn counter. R11's streak and its
+ * mutation snapshot survive too (2026-11-17 telemetry): the observed circling
+ * spans user turns, and a turn-bound counter never reached the threshold —
+ * only a landed mutation (or a non-error result) disarms the streak now. */
 export function resetTurnParts(t: TurnState): void {
   t.lg1Mutations.clear();
   t.lg1Noted.clear();
   t.lg1Armed = undefined;
-  t.lg1ErrStreak = 0;
   t.lg1ErrNoted = false;
-  t.lg1ErrMutSeq = 0;
 }
 
 /** One-shot block of an armed path's next mutation — called from the
