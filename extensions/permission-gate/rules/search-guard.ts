@@ -94,10 +94,12 @@ const SS3_MSG =
   "Search (fd-first): 'find' is the fallback, not the default — use 'fd PATTERN path/' (regex pattern; -e exact, -H hidden, -t f files). If fd genuinely errored, say so in chat and wait for approval before using find.";
 
 /** SS4 (2026-11-01): `-r` is a grep habit, not an rg recursion flag — rg recurses
- * by default and reads `-r`/`--replace` as display substitution, so the search
- * still runs but answers the wrong question and costs a re-run. */
+ * by default and reads `-r`/`--replace` as display substitution, so the common
+ * `rg -rn PATTERN f` prints substituted matches instead of numbered lines and
+ * costs a re-run. 2026-11-17: the reason names that symptom (42 warns a week)
+ * instead of describing the flag's origin. */
 const SS4_MSG =
-  "Search (rg -r): '-r' on rg is --replace (display substitution), not recursion — rg already recurses, so drop it: 'rg PATTERN path/'. The flag comes from grep idioms and silently changes what the command reports.";
+  "Search (rg -r): '-r' is rg's --replace, not recursion — 'rg -rn foo f' substitutes into the matches it prints instead of numbering lines. rg recurses already: 'rg -n PATTERN path/'.";
 
 /**
  * SS1's crawl-cost premise applies to all searches.
