@@ -1095,6 +1095,12 @@ interface RunningSubagent {
    *  place, so the stamp survives them. Mirrored into the delivered result
    *  and the history row. */
   queueWaitMs?: number;
+  /** Spawn-stage offsets in ms from `startTime` (W4 latency instrument,
+   *  2026-11-17): config/session/loadout/env/prompts/pane mark where the
+   *  launch spent its time, so a slow spawn names its own stage instead of
+   *  being blamed on the model. Best-effort diagnostics only — nothing in
+   *  the launch path reads them back. */
+  spawnStages?: Record<string, number>;
   sessionFile: string;
   parentArtifactDir?: string;
   /** Spawn-time git baseline snapshot (PI_SUBAGENT_BASELINE) when the child
@@ -2823,6 +2829,12 @@ async function launchSubagent(
   if (!params.name?.trim()) throw new Error("launchSubagent: params.name is required (the spawn handler assigns a unique name before launching)");
   const startTime = Date.now();
   const id = Math.random().toString(16).slice(2, 10);
+  // W4 spawn-stage instrument: one offset per launch step, so a slow spawn
+  // names the step that cost the time (see RunningSubagent.spawnStages).
+  const spawnStages: Record<string, number> = {};
+  const stage = (name: string) => {
+    spawnStages[name] = Date.now() - startTime;
+  };
 
   const agentDefs = params.agent ? loadAgentDefaults(params.agent) : null;
   const effectiveModel = params.model ?? agentDefs?.model;
@@ -2840,6 +2852,7 @@ async function launchSubagent(
   const { effectiveCwd, localAgentDir, effectiveAgentDir } = resolveSubagentPaths(params, agentDefs);
   const targetCwdForSession = effectiveCwd ?? ctx.cwd;
   const sessionDir = getDefaultSessionDirFor(targetCwdForSession, effectiveAgentDir);
+  stage("config");
 
   // Generate a deterministic session file path for this subagent.
   // This eliminates race conditions when multiple agents launch simultaneously —
@@ -2866,6 +2879,7 @@ async function launchSubagent(
 
   const activityFile = getSubagentActivityFile(artifactDir, id);
   mkdirSync(dirname(activityFile), { recursive: true });
+  stage("session");
   const { inheritsConversationContext } = launchBehavior;
 
   // Build the task message
@@ -3030,6 +3044,7 @@ async function launchSubagent(
   // Apply model, identity, and the default-deny tool/extension restriction via
   // the shared helper (same code path resume uses — they can't drift).
   applySandboxToParts(parts, loadout, { artifactDir, name: params.name });
+  stage("loadout");
 
   // Build env prefix: subagent identity + config dir propagation + spawn allowlist
   const envParts: string[] = [];
@@ -3070,6 +3085,7 @@ async function launchSubagent(
     envParts.push(`PI_SUBAGENT_BASELINE=${shellEscape(gitBaselinePath)}`);
   }
   const envPrefix = envParts.join(" ") + " ";
+  stage("env");
 
   // Pass task and skill prompts to the sub-agent.
   // Only full-context fork mode gets a direct task argument because it already
@@ -3100,6 +3116,7 @@ async function launchSubagent(
   })) {
     parts.push(shellEscape(promptArg));
   }
+  stage("prompts");
 
   // Resolve cwd — param overrides agent default, supports absolute and relative paths.
   // This was already computed above so session placement, PI_CODING_AGENT_DIR, and cd agree.
@@ -3129,6 +3146,7 @@ async function launchSubagent(
     waitChannel,
     agentsSessionNameFor(scopeRepoRoot),
   );
+  stage("pane");
 
   const running: RunningSubagent = {
     id,
@@ -3140,6 +3158,7 @@ async function launchSubagent(
     startTime,
     sessionFile: subagentSessionFile,
     parentArtifactDir: artifactDir,
+    spawnStages,
     ...(gitBaselinePath ? { gitBaselinePath } : {}),
     ...(scopeInfo && scopeInfo.scope.origin !== "none" ? { scope: scopeInfo.scope } : {}),
     ...(scopeInfo?.scopeId ? { scopeId: scopeInfo.scopeId } : {}),
@@ -4767,6 +4786,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             sessionFile: running.sessionFile,
             launchScriptFile: running.launchScriptFile,
             status: "started",
+            // W4 instrument: the launch steps' offsets ride the result details
+            // into the parent transcript, so a later export can attribute a
+            // spawn's time without re-instrumenting.
+            ...(running.spawnStages ? { spawnStages: running.spawnStages } : {}),
           },
         };
       },
