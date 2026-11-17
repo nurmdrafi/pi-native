@@ -14,18 +14,25 @@
  * (mtime desc, path) + slice keeps the same sample every run — no Math.random.
  *
  * Output: one JSON line  { commands, blocked, fp_rate, by_family, sessions }
- * Run: node tests/replay.mjs [sessionsRoot]
+ * Run: node tests/tools/audit/replay.mjs [sessionsRoot] [--all]
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
-import { freshGate, bashProbe, familyOfReason } from '../../gate/harness/stub.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const SESSIONS = resolve(process.argv[2] ?? join(homedir(), '.pi', 'agent', 'sessions'));
+const args = process.argv.slice(2);
+const allSessions = args.includes('--all');
+const sessionsArg = args.find((arg) => arg !== '--all');
+const SESSIONS = resolve(sessionsArg ?? join(homedir(), '.pi', 'agent', 'sessions'));
 const MAX_FILES = 600; // speed bound; stable over-sample below keeps runs comparable
+
+// Historical logs do not record whether pibash was registered. Exclude P2 so
+// the bash replay measures command rules rather than blocking every bash call.
+process.env.PGATE_NATIVE_BASH_FIRST = 'off';
+const { freshGate, bashProbe, familyOfReason } = await import('../../gate/harness/stub.mjs');
 
 let files = [];
 try {
@@ -36,7 +43,7 @@ try {
   console.log(JSON.stringify({ commands: 0, blocked: 0, fp_rate: null, by_family: {}, sessions: 0, error: `no sessions dir at ${SESSIONS}` }));
   process.exit(0);
 }
-if (files.length > MAX_FILES) {
+if (!allSessions && files.length > MAX_FILES) {
   const keyed = files.map((f) => { let m = 0; try { m = statSync(f).mtimeMs; } catch {} return { f, m }; });
   keyed.sort((a, b) => (b.m - a.m) || (a.f < b.f ? -1 : 1)); // newest first, path tiebreak
   files = keyed.slice(0, MAX_FILES).map((k) => k.f).sort();
@@ -121,7 +128,9 @@ for (const file of files) {
     // exported; keep in sync with permission-gate.ts CONVENTIONAL_HEADER.
     const CONVENTIONAL = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([\w\-.]+\))?!?: .+/;
     const msgs = [...c.command.matchAll(/(?:^|\s)(?:--[a-zA-Z-]*message|-[a-zA-Z]*m)\s*(?:=\s*)?(?:"((?:\\.|[^"])*)"|'((?:\\.|[^'])*)')/g)].map((m) => (m[1] ?? m[2] ?? '').replace(/\\n/g, '\n').split('\n')[0]);
-    const intended = fam === 'Commitlint' && msgs.length > 0 && msgs[0].length > 0 && !CONVENTIONAL.test(msgs[0]);
+    const intended =
+      fam === 'Permission Gate (Malformed)' ||
+      (fam === 'Commitlint' && msgs.length > 0 && msgs[0].length > 0 && !CONVENTIONAL.test(msgs[0]));
     if (intended) intendedBlocks++;
     if (c.result && !c.result.isError && !intended) ranButBlocked++;
     await pi.invoke('tool_result', {

@@ -34,6 +34,8 @@ fixtures/                 shared inputs: bench/, doc-check/, session-metrics/
 | `npm test` | every `*.test.mjs` (unit + integration + parity + benchmark + gate) |
 | `npm run test:subagents` | `tests/subagents/runner.ts` |
 | `npm run gate:eval` | `tests/gate/eval/run.mjs` — 92 fixtures, block-recovery audit, replay probe |
+| `npm run audit:blocks` | `tests/tools/audit/block-recovery.mjs` — all-session gate families and recovery |
+| `node tests/tools/audit/replay.mjs --all` | all-session bash replay; excludes P2 because historical registration is not logged |
 | `npm run bench:model-visible` | `tests/tools/bench/model-visible-baseline.mjs` (`:compare`, `:update`) |
 | `npm run bench:piread` | `tests/tools/bench/piread.mjs` — oracle vs daemon vs one-shot, wall-clock only |
 | `npm run bench:pibash` | `tests/tools/bench/pibash.mjs` — the same arms for the bash path |

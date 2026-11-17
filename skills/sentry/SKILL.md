@@ -36,6 +36,7 @@ Ban: `cat`/`echo`/print of the secrets file, its values, or the token; the token
 | --- | --- |
 | Project slugs | `GET /api/0/organizations/$SENTRY_ORG/projects/` |
 | Unresolved issues | `GET /api/0/organizations/$SENTRY_ORG/issues/?query=is:unresolved&project=<slug>&statsPeriod=24h&sort=freq` |
+| Archived issues | `GET /api/0/organizations/$SENTRY_ORG/issues/?query=is:archived&project=<slug>&sort=last_seen` |
 | Issue detail | `GET /api/0/organizations/$SENTRY_ORG/issues/<id>/` |
 | Latest event | `GET /api/0/organizations/$SENTRY_ORG/issues/<id>/events/latest/` |
 
@@ -86,3 +87,5 @@ Order is fixed: reproduce → fix → verify → resolve → audit.
 ## 5. Triage loop (automation)
 
 Per project: fetch unresolved → rank by `count` desc, `lastSeen` desc → for each issue, sections 3–4. Batch guard: cap at 3 issues per project per run unless told otherwise; report remaining. Per fixed issue, report shape: `fixed <issue_id> <error>` — frequency (events + users), first/last seen, root cause one line, fix files, verification commands + exit codes. Machine-readable summary per run: NDJSON to a `/tmp` path named by the caller, one line per issue handled (`{repo, issue_id, action, result}`).
+
+After the unresolved pass, audit the blind spot: archived issues (section-2 recipe, `sort=last_seen`) never auto-reopen, so a recurring one counts events invisibly. Any archived issue whose `lastSeen` is newer than the last deploy gets the same section-3 analysis and fix; changing its state still needs a passing fix plus the user's order.

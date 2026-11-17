@@ -87,8 +87,8 @@ export const RULE_IDS = {
   /** Bash (reblock) — RB: verbatim re-send of a just-blocked command
    *  escalates with a dedicated reason. */
   reblockEscalation: "RB",
-  /** Toolchain (pnpm pin) — TC1: npm/npx/yarn in a pnpm-pinned repo blocks;
-   *  use `pnpm run`/`exec`/`dlx`. */
+  /** Toolchain (pnpm pin) — TC1: npm/npx/yarn in a pnpm-pinned repo blocks,
+   * except read-only `npm view`; use `pnpm run`/`exec`/`dlx`. */
   toolchainPnpm: "TC1",
   /** Toolchain (node pin) — TC2: node-family binary missing the exact
    *  `.nvmrc`/`engines` pin warns; prefix `nvm use <pin> &&`. */

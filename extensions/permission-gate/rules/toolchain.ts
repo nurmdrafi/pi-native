@@ -9,7 +9,7 @@
  *
  * | ID  | Check                                              | Fix carried in the reason |
  * |-----|----------------------------------------------------|---------------------------|
- * | TC1 | pnpm repo (packageManager/pnpm-lock) + npm/npx/yarn | pnpm run/exec/dlx        |
+ * | TC1 | pnpm repo + npm/npx/yarn, except read-only npm view | pnpm run/exec/dlx        |
  * | TC2 | exact Node pin (.nvmrc/engines) ≠ interpreter       | nvm use <pin> && …        |
  *
  * Inert unless a manifest pins the toolchain: TC1 needs a pnpm marker, TC2
@@ -107,7 +107,8 @@ export function toolchainCheck(
   if (VERSION_MANAGER_RE.test(cmd)) return undefined;
   const m = readManifest(cwd);
   if (pnpmOn && (m.pm?.startsWith("pnpm") || m.pnpmLock) && NPM_FAMILY.test(head)) {
-    if (!(head === "npx" && /^npx\s+pnpm\b/.test(seg)))
+    const readOnlyNpmView = head === "npm" && /^npm\s+view\b/.test(seg);
+    if (!readOnlyNpmView && !(head === "npx" && /^npx\s+pnpm\b/.test(seg)))
       return `Toolchain (pnpm): '${head}' in a pnpm repo — use 'pnpm run <script>', 'pnpm exec <bin>' or 'pnpm dlx <pkg>'. npm/npx/yarn against a pnpm tree caused 7 failed runs (lockfile/engine drift).`;
   }
   const pin = pinnedNode(m);

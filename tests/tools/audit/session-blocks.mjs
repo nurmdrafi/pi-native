@@ -23,6 +23,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { renderedCoverageFromBlocks } from "../../../extensions/permission-gate/rules/read-coverage.ts";
+import { isGateBlockText } from "../../gate/gate-labels.mjs";
 
 const argv = process.argv.slice(2);
 const AS_JSON = argv.includes("--json");
@@ -94,12 +95,20 @@ function parseSession(file) {
 }
 
 const FAMILIES = [
-  ["anchor", /Anchor Guard/],
-  ["locate", /Locate-first/],
-  ["re-read", /Re-read/],
-  ["re-run", /Re-run/],
-  ["loop", /Loop Guard/],
-  ["destructive", /destructive|confirm/i],
+  ["permission", /^Permission Gate/],
+  ["anchor", /^Anchor Guard/],
+  ["re-read", /^Token Economy \(Re-read\)/],
+  ["re-run", /^Token Economy \(Re-run\)/],
+  ["token", /^Token Economy/],
+  ["locate", /^Locate-first/],
+  ["toolchain", /^Toolchain/],
+  ["search", /^Search(?:Guard| Guard| \()/],
+  ["commitlint", /^Commit(?:lint| Message)/],
+  ["loop", /^Loop Guard/],
+  ["destructive", /^Destructive/],
+  ["bash", /^Bash cap/],
+  ["output", /^Output scrub/],
+  ["phase", /^Phase/],
   ["other", /.*/],
 ];
 /**
@@ -109,9 +118,8 @@ const FAMILIES = [
  * leading label keeps the block ledger honest: before this split, 5 of 22
  * "blocks" in one session were ordinary command failures.
  */
-const GATE_LABEL = /^(Anchor Guard|Token Economy|Loop Guard|Locate-first|Toolchain|SearchGuard|Search Guard|Destructive|Commitlint|Output scrub|Bash cap|Phase)/i;
 const familyOf = (text) => FAMILIES.find(([, re]) => re.test(text))[0];
-const kindOf = (text) => (GATE_LABEL.test(text.trim()) ? "gate" : "error");
+const kindOf = (text) => (isGateBlockText(text) ? "gate" : "error");
 
 const keyOf = (name, arg) => `${name}:${arg.slice(0, 60)}`;
 

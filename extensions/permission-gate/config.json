@@ -54,7 +54,7 @@
     "R9": "Git (commit lint): git commit -m checked against the commitlint pattern; safety floor — cannot go below 'error'.",
     "R10": "Bash (re-run): identical re-run <=10 min after its last success with no intervening mutation blocks.",
     "RB": "Bash (reblock): verbatim re-send of a just-blocked command escalates with a dedicated reason.",
-    "TC1": "Toolchain (pnpm pin): npm/npx/yarn in a pnpm-pinned repo blocks; use pnpm run/exec/dlx.",
+    "TC1": "Toolchain (pnpm pin): npm/npx/yarn in a pnpm-pinned repo blocks, except read-only npm view; use pnpm run/exec/dlx.",
     "TC2": "Toolchain (node pin): node-family binary missing the exact .nvmrc/engines pin warns; prefix nvm use.",
     "SS1": "Search (scope): recursive grep/rg with no path or glob scope blocks — scope it (rg PATTERN path/).",
     "SS2": "Search (mid-pipe): a grep segment reached mid-pipe blocks; use single-process rg PATTERN path/.",

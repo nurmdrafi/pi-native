@@ -64,6 +64,46 @@ code for views that users may not open.
 **Correction applied:** defer tab and session-detail modules until rendered,
 with accessible loading fallbacks.
 
+## Permission-gate review
+
+The gate runs before tool execution, applies configured rule severities, keeps
+destructive confirmation and commit-message lint at hard floors, and fails
+closed when a tool-call handler throws. The destructive-command matcher is
+documented as a tripwire rather than a security boundary.
+
+### Finding: historical block audit missed active gate families
+
+The all-session audit previously recognized only Anchor Guard, Token Economy,
+and Commitlint, and counted matching messages without requiring `isError`.
+Across 830 session logs, the corrected audit found 2,049 gate-error results:
+758 Token Economy, 734 Anchor Guard, 204 Locate-first, 181 Permission Gate,
+63 Search, 55 Commitlint, 51 Toolchain, and 3 Loop Guard. The earlier audit
+counted 1,553 results: it included six non-error notes and missed 502 actual
+gate errors.
+
+**Correction applied:** both session audit tools now share anchored gate-label
+matching; the all-session audit counts only error results and reports both
+rule-level and subtype totals. `npm run audit:blocks` exposes the full-session
+audit.
+
+Across all 2,049 blocks, 1,910 were followed by a tool call, 127 by another
+same-family block, and 12 by another outcome. The one-call recovery rate was
+93%, above the existing 85% threshold.
+
+### Finding: TC1 treated read-only package lookup as a mismatch
+
+The historical `npm view` report in [`harness.ndjson`](../lessons/harness.ndjson)
+matches a TC1 false-positive class: across 37 sessions containing such queries,
+one `npm view` result was blocked with a Toolchain (pnpm) label. The available
+logs do not identify whether that is the exact event from the lesson. The
+shipped TC1 severity is `warn`, so it does not block under the current
+configuration; with TC1 set to `error`, the helper would have blocked it.
+
+**Correction applied:** read-only `npm view` is exempt from TC1, while
+package-mutating commands such as `npm install` remain flagged. The regression
+test also confirms that `npm view` is not classified as destructive. The lesson
+log was analyzed but left unchanged as requested.
+
 ## Correction and verification
 
 The root `check` gate now includes the dashboard build. CI installs dashboard
@@ -81,3 +121,5 @@ test, typecheck, and agent-lint steps.
   which is absent on this macOS host.
 - `npm run check`: stopped at existing documentation-check findings for
   `git --oneline` and `git --stat`; these are outside this review's scope.
+- Permission-gate regression tests passed; the all-session block audit covered
+  2,049 blocks with 93% one-call recovery.
