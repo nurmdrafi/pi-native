@@ -46,19 +46,21 @@ Always pipe through jq and keep only what is needed:
 curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/$SENTRY_ORG/issues/?query=is:unresolved&project=$PROJECT_SLUG&statsPeriod=24h&sort=freq" | jq -r '.[] | [.id, .shortId, .level, .count, .userCount, .firstSeen, .lastSeen, .title, .culprit] | @tsv'
 ```
 
-Stacktrace from the latest event — frames are ordered outermost-first; the error site is the last in-app frame:
+Stacktrace from the latest event — entry payloads nest under `.data` (exception values at `.entries[].data.values[0]`); frames are ordered outermost-first, the error site is the last in-app frame, and `// []` keeps jq quiet when the event carries none:
 
 ```sh
-curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/$SENTRY_ORG/issues/$ISSUE_ID/events/latest/" | jq '.entries[] | select(.type=="exception") | .values[0].stacktrace.frames | map(select(.inApp != false)) | .[-5:]'
+curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "$SENTRY_URL/api/0/organizations/$SENTRY_ORG/issues/$ISSUE_ID/events/latest/" | jq '.entries[] | select(.type=="exception") | .data.values[0].stacktrace.frames // [] | map(select(.inApp != false)) | .[-5:]'
 ```
+
+Minified clients often leave no usable frames; the event root's `.metadata` (`type`, `value`, `function`, `filename`) still names the failure and the handler — probe it first.
 
 ## 3. Understand
 
-1. `title` + `culprit` name the failure; top in-app frames name the files.
+1. `title` + `culprit` name the failure; top in-app frames name the files. One grouped issue can hold several message variants — before declaring an issue fixed, read the latest event's message, not the count trend.
 2. Map frames to the repo: match `filename` (or basename) with `fd`/`rg` inside the repo path; skip frames under `node_modules`/`webpack`/browser internals.
 3. Read the mapped file plus its callers before concluding anything — behavior claims need the consumption site.
 4. Evidence beyond the stack — same latest-event call or one extra call:
-   - Breadcrumbs (user actions before the error): `jq '.entries[] | select(.type=="breadcrumbs") | .values[-10:]'`
+   - Breadcrumbs (user actions before the error): `jq '.entries[] | select(.type=="breadcrumbs") | .data.values[-10:]'`
    - Tag distributions — impact scope (browser, environment, url, release): `GET /api/0/organizations/$SENTRY_ORG/issues/<id>/tags/` and `.../tags/<key>/`
    - Event context: `jq '{user, release, environment, tags}'` on the latest event
    - PII rule: event data may carry credentials/tokens/PII — note presence and type, never reproduce values in output

@@ -119,7 +119,7 @@ test, typecheck, and agent-lint steps.
 - Root TypeScript checking and agent lint: passed.
 - `npm test`: 589 of 590 tests passed. The remaining test expects `/bin/true`,
   which is absent on this macOS host.
-- `npm run check`: stopped at existing documentation-check findings for
-  `git --oneline` and `git --stat`; these are outside this review's scope.
+- `npm run check`: stopped at two documentation-check findings caused by Git
+  option spellings quoted in this report; these are outside this review's scope.
 - Permission-gate regression tests passed; the all-session block audit covered
   2,049 blocks with 93% one-call recovery.

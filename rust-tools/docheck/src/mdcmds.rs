@@ -280,7 +280,11 @@ pub fn sub_cmd(seg: &str, tok: &str) -> Option<String> {
     if it.next()? != tok {
         return None;
     }
-    let s = it.next().unwrap_or("");
+    let mut s = it.next().unwrap_or("");
+    while tok == "git" && s == "-C" {
+        it.next()?;
+        s = it.next().unwrap_or("");
+    }
     let mut chars = s.chars();
     let first_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
     let rest_ok = chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
@@ -788,6 +792,10 @@ pub fn check_md_commands(root: &Path) -> MdFamily {
 
     // pass 1: fenced shell blocks
     for md in &mds {
+        let rel = rel_of(md, root);
+        if is_handoff_or_ignored(&rel) {
+            continue;
+        }
         let Ok(bytes) = fs::read(md) else {
             continue;
         };
@@ -796,7 +804,6 @@ pub fn check_md_commands(root: &Path) -> MdFamily {
             if !SHELL_LANGS.contains(&lang.as_str()) {
                 continue;
             }
-            let rel = rel_of(md, root);
             let syntax_input = quote_placeholders(&body);
             if !bash_n_ok(&syntax_input) {
                 let first = body
@@ -1081,6 +1088,10 @@ mod tests {
     #[test]
     fn sub_cmd_rules() {
         assert_eq!(sub_cmd("git reset --hard", "git").as_deref(), Some("reset"));
+        assert_eq!(
+            sub_cmd("git -C <repo> log --oneline", "git").as_deref(),
+            Some("log")
+        );
         assert_eq!(sub_cmd("git", "git"), None);
         assert_eq!(sub_cmd("git --hard", "git"), None);
         assert_eq!(sub_cmd("git Reset", "git"), None); // uppercase rejected
@@ -1192,6 +1203,25 @@ mod tests {
             .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(rels, vec!["docs/curated.md".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn command_scan_skips_historical_markdown_in_every_pass() {
+        let root = std::env::temp_dir().join(format!("docheck-history-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["sessions", "handoff", "audit-reports"] {
+            let path = root.join(dir);
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(
+                path.join("history.md"),
+                "# Captured commands\n\n```sh\ngit --oneline\ngit --stat\n```\n",
+            )
+            .unwrap();
+        }
+
+        let result = check_md_commands(&root);
+        assert!(result.findings.is_empty(), "{:?}", result.findings);
         let _ = std::fs::remove_dir_all(&root);
     }
 

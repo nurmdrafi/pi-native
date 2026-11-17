@@ -17,7 +17,6 @@
 
 ## Workflow & TDD
 - Commit subject and body: no `#` character anywhere. Shape per `prompts/ship.md`: `type(scope): imperative summary`, body as multi-line `-` bullets, one per change, ≤100 chars per line, standard conventional type. Gates pass → commit and push without waiting for approval.
-- Never hand-count commit-message lines: compose the message in a file, gate it with `awk 'length>100 || index($0,"#") {print "line " FNR ": " length " chars or contains #"; exit 1}' <msgfile>`, then `git commit -F <msgfile>` — in the same shell call as `git add` (a rejected commit drops the staged index across calls).
 - Merge commits: subject names the deliverable, changelog deduped; never git's default `Merge branch …` template. Never commit pasted CI or webhook text — link the commit it announces.
 - TDD always: failing test → watch it fail → minimum code → refactor.
 - Bug fix → write a failing repro test first (no probe test).
@@ -32,20 +31,18 @@
 
 ### Subagents
 - Off until `/subagents on`; until then work linearly, never spawn unasked. After `/subagents on`, task pane handover → load the `tmux-panes` skill.
-- `npx` fetches missing packages without the ask-before-install gate — pre-install or vendor CLIs before child use.
-- Read `~/.pi/agent/docs/subagent-orchestration.md` before the first spawn; child conduct: `~/.pi/agent/docs/subagents.md` (keep it lean). Keep the roster table and `~/.pi/agent/agents/` frontmatter in sync on every roster change.
+- Keep the roster table and `~/.pi/agent/agents/` frontmatter in sync on every roster change.
 
 ## Verification
 - At task end: tests + lint + typecheck scoped to changed files only; project lacks lint/typecheck → skip that leg and say so.
 - Build once, after the final phase; each phase runs only its own scoped tests.
 - Never claim something works without running it; cannot run → state why.
-- Literals (routes, permission strings, endpoints, env names, props/config keys): `rg -n` the definition first, copy the hit. Config filenames take any extension — `fd <basename>` (e.g. `fd commitlint.config`), copy the hit, never guess the suffix.
+- Verify external contracts and configuration literals against their defining source before relying on them.
 - Define each new symbol once, then reference it; never free-type the same literal twice. Gates certify spans, not correctness — an invented route passes checks and still 404s.
-- `rg` the producer of a shape before calling its methods.
+- Inspect the producer before relying on an output shape or its methods.
 - Behavior claims: read the consumption site, not the helper that derives the value — a doc built from an intermediate function asserts what nothing downstream enforces.
 
 ## Docs
-- Apply `~/.pi/agent/docs/portability.md` before shell/path work.
 - Repo paths cited in these instructions and their docs (docs, tests, benchmarks) resolve under the agent home (`~/.pi/agent`), never the session cwd. Skill-body paths (`scripts/`, `references/`, `assets/`) resolve under the invoked skill's directory (`location` on the injected skill tag; project skills live in `.pi/skills/`).
 - Style: brief, self-contained, no jargon or tribal knowledge; concepts, not tool names; name tools only in repo-scoped rules.
 - The pi-native repo (agent home) is public — every file in it is world-readable; project repos where pi is initialized may be private — never assume public there. Sensitive data never enters any file (docs, comments, tests, fixtures, notes, changelog, prompts, skill bodies): secrets, tokens, and internal/self-hosted infrastructure hostnames or endpoints — reference those via env vars read at runtime (e.g. `$SENTRY_URL` from the agent-home secrets file), never written out. Concrete absolute paths — user, device, or machine specific (`/Users/<name>`, `/home/<name>`, hostnames) — never enter any file either: paths stay dynamic and OS/device-agnostic (`~`/`$HOME`-relative, repo-relative, or env-derived, per `docs/portability.md`); quote historical paths with `<home>`/`<user>` placeholders. In the public agent home, public facts may stay: org/vendor names, public repo and project slugs, public API endpoints, public usernames; keep dates. When a reference must be neutralized, use `<project-a>`, `<vendor>`, `<org>`, `<project-root>`. Fixture names describe shape, never the incident's source. A skill about a named stack names that stack.
@@ -54,8 +51,6 @@
 - Slash-command bodies pass arguments only through `$ARGUMENTS`/`$@`/`${N}` placeholders — a body without one silently drops the invoked argument.
 - Prompt frontmatter values are quoted strings (`argument-hint: "[lite|full]"`); an unquoted `[` parses as a YAML flow sequence and breaks the prompt at load.
 
-## Harness tool discipline
-- Lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) → append one NDJSON line to `~/.pi/agent/lessons/harness.ndjson` — fields `ts`, `source`, `lesson`; read the tail before planning calls; never commit/push. Compose the line with `jq -c -n` — printf mangles inner quotes and `$( )` at write time.
+## Harness lessons
+- Record each lesson or incident (tool error, gate block, guard misfire, rule conflict, vague instruction, misbehaviour) in `~/.pi/agent/lessons/harness.ndjson` with `ts`, `source`, `session_id`, and `lesson`. The session ID must resolve to history; never commit/push the log.
 - Tool-defect lessons carry path, file size, and exact payload (anchor text or hash) so a replay reproduces it.
-- A tool writing output/state to a chosen path keeps it inside agent home — outside paths are refused.
-- File writes use `piwrite` when it is registered — see `~/.pi/agent/docs/native-tools.md`. Overwriting an existing path trips the destructive gate: check for the twin first (`fd <basename>`), then write a fresh path or rewrite the original deliberately.

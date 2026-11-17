@@ -88,7 +88,7 @@ Every repo script is exposed through `package.json` — run `npm run <name>` fro
 | `typecheck`         | `tsc -p tsconfig.json`    | Links pi, then type-checks the TypeScript extensions                       |
 | `test`             | `node --test`             | Full suite: permission-gate, parity, and doc-check suites                  |
 | `test:subagents`    | `node --test`             | Subagent unit suite (mock-based, no tmux or model needed)                  |
-| `lint:agents`       | `node scripts/agents-lint.mjs` | AGENTS.md lint — flags duplicated rules and contradictory directives (one JSON line) |
+| `lint:agents`       | `node scripts/agents-lint.mjs` | Lints AGENTS.md and syncs generated agent/skill roster tables; may update `docs/subagent-orchestration.md` and `docs/skills.md` |
 | `doc:check`         | `~/.pi/agent/bin/docheck` | Verifies harness commands, paths, tool and env-var inventories declared in markdown actually resolve (native Rust port; the former `scripts/doc-check.mjs` is deleted) |
 | `gate:eval`         | `node tests/gate/eval/run.mjs` | Aggregates the fixture suite with the block-recovery and bash-replay audits; prints one final JSON metrics line |
 | `audit:blocks`      | `node tests/tools/audit/block-recovery.mjs` | Measures gate-block families and next-action recovery across all session logs |
