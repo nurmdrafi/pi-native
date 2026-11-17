@@ -9,7 +9,7 @@
  * rewritten, sorted by name; everything else stays byte-identical and a
  * table already in sync produces no write.
  * Heuristic, no deps. Output: one JSON line.
- *   { bullets, dup_pairs, contradictions, details: [...] }
+ *   { bullets, dup_pairs, contradictions, missing, scope_leaks, default_restatements, tables, details: [...] }
  * Contradiction checks (extensible):
  *   - ask-polarity: one bullet pre-approves an action class another demands an ask for
  *   - spawn-rule count: >1 bullet governing subagents
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Files are arguments so the same heuristics judge every rule file; default
- * stays AGENTS.md so `npm run lint:agents` is unchanged. Two or more files pool
+ * stays the always-on pair (AGENTS.md + SYSTEM.md) so the split is linted as one. Two or more files pool
  * their bullets, which is the only way to catch a rule restated across the
  * always-on pair. Numbered items count too: the read ladder is `1.`/`2.`/`3.`,
  * not `-`, and a bullet-only regex reported "no duplicates" over the densest
@@ -33,18 +33,18 @@ for (const a of process.argv.slice(2)) {
   if (a === '--min') min = Number(process.argv[process.argv.indexOf(a) + 1]);
   else if (!a.startsWith('--') && Number.isNaN(Number(a))) files.push(a);
 }
-if (!files.length) files.push('AGENTS.md');
+if (!files.length) files.push('AGENTS.md', 'SYSTEM.md');
 const SOURCES = files.map((f) => ({ file: f, md: readFileSync(join(ROOT, f), 'utf8') }));
-const md = SOURCES.map((s) => s.md).join('\n');
-
 const bullets = [];
 const sectioned = [];
-let section = '';
-for (const line of md.split('\n')) {
-  const head = line.match(/^#{1,6}\s+(.+)$/);
-  if (head) { section = head[1].trim(); continue; }
-  const item = line.match(/^\s*(?:[-*] |\d+\. )(.+)$/);
-  if (item) { bullets.push(item[1].trim()); sectioned.push({ section, text: item[1].trim() }); }
+for (const s of SOURCES) {
+  let section = '';
+  for (const line of s.md.split('\n')) {
+    const head = line.match(/^#{1,6}\s+(.+)$/);
+    if (head) { section = head[1].trim(); continue; }
+    const item = line.match(/^\s*(?:[-*] |\d+\. )(.+)$/);
+    if (item) { bullets.push(item[1].trim()); sectioned.push({ file: s.file, section, text: item[1].trim() }); }
+  }
 }
 const norm = (s) => s.toLowerCase().replace(/[*_`]/g, '').replace(/[^\w\s/]/g, ' ').replace(/\s+/g, ' ').trim();
 const words = (s) => new Set(norm(s).split(' ').filter((w) => w.length > 2));
@@ -82,8 +82,10 @@ for (const pre of preapproved) {
     }
   }
 }
-const spawnRules = bullets.filter((b) => /subagent/i.test(b));
-if (spawnRules.length > 1) { contradictions++; details.push({ kind: 'multi-rule', topic: 'subagents', n: spawnRules.length }); }
+for (const file of [...new Set(sectioned.map((b) => b.file))]) {
+  const spawnRules = sectioned.filter((b) => b.file === file && /subagent/i.test(b.text));
+  if (spawnRules.length > 1) { contradictions++; details.push({ kind: 'multi-rule', topic: 'subagents', n: spawnRules.length, file }); }
+}
 const styleRules = sectioned.filter((b) => /concise|caveman|filler|pleasantr|no emojis|fragments/i.test(b.text) && /communication/i.test(b.section));
 if (styleRules.length > 1) { contradictions++; details.push({ kind: 'multi-rule', topic: 'style', n: styleRules.length }); }
 
@@ -133,6 +135,20 @@ for (const { file, md: text } of SOURCES) {
   for (const [i, line] of text.split('\n').entries())
     if (REPO_ONLY.test(line) && !SCOPED.test(line))
       scope_leaks.push({ file, line: i + 1, text: line.trim().slice(0, 90) });
+}
+
+// Default-handled restatements (2026-11-17): a rule that restates a control the
+// tools/extensions/system already enforce duplicates the tooling and drifts when
+// it changes. Flag the unambiguous restatement phrasings (refusal of writes, the
+// named gates, reader-bypass); environment facts and agent-response guidance
+// stay unflagged. Advisory, like scope_leaks.
+const DEFAULT_CONTROL = /\b(?:is|are|will|would)\s+(?:silently\s+)?refused\b|refuses?\s+(?:to|the)\b|\b(?:read[- ]?gate|destructive[- ]?gate|ask[- ]?before[- ]?install|reader[- ]?bypass)\b/i;
+const default_restatements = [];
+for (const { file, md: text } of SOURCES) {
+  if (!/(?:^|\/)(?:AGENTS|SYSTEM)\.md$/.test(file)) continue;
+  for (const [i, line] of text.split('\n').entries())
+    if (DEFAULT_CONTROL.test(line))
+      default_restatements.push({ file, line: i + 1, text: line.trim().slice(0, 90) });
 }
 
 // Roster generation (2026-11-07): the Agents and Skills tables were
@@ -216,4 +232,4 @@ for (const spec of [
   tables.push({ doc: spec.doc, rows_before: rowsBefore, rows_after: rowsAfter, changed: after !== before });
 }
 
-console.log(JSON.stringify({ bullets: bullets.length, dup_pairs: dupPairs, contradictions, missing, scope_leaks, tables, details }));
+console.log(JSON.stringify({ bullets: bullets.length, dup_pairs: dupPairs, contradictions, missing, scope_leaks, default_restatements, tables, details }));

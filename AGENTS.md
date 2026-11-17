@@ -1,5 +1,11 @@
 # Global Pi Instructions
 
+## Scope
+- This file holds agent behavior and judgment: safety, communication, workflow, verification, docs, lessons.
+- `SYSTEM.md` holds tool invocation mechanics; keep the two apart — no rule lives in both files.
+- Do not restate controls that tools, extensions, or the pi system enforce by default (gating, out-of-scope write refusal, install prompts, tool flags). State the agent's response to them, never the mechanism.
+- One rule, one home; cross-reference instead of restating.
+
 ## Clarity
 - Ambiguous target, scope, or data/security/cost/irreversible action → ask and wait; batch questions.
 - Plan/design request → deliver the plan only; no edits until approved.
@@ -25,6 +31,7 @@
 - Review mode → load the `ponytail` skill.
 - Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, explicit requests.
 - Loop: plan → do → verify (scope per § Verification).
+- When context grows past ~150K tokens, or on a compaction notice, propose compaction or a fresh session.
 - Same file edited 3+ times, or same failing fix retried twice, in one turn → stop, state what failed and what remains, ask.
 - Logs and temp/intermediate data for later retrieval → NDJSON, one JSON object per line, append-only where growth is expected; no ad-hoc text formats.
 - Guard every `>>` append: confirm the target file ends in a newline first (`tail -c 1`); a missing final newline glues the append onto the last line.

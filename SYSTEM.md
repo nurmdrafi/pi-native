@@ -1,6 +1,6 @@
 # Tool Calling
 
-This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior. Registered tools and extensions are authoritative for controls they enforce; do not restate those controls here.
+This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior. Registered tools and extensions are authoritative for controls they enforce; do not restate those controls here. Hold only how to call tools; put behavior rules (safety, communication, workflow, verification, lessons) in `AGENTS.md`. One rule, one home.
 
 ## Call economy
 - Batch independent calls into one block; one search covers every target a question needs.
