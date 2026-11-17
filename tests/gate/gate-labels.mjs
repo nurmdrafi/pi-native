@@ -1,5 +1,5 @@
 const GATE_BLOCK_PREFIX =
-  /^(?:Permission Gate(?: \([^)]*\))?|Anchor Guard|Token Economy|Loop Guard|Locate-first|Phase(?: \(PH1\))?|Commitlint|Commit Message|Toolchain|Search(?:Guard| Guard)?|Destructive|Bash cap|Output scrub)(?=[:\s(]|$)/i;
+  /^(?:Permission Gate(?: \([^)]*\))?|Anchor Guard|Token Economy|Loop Guard|Locate-first|Phase(?: \(PH1\))?|Commitlint|Commit Message|Toolchain|Search(?:Guard| Guard)?\s*(?=[:(])|Destructive|Bash cap|Output scrub)(?=[:\s(]|$)/i;
 
 export const isGateBlockText = (text) => GATE_BLOCK_PREFIX.test(text.trimStart());
 

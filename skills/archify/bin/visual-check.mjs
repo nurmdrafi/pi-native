@@ -1,5 +1,5 @@
 import { softwareNoticesHtml } from '../renderers/shared/software-notices.mjs';
-import { displayPath } from '../renderers/shared/portable-path.mjs';
+import { displayPath, expandDisplayPath } from '../renderers/shared/portable-path.mjs';
 import { spawn } from 'node:child_process';
 import { isExplainerHtml } from '../explainer/check.mjs';
 import { EXPLAINER_VIEWPORTS, inspectExplainerBrowser, explainerObservation, explainerObservationDiagnostics } from '../explainer/browser-check.mjs';
@@ -709,9 +709,10 @@ function beginVisualEvidenceWrite(artifactPath, artifactBytes, outputs) {
         code: 'ownership-sidecar-path-mismatch',
       });
     }
-    if (typeof previous?.artifact?.path !== 'string'
-      || !path.isAbsolute(previous.artifact.path)
-      || sameEntry(previous.artifact.path, artifactPath).status !== 'match'
+    const previousArtifactPath = expandDisplayPath(previous?.artifact?.path);
+    if (typeof previousArtifactPath !== 'string'
+      || !path.isAbsolute(previousArtifactPath)
+      || sameEntry(previousArtifactPath, artifactPath).status !== 'match'
       || previous.artifact.sha256 !== sha256(artifactBytes)
       || previous.artifact.bytes !== artifactBytes.byteLength) {
       return evidencePathConflict(artifactPath, outputs, outputs.receipt, {

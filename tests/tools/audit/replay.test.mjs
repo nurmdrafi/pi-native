@@ -47,5 +47,8 @@ it("replays all session files and excludes native-bash-first from the bash proxy
   assert.equal(metrics.ran_ok, 1);
   assert.equal(familyOfReason("Permission Gate (Failure Loop): retry"), "Permission Gate (Failure Loop)");
   assert.equal(familyOfReason("Toolchain (Node): use the pinned version"), "Toolchain (Node)");
+  assert.equal(familyOfReason("Search (rg -r): substituted matches"), "Search (rg -r)");
+  assert.equal(familyOfReason("Search Guard (fd-first): use fd"), "Search Guard (fd-first)");
   assert.equal(familyOfReason("ordinary command error"), null);
+  assert.equal(familyOfReason("Search results were empty, try another term"), null, "prose starting with Search must not classify as a gate block");
 });

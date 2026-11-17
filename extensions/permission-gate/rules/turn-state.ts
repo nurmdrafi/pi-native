@@ -128,7 +128,9 @@ export function lg1RecordMutation(
 }
 
 /** Consecutive tool errors (bash + edit/write): note once at 3 (LG1), escalate at
- * FAILURE_LOOP_AT (R11). */
+ * FAILURE_LOOP_AT (R11). The streak crosses user turns (resetTurnParts keeps
+ * it), while the note latch resets — `>= 3` lets a streak that crossed a turn
+ * boundary still get its one note per turn instead of skipping past 3. */
 export function lg1RecordResult(
   t: TurnState,
   isError: boolean,
@@ -140,7 +142,7 @@ export function lg1RecordResult(
   if (t.lg1ErrStreak === 0) t.lg1ErrMutSeq = t.mutationSeq;
   t.lg1ErrStreak++;
   if (!ruleEnabled("loopGuard")) return undefined;
-  if (t.lg1ErrStreak === 3 && !t.lg1ErrNoted) {
+  if (t.lg1ErrStreak >= 3 && !t.lg1ErrNoted) {
     t.lg1ErrNoted = true;
     return "Loop Guard (LG1): 3 consecutive tool errors — if the same fix keeps failing, stop and ask the user instead of retrying.";
   }

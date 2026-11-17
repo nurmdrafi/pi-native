@@ -143,21 +143,29 @@ export function swallowCheck(seg: string): string | undefined {
  * - a `|`-prefixed `sed -n`/`head`/`tail` filters output a command already
  *   produced, which the shell rules allow, so only a read-position reader
  *   (start, `;`, `&&`, `||`, `do`, `then`) is flagged;
- * - `cat` used as a writer (`cat > f`, `cat >> f`, `cat <<EOF`, or bare
- *   `cat` piping stdin) reads no window, so only a `cat` with a real
- *   operand is flagged;
+ * - `cat` used as a writer (`cat > f`, `cat >> f`, `cat <<EOF`, a bare
+ *   `cat` piping stdin, or operands feeding a mid-segment `>`/`>>` such as
+ *   `cat a b > c`) reads no window, so only a `cat` with a real
+ *   operand is flagged; the same redirect exclusion covers `sed -n … > g`;
  * - `head`/`tail` flag only in the single-file view shape — see
  *   headTailReadsFile. */
 export function readerBypassCheck(cmd: string): string | undefined {
   const reason =
     "Hygiene (Reader-bypass): read file windows with piread — offset/limit for a range, hits for a search with context, 'outline --show <file> <sym>' for a unit; cat/sed/head/tail print bytes without offsets.";
   const head = String.raw`(?:^|&&|\|\||;|\bdo\b|\bthen\b)\s*`;
-  const sedReader = new RegExp(String.raw`${head}sed\s+[^|;&]*-n\b`);
-  const catReader = new RegExp(String.raw`${head}cat\s+(?![<>|])`);
+  const seg = String.raw`[^|;&]*`;
+  const sedReader = new RegExp(String.raw`${head}(sed\s+${seg}-n\b${seg})`, "g");
+  const catReader = new RegExp(String.raw`${head}(cat\s+(?![<>|])${seg})`, "g");
   const pipedCat = /\|\s*cat\s+(?![<>|])/;
+  // A `>`/`>>` after the operands (not `2>`/`&>` stderr forms) makes the
+  // segment a writer (`cat a b > c` concatenates, `sed -n 1,5p f > g` extracts)
+  // — there is no piread window to name, so the segment is not a read.
+  const writesOutput = (s: string) => /(?<![\d&])>{1,2}[^>]/.test(s) || /(?<![\d&])>>$/.test(s);
   const viewReader = new RegExp(String.raw`${head}((?:head|tail)\b[^|;&]*)`, "g");
   const headTailReader = [...cmd.matchAll(viewReader)].some((m) => headTailReadsFile(m[1] ?? ""));
-  return sedReader.test(cmd) || catReader.test(cmd) || pipedCat.test(cmd) || headTailReader
+  const readsSegment = (re: RegExp) =>
+    [...cmd.matchAll(re)].some((m) => !writesOutput(m[1] ?? ""));
+  return readsSegment(sedReader) || readsSegment(catReader) || pipedCat.test(cmd) || headTailReader
     ? reason
     : undefined;
 }

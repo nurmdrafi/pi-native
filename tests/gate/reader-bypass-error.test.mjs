@@ -49,6 +49,9 @@ const allowed = [
   ["a piped sed filter", `printf 'x\\n' | sed -n '1,1p'`],
   ["a cat write", `printf 'x\\n' | cat > ${FILE}.out`],
   ["jq", `jq -r '.name' ${FILE}`],
+  ["a concatenation write", `cat ${FILE} ${FILE} > ${FILE}.out`],
+  ["an append write", `cat ${FILE} >> ${FILE}.out`],
+  ["a sed extract write", `sed -n '1,2p' ${FILE} > ${FILE}.out`],
 ];
 
 for (const [shape, command] of allowed) {

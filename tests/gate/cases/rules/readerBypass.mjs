@@ -51,6 +51,21 @@ export const cases = [
     async (pi) => bash(pi, "rg -n foo src/ | sed 's/foo/bar/' | head -5"),
   ],
   [
+    "SE2: a concatenation write (cat a b > out) reads no window",
+    "pass",
+    async (pi) => bash(pi, `cat ~/.pi/agent/README.md ~/.pi/agent/CHANGELOG.md > /tmp/combined.md`),
+  ],
+  [
+    "SE2: an append write (cat a >> out) reads no window",
+    "pass",
+    async (pi) => bash(pi, `cat ~/.pi/agent/README.md >> /tmp/combined.md`),
+  ],
+  [
+    "SE2: a sed extract write (sed -n ... f > g) is not a read",
+    "pass",
+    async (pi) => bash(pi, `sed -n '1,5p' ~/.pi/agent/README.md > /tmp/first-five.md`),
+  ],
+  [
     "SE2: pipeline-stage sed -n filtering produced output is not flagged",
     "pass",
     async (pi) => bash(pi, "rg -n foo src/ | sed -n '1,5p'"),

@@ -76,6 +76,14 @@ export function displayPath(file) {
   return home && abs.startsWith(home + path.sep) ? `~${abs.slice(home.length)}` : abs;
 }
 
+/** Inverse of displayPath for machine-read receipt fields: a leading `~/`
+ * resolves back to the absolute path it was derived from. */
+export function expandDisplayPath(value) {
+  if (typeof value !== 'string' || !value.startsWith('~/')) return value;
+  const home = process.env.HOME;
+  return home ? path.join(home, value.slice(2)) : value;
+}
+
 export function validatePortablePath(value, options = {}) {
   const profile = options?.profile;
   assertProfile(profile);

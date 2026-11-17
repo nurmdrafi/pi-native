@@ -21,7 +21,6 @@ Read-only: no files are written.
 
 import json
 import os
-import os
 import re
 import subprocess
 import sys
