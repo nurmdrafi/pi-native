@@ -129,7 +129,7 @@ test("rule IDs are unique", () => {
 // disabled, and locate-first certification disabled 2026-11-04 c4eaa82).
 // Everything else ships warn/error; an off outside this list is
 // config drift the test below catches.
-const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "locateFirst"];
+const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "locateFirst", "destructiveConfirm"];
 
 test("tracked config.json loads every rule at warn or error (explicit off allowlist)", () => {
   const { config } = loadConfig();
@@ -327,7 +327,7 @@ test("ruleEnabled/ruleBlocks expose the warn-vs-error distinction", () => {
     import { ruleEnabled, ruleBlocks } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({
       warn: [ruleEnabled("rerunGuard"), ruleBlocks("rerunGuard")],
-      error: [ruleEnabled("destructiveConfirm"), ruleBlocks("destructiveConfirm")],
+      error: [ruleEnabled("commitMessageLint"), ruleBlocks("commitMessageLint")],
     }));
   `;
   const res = runLoader(script);
@@ -410,9 +410,14 @@ test("R1x error tier: PGATE_RE_READ_CONSUME=2 blocks a >=50% overlap re-read at 
 test("safety rules cannot be configured away", () => {
   // editAnchorGuard left HARD_RULES 2026-10-28: the edit pipeline enforces
   // oldText correctness, so AG is config-controlled teaching, not a clamp.
+  // destructiveConfirm left HARD_RULES 2026-11-17 by user direction
+  // (global allow-all): it is config-controlled like every other rule —
+  // re-arm via config.json H2 or PGATE_H2=error. commitMessageLint stays floored.
   const { config } = loadConfig({}, { editAnchorGuard: "off", destructiveConfirm: "off" });
   assert.equal(config.severity.editAnchorGuard, "off", "anchor guard is config-controlled (demoted from hard)");
-  assert.equal(config.severity.destructiveConfirm, "error", "destructive confirm must not be disableable");
+  assert.equal(config.severity.destructiveConfirm, "off", "destructive confirm is config-controlled (demoted from hard)");
+  const floored = loadConfig({}, { commitMessageLint: "off" });
+  assert.equal(floored.config.severity.commitMessageLint, "error", "commit message lint must not be disableable");
 });
 
 test("rule IDs match the documented README rule table", () => {

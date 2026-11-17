@@ -442,7 +442,8 @@ export default function (pi: ExtensionAPI) {
    * session cwd; a target landing outside it (realpath where resolvable, so
    * an in-cwd symlink cannot launder the escape) confirms through the H2
    * ladder (the destructiveConfirm rule — the same switch that arms the
-   * protected-prefix confirm, a safety floor that cannot ship below error),
+   * protected-prefix confirm; config-controlled since 2026-11-17, user
+   * direction, shipped off — see config.json H2),
    * and a piwrite overwrite of an EXISTING file confirms too — silent
    * overwrite is the finding's failure class — but only while WB's
    * configured severity is off; with the binding active WB owns overwrites

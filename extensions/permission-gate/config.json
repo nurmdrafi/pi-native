@@ -1,5 +1,5 @@
 {
-  "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: destructiveConfirm and commitMessageLint cannot be configured below \"error\". Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names — either spelling works in `rules` (`editRegionGuard` or `AG2`); entries below use the IDs. outputCap/confirm/destructive tune numeric limits and the confirm command list. The docs object maps every rule ID to a one-line description — advisory, never parsed.",
+  "_comment": "Permission-gate rule severities — this file is the single control surface; no severity decisions live in code. Per rule: \"off\" = silent, \"warn\" = note and proceed, \"error\" = block. Legacy values still parse: 0/1/2 and true/false. A key that is missing or set to garbage fails closed to \"error\" with a stderr warning. One-off override without editing: PGATE_<SCREAMING_SNAKE_KEY>=off|warn|error (e.g. PGATE_RERUN_GUARD=off). Safety floor: commitMessageLint cannot be configured below \"error\"; destructiveConfirm left the floor 2026-11-17 by user direction (global allow-all) and ships \"off\" — re-arm here or with PGATE_H2=error. Rule IDs (R1, P3, ...) are the internal cross-reference used in source comments and the README rule table; keys here are the stable, human-readable names — either spelling works in `rules` (`editRegionGuard` or `AG2`); entries below use the IDs. outputCap/confirm/destructive tune numeric limits and the confirm command list. The docs object maps every rule ID to a one-line description — advisory, never parsed.",
 
   "rules": {
     "AG": "off",
@@ -16,7 +16,7 @@
     "H1": "error",
     "H1b": "error",
     "OS": "error",
-    "H2": "error",
+    "H2": "off",
     "R9": "error",
     "R10": "warn",
     "RB": "error",
@@ -50,7 +50,7 @@
     "H1": "Bash (output cap): non-blocking — output capped at 40 lines / 2KB, full text spilled to $TMPDIR/pgate-spill with a pointer.",
     "H1b": "Reads (output cap): non-blocking — read results over 300 lines / 8KB truncate to head, full text spilled.",
     "OS": "Bash (output scrub): lossless-or-labeled compaction before the H1 cap — ANSI stripped, passing tests aggregated, failures kept verbatim.",
-    "H2": "Bash (destructive confirm): sudo, rm, forced git, installs, DB drops need approval; safety floor — cannot go below 'error'.",
+    "H2": "Bash (destructive confirm): sudo, rm, forced git, installs, DB drops would need approval; config-controlled since 2026-11-17, ships 'off'.",
     "R9": "Git (commit lint): git commit -m checked against the commitlint pattern; safety floor — cannot go below 'error'.",
     "R10": "Bash (re-run): identical re-run <=10 min after its last success with no intervening mutation blocks.",
     "RB": "Bash (reblock): verbatim re-send of a just-blocked command escalates with a dedicated reason.",

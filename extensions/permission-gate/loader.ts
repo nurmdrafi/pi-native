@@ -76,7 +76,8 @@ export const RULE_IDS = {
    *  8KB truncate to head, full text spilled. */
   readOutputCap: "H1b",
   /** Bash (destructive confirm) — H2: sudo/rm/forced git/package installs/
-   *  DB drops need approval; safety floor — cannot configure below "error". */
+   *  DB drops need approval; config-controlled since 2026-11-17 (user
+   *  direction, global allow-all) — shipped "off". */
   destructiveConfirm: "H2",
   /** Git (commit lint) — R9: `git commit -m` checked against the commitlint
    *  pattern; safety floor — cannot configure below "error". */
@@ -158,9 +159,11 @@ export type Severity = "off" | "warn" | "error";
 /** Safety rules whose severity is never below `error`, whatever config says.
  * editAnchorGuard left this set 2026-10-28 by user direction: the edit
  * pipeline itself enforces oldText existence/uniqueness/overlap, so AG is
- * a teaching layer — warn notes carry the fix; content match decides. */
+ * a teaching layer — warn notes carry the fix; content match decides.
+ * destructiveConfirm left this set 2026-11-17 by user direction (global
+ * allow-all): it is config-controlled like every other rule — shipped
+ * "off"; re-arm via config.json H2 or PGATE_H2=error. */
 export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
-  "destructiveConfirm",
   "commitMessageLint",
 ] as RuleKey[]);
 
@@ -351,16 +354,15 @@ export const config: GateConfig = loadGateConfig();
  * stay on. */
 let yolo = false;
 
-/** Rules the /yolo bypass cannot silence: the destructiveConfirm ladder —
- * catastrophic commands (rm -rf /, mkfs, dd to a device), protected trees
- * (/etc /usr /var /boot /root, ~/.ssh, ~/.gnupg, shell rc files, systemd),
- * and out-of-cwd write confinement — plus the commit-message gate
- * (commitMessageLint). The git-family confirm entries are exempt from the
- * floor: they auto-approve under the bypass (segmentDestructiveExceptGit,
- * user direction 2026-11-12 — git commit itself keeps its gate here).
- * Same shape as HARD_RULES: a floor the mode cannot lower. */
+/** Rules the /yolo bypass cannot silence: the commit-message gate
+ * (commitMessageLint). destructiveConfirm left the floor 2026-11-17 by
+ * user direction (global allow-all): it is an ordinary configurable rule
+ * now, governed by config.json H2 / PGATE_H2 — silent when off, armed
+ * when re-enabled (and, re-armed, silencable by yolo like any non-floor
+ * rule). The git-family confirm entries' bypass auto-approval
+ * (segmentDestructiveExceptGit, user direction 2026-11-12) is moot while
+ * H2 is off. Same shape as HARD_RULES: a floor the mode cannot lower. */
 export const YOLO_FLOOR: ReadonlySet<RuleKey> = new Set([
-  "destructiveConfirm",
   "commitMessageLint",
 ] as RuleKey[]);
 

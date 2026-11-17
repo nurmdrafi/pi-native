@@ -297,9 +297,10 @@ async function runGateChild(wbOff) {
     }
   }
 
-  // g11 — yolo auto-approves the git-family confirm entries (user
-  // direction 2026-11-12) while the non-git destructive floor and the
-  // normal-mode confirm stay armed
+  // g11 — yolo silences every non-floor rule (2026-11-17: destructiveConfirm
+  // left YOLO_FLOOR by user direction, global allow-all): the fixture keeps
+  // H2 at error for this suite, so normal mode still confirms; under yolo
+  // the whole H2 family silences — git-family and non-git alike
   {
     const loader = await import("../../extensions/permission-gate/loader.ts");
     const git = "git reset --hard HEAD~1";
@@ -311,7 +312,7 @@ async function runGateChild(wbOff) {
       const g = await bash(git, inCwd);
       check("g11 yolo: git-family ask is auto-approved", g === "bash ok", g);
       const d = await bash(rmf, inCwd);
-      check("g11 yolo: non-git destructive still confirms", d.startsWith("BLOCKED: Permission Gate (Destructive)"), d);
+      check("g11 yolo: non-git destructive is silenced too (H2 left the floor)", d === "bash ok", d);
     } finally {
       loader.setYolo(false);
     }
