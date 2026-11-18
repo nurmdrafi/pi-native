@@ -13,6 +13,7 @@ import {
   copyFileSync,
   unlinkSync,
   statSync,
+  realpathSync,
 } from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -1755,9 +1756,18 @@ function buildSubagentToolAllowlist(
 
   const grantSpawning = opts?.grantSpawning ?? false;
 
-  // No explicit tool restriction and no spawning grant → don't pass --tools at
-  // all (the child keeps its default toolset).
-  if (requested.length === 0 && !grantSpawning) return null;
+  // `tools: all` (trimmed, case-insensitive, single token) is the ONLY
+  // unrestricted route: return null so the child keeps its full default
+  // toolset. The launch call site warns when this explicit grant is chosen.
+  if (requested.length === 1 && requested[0].toLowerCase() === "all") return null;
+
+  // Audit A10 (2026-11-18) — deny-by-default: an undeclared/empty `tools:`
+  // used to produce an unrestricted child (null allowlist). It now yields the
+  // control-tools-only allowlist — the child can run nothing except the
+  // control lane (ask_question). `tools: all` above is the only unrestricted
+  // route; fork clones bypass this function by design (applySandboxToParts
+  // replays a null loadout as intentionally unrestricted).
+  if (requested.length === 0 && !grantSpawning) return [...SUBAGENT_CONTROL_TOOLS].join(",");
 
   const allow = new Set(requested);
   if (grantSpawning) {
@@ -1808,7 +1818,8 @@ function applySandboxToParts(
 
   // Default-deny: disable global extension discovery and re-enable only the
   // extensions backing the whitelisted tools. A null allowlist means the spawn
-  // was intentionally unrestricted (e.g. a fork clone) and is replayed as-is.
+  // was intentionally unrestricted (a `tools: all` declaration or a fork-clone
+  // replay) and is replayed as-is.
   if (loadout.toolAllowlist) {
     parts.push("--no-extensions");
     parts.push("--tools", shellEscape(loadout.toolAllowlist));
@@ -1852,6 +1863,28 @@ function applySandboxToParts(
     // surface, never to skip silently — env entry or shipped default alike.
     for (const miss of dropped) {
       reportDiagnostic(`[pi-subagents] PI_SUBAGENT_EXTRA_EXTENSIONS entry not found, dropping: ${miss}`);
+    }
+    // Phase 4 (audit A3): a parent that runs the permission gate must not
+    // silently spawn a sandboxed child without it. The parent's gate is the
+    // config-dir default (getAgentConfigDir); if it exists but no resolved
+    // -e path (override entry or tool-manifest extension) carries it, fail
+    // the spawn instead of closing F3's silent lane with a warning alone.
+    const normPath = (p: string): string => {
+      try {
+        return existsSync(p) ? realpathSync(p) : resolve(p);
+      } catch {
+        return resolve(p);
+      }
+    };
+    const gateDirRaw = join(getAgentConfigDir(), "extensions", "permission-gate");
+    const gateDir = normPath(gateDirRaw);
+    const carried = [...extPaths, ...kept].map(normPath);
+    if (existsSync(gateDirRaw) && !carried.includes(gateDir)) {
+      throw new Error(
+        `[pi-subagents] refusing to spawn a gateless child: the parent's permission gate ` +
+          `(${gateDir}) is not in the resolved extension set. ` +
+          `Re-add the gate path to PI_SUBAGENT_EXTRA_EXTENSIONS or unset the override.`,
+      );
     }
     for (const extPath of kept) {
       if (!extPaths.has(extPath) && existsSync(extPath)) parts.push("-e", shellEscape(extPath));
@@ -3031,6 +3064,13 @@ async function launchSubagent(
   // the extensions backing the whitelisted tools. Bare/fork spawns with no tool
   // restriction keep their full default toolset and all global extensions.
   const toolAllowlist = buildSubagentToolAllowlist(effectiveTools, { grantSpawning });
+  // An unrestricted child must never spawn silently: `tools: all` is the one
+  // explicit opt-out of the deny-by-default loadout (audit A10, 2026-11-18).
+  if (toolAllowlist === null && (effectiveTools ?? "").trim().toLowerCase() === "all") {
+    reportDiagnostic(
+      `[pi-subagents] subagent "${params.name}" (agent "${params.agent ?? "adhoc"}") launched UNRESTRICTED: definition declares tools: all — no --tools sandbox, the child keeps its full default toolset`,
+    );
+  }
 
   // Snapshot the fully-resolved sandbox beside the session file so a later
   // `subagent_message({ name })` resume can replay the exact same

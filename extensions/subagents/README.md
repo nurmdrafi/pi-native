@@ -121,6 +121,12 @@ environment unfiltered. The permission-gate extension rides along by default
 `PI_SUBAGENT_EXTRA_EXTENSIONS` (colon-separated paths) replaces that default
 rather than adding to it — omit the gate path and the child runs ungated.
 
+The allowlist is deny-by-default: a definition without a `tools:` line gets
+the control lane only (`ask_question`) — the child can call nothing else.
+`tools: all` is the one explicit unrestricted route (no `--tools` sandbox;
+the spawn logs a warning naming the agent), and top-level fork clones keep
+their unrestricted replay contract by design.
+
 Inside the child only the `tools:` list is enforced; the role prompt and a
 heuristic pattern filter over command text (git writes, installers) only
 discourage writes — the filter inspects neither heredoc bodies nor run-by-path

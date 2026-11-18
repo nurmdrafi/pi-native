@@ -38,6 +38,7 @@ import {
 } from "fs";
 import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
 import { toLF, validateEditAnchors } from "./rules/anchor-guard.ts";
@@ -314,6 +315,31 @@ export default function (pi: ExtensionAPI) {
   /** H2/chat (2026-10-11): the latest user message approved destructive work —
    * counts as approval for the turn it arrived in (single ask; see APPROVAL_RE) */
   let promptApproves = false;
+  /** A2 (2026-11-18): the gate's own tree is control plane — write/edit into
+   * extensions/permission-gate/** requires a chat affirmative that names gate
+   * maintenance, so a self-modify cannot ride a generic "yes". */
+  let lastUserPrompt = "";
+  const GATE_TREE = dirname(fileURLToPath(import.meta.url));
+  const gateMaintenanceNamed = () =>
+    APPROVAL_RE.test(lastUserPrompt) && /gate\s+maintenance/i.test(lastUserPrompt);
+  const inGateTree = (abs: string): boolean => {
+    if (!abs) return false;
+    let real = abs;
+    try {
+      real = realpathSync(abs);
+    } catch {
+      try {
+        real = join(realpathSync(dirname(abs)), basename(abs));
+      } catch {
+        return false;
+      }
+    }
+    return real === GATE_TREE || real.startsWith(GATE_TREE + "/");
+  };
+  const controlPlaneBlock = (tool: string, abs: string) =>
+    blockCall(
+      `Permission Gate (Control plane): ${tool} into the permission-gate tree needs chat approval naming gate maintenance (e.g. "yes, approve gate maintenance").`,
+    );
 
   /**
    * A block returns the reason to the model; nothing is persisted. Session
@@ -630,6 +656,7 @@ export default function (pi: ExtensionAPI) {
   on("before_agent_start", (event) => {
     turn.turnsSeen++;
     const prompt = event.messageType === "user" ? event.prompt : "";
+    lastUserPrompt = prompt;
     promptApproves = APPROVAL_RE.test(prompt);
     // LG1: a new user turn is the loop boundary — churn/error counters reset
     lg1Reset();
@@ -648,6 +675,9 @@ export default function (pi: ExtensionAPI) {
       const path = normPath(event.input.path, ctx?.cwd);
       const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);
+      // A2: control-plane floor — gate-tree edits need the maintenance phrase
+      if (ruleEnabled("destructiveConfirm") && inGateTree(path) && !gateMaintenanceNamed())
+        return controlPlaneBlock("edit", path);
       // S4 fix 8: symlink-resolved protected targets confirm through the
       // same H2 ladder as destructive bash — a write into <fake-home>/.ssh
       // via an in-cwd link must never land silently
@@ -925,6 +955,9 @@ export default function (pi: ExtensionAPI) {
       const path = normPath(event.input.path, ctx?.cwd);
       const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);
+      // A2: control-plane floor — gate-tree writes need the maintenance phrase
+      if (ruleEnabled("destructiveConfirm") && inGateTree(path) && !gateMaintenanceNamed())
+        return controlPlaneBlock("write", path);
       // S4 fix 8: same symlink-resolved protected-path confirm as edit
       const prot = ruleEnabled("destructiveConfirm")
         ? protectedPathReason("write", path)
@@ -1817,6 +1850,27 @@ export default function (pi: ExtensionAPI) {
     searchHits.clear();
     tmpWriteTargets.clear();
     warnEscalation.clear();
+    // A3 (2026-11-18): hash config.json + loader.ts; a drift vs the last
+    // session warns in-context before the first tool call — a silent control-
+    // plane edit must not arm unannounced. Best-effort: an unreadable state
+    // file never blocks the session.
+    try {
+      const statePath = join(GATE_TREE, "../../.cache/permission-gate-state.json");
+      const sha = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
+      const cur = sha(join(GATE_TREE, "config.json")) + sha(join(GATE_TREE, "loader.ts"));
+      mkdirSync(dirname(statePath), { recursive: true });
+      const prev = existsSync(statePath)
+        ? (JSON.parse(readFileSync(statePath, "utf8")) as { gateFiles?: string })
+        : undefined;
+      if (prev?.gateFiles && prev.gateFiles !== cur)
+        ctx?.ui?.notify?.(
+          "permission-gate: config.json/loader.ts changed since the last session — review before trusting the gate",
+          "warning",
+        );
+      writeFileSync(statePath, JSON.stringify({ gateFiles: cur, ts: Date.now() }));
+    } catch {
+      /* best-effort drift check */
+    }
     turn.lastBlockedBash = undefined;
     turn.turnsSeen = 0;
     turn.cadenceFired = false;

@@ -36,11 +36,11 @@ Phase = plan.md phases. Tick only after its test passes.
 - [x] reader-bypass-escalation.mjs green
 
 ## Phase 4 — Control-plane protection (A2/A3)
-- [ ] Failing test: piwrite to config.json blocked without affirmative
-- [ ] Gate-file write/edit/redirect guard implemented
-- [ ] session_start config/loader hash drift warning + test
-- [ ] Spawn without gate in resolved extensions → hard fail + test
-- [ ] security-canary scene extended, green
+- [x] Failing test: piwrite to config.json blocked without affirmative
+- [x] Gate-file write/edit/redirect guard implemented
+- [x] session_start config/loader hash drift warning + test
+- [x] Spawn without gate in resolved extensions → hard fail + test
+- [x] security-canary scene extended, green
 
 ## Phase 5 — Subagent briefs (A14)
 - [x] Spawn preamble carries gate composition recipe + no-destructive policy
@@ -55,11 +55,11 @@ Phase = plan.md phases. Tick only after its test passes.
 - [ ] security-toctou scene green
 
 ## Phase 7 — Deny-by-default loadout (A10)
-- [ ] Failing test: agent definition without `tools:` → empty allowlist
-- [ ] Failing test: `tools: all` → unrestricted + spawn warning
-- [ ] Mechanism flip in subagents/index.ts:1750-1751
-- [ ] Migration scan: bundled/global/project agents missing `tools:` fixed
-- [ ] Fork-clone unrestricted contract documented
+- [x] Failing test: agent definition without `tools:` → empty allowlist
+- [x] Failing test: `tools: all` → unrestricted + spawn warning
+- [x] Mechanism flip in subagents/index.ts:1750-1751
+- [x] Migration scan: bundled/global/project agents missing `tools:` fixed
+- [x] Fork-clone unrestricted contract documented
 
 ## Definition of done
 All tests green (`npm run gate:eval`, tests/gate suite); CHANGELOG entry;

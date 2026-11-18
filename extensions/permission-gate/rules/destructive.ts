@@ -7,7 +7,9 @@
  * determined rewrite escapes it. AGENTS.md discipline and the user's eyes are
  * the actual boundary. */
 import { homedir } from "os";
+import { join, dirname } from "path";
 import { realpathSync } from "fs";
+import { fileURLToPath } from "url";
 import { config } from "../loader.ts";
 
 
@@ -218,6 +220,19 @@ const EVAL_ENCODED = /\beval\b[^|;&]*(?:\$\(|`)/;
  * ~/.gnupg/, ~/.config/systemd/. */
 let ppHome = "";
 let ppRe: RegExp | undefined;
+/** A2 (2026-11-18): the gate's own tree is protected control plane — writes,
+ * edits, and bash redirects into extensions/permission-gate confirm like any
+ * protected path, closing the self-modify seam where a config.json edit
+ * armed on the next process. The write/edit lanes additionally require the
+ * chat phrase "gate maintenance" (index.ts) — the redirect lane asks through
+ * the ordinary H2 ladder. */
+const GATE_DIR = (() => {
+  try {
+    return realpathSync(join(dirname(fileURLToPath(import.meta.url)), ".."));
+  } catch {
+    return "";
+  }
+})();
 export const PROTECTED_PREFIX_RE = {
   test(p: string): boolean {
     // Compare in realpath space. Callers pass an already-realpathed target, so
@@ -243,7 +258,8 @@ export const PROTECTED_PREFIX_RE = {
         String.raw`/\.config/systemd/`;
       ppRe = new RegExp(
         String.raw`^(?:/etc|/usr|/var|/boot|/root)(?:/|$)` +
-          homes.map((h) => String.raw`|^` + h + suffix).join(""),
+          homes.map((h) => String.raw`|^` + h + suffix).join("") +
+          (GATE_DIR ? String.raw`|^` + GATE_DIR.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`) + String.raw`(?:/|$)` : ""),
       );
     }
     return ppRe.test(p);
