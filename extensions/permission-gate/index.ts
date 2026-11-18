@@ -304,6 +304,13 @@ export default function (pi: ExtensionAPI) {
 
   /** H2: last user-approved destructive command (verbatim) + when */
   let lastApprovedDestructive: { cmd: string; ts: number } | undefined;
+  /** A15 (2026-11-18): session-scoped warn counter per rule family — a warn
+   * ignored three times in one session promotes to a block (behavior-change
+   * loop; 2026-11-18 taxonomy: 21% of blocks ended in partial compliance and
+   * warns were dead letters). Reset at session_start like the rest. */
+  const warnEscalation = new Map<string, number>();
+  const ESCALATE_AT = 3;
+  const ESCALATABLE = new Set(["readerBypass", "searchMidPipe", "findFirst"] as const);
   /** H2/chat (2026-10-11): the latest user message approved destructive work —
    * counts as approval for the turn it arrived in (single ask; see APPROVAL_RE) */
   let promptApproves = false;
@@ -347,8 +354,17 @@ export default function (pi: ExtensionAPI) {
     key: Parameters<typeof ruleSeverity>[0],
     reason: string,
     id?: string,
-  ): { block: true; reason: string } | undefined =>
-    ruleBlocks(key) ? blockCall(reason) : ruleEnabled(key) ? warnCall(reason, id) : undefined;
+  ): { block: true; reason: string } | undefined => {
+    if (ruleBlocks(key)) return blockCall(reason);
+    if (!ruleEnabled(key)) return undefined;
+    if (ESCALATABLE.has(key as never)) {
+      const n = (warnEscalation.get(key) ?? 0) + 1;
+      warnEscalation.set(key, n);
+      if (n >= ESCALATE_AT)
+        return blockCall(`${reason} [${n === 3 ? "3rd" : `${n}th`} this session — warns block]`);
+    }
+    return warnCall(reason, id);
+  };
   // S4 fix 1 (2026-10-15, spec §5.2): fail-closed handler wrap — an unexpected
   // exception in ANY handler must never fail open. tool_call → generic internal
   // block (the call never runs; a rejected handler otherwise lets the tool
@@ -559,8 +575,9 @@ export default function (pi: ExtensionAPI) {
     }
     logDecision("block", key);
     return (
-      `Permission Gate (Destructive): ${subject} needs the user's approval ` +
-      `first — ${ctx?.hasUI ? "the user declined" : "no chat approval, no confirm dialog"}; ask in chat and wait. Never run it unprompted.`
+      `Permission Gate (Destructive): ${subject} needs user approval ` +
+      `first — ${ctx?.hasUI ? "the user declined" : "no approval yet"} — ` +
+      `ask in chat (yes), wait; never reroute; edits: piedit/piwrite.`
     );
   };
 
@@ -1799,6 +1816,7 @@ export default function (pi: ExtensionAPI) {
     pendingSearchCalls.clear();
     searchHits.clear();
     tmpWriteTargets.clear();
+    warnEscalation.clear();
     turn.lastBlockedBash = undefined;
     turn.turnsSeen = 0;
     turn.cadenceFired = false;

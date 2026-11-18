@@ -27,13 +27,13 @@ Phase = plan.md phases. Tick only after its test passes.
 - [x] security-fixture corpus extended (bash-block.txt additions)
 
 ## Phase 3 — Teach + escalate + composition (A4/A8/A15)
-- [ ] Failing test: SE2/SS2/SS3 messages carry composition recipe
-- [ ] jq single-operand read whitelist under size bound + test
-- [ ] Destructive-block message carries ask-route recipe (affirmative phrasing) + test
-- [ ] Mutation-need recipe names piedit/piwrite, never heredoc rewrites
-- [ ] Same-session warn counter; N=3 promotion to block + test
-- [ ] Dash-path hint in SS messages
-- [ ] reader-bypass-escalation.mjs green
+- [x] Failing test: SE2/SS2/SS3 messages carry composition recipe
+- [x] jq single-operand read whitelist under size bound + test
+- [x] Destructive-block message carries ask-route recipe (affirmative phrasing) + test
+- [x] Mutation-need recipe names piedit/piwrite, never heredoc rewrites
+- [x] Same-session warn counter; N=3 promotion to block + test
+- [x] Dash-path hint in SS messages
+- [x] reader-bypass-escalation.mjs green
 
 ## Phase 4 — Control-plane protection (A2/A3)
 - [ ] Failing test: piwrite to config.json blocked without affirmative
