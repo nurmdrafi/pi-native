@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   splitSegments,
   normalizeSegment,
@@ -7,6 +9,10 @@ import {
   segmentDestructiveExceptGit,
   tmpWriteTargetsOf,
   executesRecordedTmpTarget,
+  protectedWrittenTargetOf,
+  protectedCopyTargetOf,
+  copyTargetOf,
+  approvalIn,
 } from "../../extensions/permission-gate/rules/destructive.ts";
 
 /** H2 destructive-confirm predicate exactly as the gate applies it to a
@@ -267,4 +273,146 @@ test("W2E: the writing command itself never self-hits", () => {
     ),
     undefined,
   );
+});
+
+// ---- 2026-11-18 code review (findings 1-4, 6): control-plane relative and
+// copy lanes, prefixed execution, body-vocabulary shapes, heredoc tags ----
+const GATE_CWD = fileURLToPath(new URL("../../", import.meta.url));
+
+test("R1: relative redirect/tee into the gate tree is a protected write target", () => {
+  assert.ok(
+    protectedWrittenTargetOf(
+      "echo x > extensions/permission-gate/config.json",
+      GATE_CWD,
+    ),
+  );
+  assert.ok(
+    protectedWrittenTargetOf(
+      "sed s/x/y/g extensions/permission-gate/config.json | tee extensions/permission-gate/config.json.new",
+      GATE_CWD,
+    ),
+  );
+  // absolute spelling hits without any cwd help
+  assert.ok(
+    protectedWrittenTargetOf(
+      `echo x > ${join(GATE_CWD, "extensions/permission-gate/config.json")}`,
+      "/tmp",
+    ),
+  );
+  assert.equal(protectedWrittenTargetOf("echo x > src/x.ts", GATE_CWD), undefined);
+  // same relative spelling from an unrelated cwd resolves away from the tree
+  assert.equal(
+    protectedWrittenTargetOf("echo x > extensions/permission-gate/config.json", "/tmp"),
+    undefined,
+  );
+});
+
+test("R2: cp/mv/install/rsync into the gate tree is a protected copy target", () => {
+  for (const cmd of [
+    "cp evil.json extensions/permission-gate/config.json",
+    "mv evil.json extensions/permission-gate/config.json",
+    "install -m644 evil.json extensions/permission-gate/config.json",
+    "rsync -a evil.json extensions/permission-gate/",
+    "sudo cp evil.json extensions/permission-gate/config.json",
+  ]) {
+    assert.ok(protectedCopyTargetOf(cmd, GATE_CWD), cmd);
+  }
+  assert.equal(protectedCopyTargetOf("cp a b", GATE_CWD), undefined);
+  assert.equal(
+    protectedCopyTargetOf("cp evil.json extensions/permission-gate/config.json", "/tmp"),
+    undefined,
+  );
+  assert.equal(protectedCopyTargetOf("cat evil.json", GATE_CWD), undefined);
+});
+
+test("R3: env- or wrapper-prefixed execution of a recorded /tmp target hits", () => {
+  const rec = recorded("echo 'x' > /tmp/fp.js");
+  assert.equal(
+    executesRecordedTmpTarget(splitSegments("FOO=1 /tmp/fp.js"), rec),
+    "/tmp/fp.js",
+  );
+  assert.equal(executesRecordedTmpTarget(splitSegments("sudo /tmp/fp.js"), rec), "/tmp/fp.js");
+  assert.equal(executesRecordedTmpTarget(splitSegments("exec /tmp/fp.js"), rec), "/tmp/fp.js");
+  // non-recorded paths still never hit
+  assert.equal(executesRecordedTmpTarget(splitSegments("sudo node src/x.ts"), rec), undefined);
+});
+
+test("R4: argument-less rm/unlink mentions in inline bodies stay allowed", () => {
+  // word with NO following argument is prose (accepted-FP note: `rm <arg>` in
+  // prose still confirms — embedded-shell deletion shapes look identical)
+  assert.equal(confirms(`node -e 'console.log("rm")'`), false);
+  assert.equal(confirms(`node -e 'console.log("flags: rm, unlink, rmdir")'`), false);
+  // code shapes still confirm
+  assert.equal(confirms(`node -e 'fs.rm("x")'`), true);
+  assert.equal(confirms(`node -e 'fs.promises.rm("x",{recursive:true})'`), true);
+  assert.equal(confirms(`node -e 'fs.rmSync("x",{recursive:true})'`), true);
+  assert.equal(confirms(`node -e 'rmSync("x")'`), true);
+  assert.equal(confirms(`perl -e 'unlink "canary"'`), true);
+  assert.equal(confirms(`perl -e 'unlink $f'`), true);
+  assert.equal(confirms(`python3 -c 'import os; os.unlink("x")'`), true);
+  assert.equal(confirms(`python3 -c 'shutil.rmtree("x")'`), true);
+  assert.equal(confirms(`python3 -c 'import os; os.remove("x")'`), true);
+  assert.equal(confirms(`awk 'BEGIN {system("rm canary")}'`), true);
+});
+
+test("R5: heredoc delimiter named like an interpreter stays data", () => {
+  assert.equal(
+    confirms("cat <<node\nThe docs warn about shutil.rmtree misuse.\nnode"),
+    false,
+  );
+});
+
+// ---- Phase 6 (audit A12): negation-hardened approval matching ----
+// An affirmative in the shadow of a negation is a refusal: "don't proceed",
+// "no, do not run it", "not approved" must NOT arm promptApproves. The
+// pre-scan voids a match whose clause (text since the last sentence
+// boundary) contains a negation word before it; other matches still count.
+test("A12: negated affirmatives do not approve", () => {
+  for (const p of [
+    "don't proceed",
+    "Don't proceed with the deploy.",
+    "no, do not run it",
+    "not approved",
+    "That is not approved — stop.",
+    "I won't say yes to this",
+    "never approve that",
+  ]) {
+    assert.equal(approvalIn(p), false, JSON.stringify(p));
+  }
+});
+
+// Design note: the scan voids affirmatives PRECEDED by a negation (the
+// audit's failing shapes). A refusal that FOLLOWS a clean affirmative
+// ("do it? no") keeps the approval — qualifier-first approval like
+// "yes proceed, not the other file" must still pass.
+
+test("A12: clean affirmatives still approve", () => {
+  for (const p of [
+    "yes",
+    "yes, run the deploy now",
+    "Please proceed",
+    "approved",
+    "go ahead with the cleanup",
+    "Yesterday I said no. Yes, proceed now.", // refusal confined to its own sentence
+    "/ship",
+    "/issue fix the login bug",
+  ]) {
+    assert.equal(approvalIn(p), true, JSON.stringify(p));
+  }
+});
+
+test("A12: negation elsewhere in the message does not void a clean later sentence", () => {
+  assert.equal(approvalIn("Not this one. Do it for the other file."), true);
+  assert.equal(approvalIn("no. yes"), true);
+  // mixed single sentence stays a refusal (fail-closed: re-ask)
+  assert.equal(approvalIn("not that file, but yes proceed"), false);
+});
+
+// ---- Phase 6 (audit A12b): copy destinations as affected paths ----
+test("copyTargetOf: final operand of cp/mv/install/rsync, else undefined", () => {
+  assert.equal(copyTargetOf("cp a.txt b.txt"), "b.txt");
+  assert.equal(copyTargetOf("mv -f a.txt dir/b.txt"), "dir/b.txt");
+  assert.equal(copyTargetOf("sudo install -m644 a b"), "b");
+  assert.equal(copyTargetOf("cat a b"), undefined);
+  assert.equal(copyTargetOf("cp only-one"), undefined);
 });

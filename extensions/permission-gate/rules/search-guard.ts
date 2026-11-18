@@ -18,6 +18,7 @@
  * rg is gitignore-aware and fast, so unscoped rg passes by design.
  */
 import { readdirSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 
 /** quote-aware tokenizer: quoted runs stay one token (quotes stripped);
  * shell operators | < > stand alone so tokens past them are another command */
@@ -152,7 +153,10 @@ export function swallowCheck(seg: string): string | undefined {
  *   operand is flagged; the same redirect exclusion covers `sed -n … > g`;
  * - `head`/`tail` flag only in the single-file view shape — see
  *   headTailReadsFile. */
-export function readerBypassCheck(cmd: string): string | undefined {
+export function readerBypassCheck(
+  cmd: string,
+  cwd?: string,
+): string | undefined {
   const reason =
     "Hygiene (Reader-bypass): read windows with piread (offset/limit, hits, outline --show). Pipes: piread a spill slice, pibash over it; jq -r '<f>' <file> ok under 1 MB.";
   const jqOversized = (() => {
@@ -163,9 +167,13 @@ export function readerBypassCheck(cmd: string): string | undefined {
     for (const m of cmd.matchAll(/(?:^|&&|\|\||;)\s*jq\s+([^|;&]+)/g)) {
       const rest = (m[1] ?? "").trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
       if (rest.length !== 2) continue;
-      const file = rest[1].replace(/^(?:'|")|(?:'|")$/g, "");
+      const file = (rest[1] ?? "").replace(/^(?:'|")|(?:'|")$/g, "");
+      // 2026-11-18 code review (finding 5): resolve against the bash cwd —
+      // the gate process cwd is not where the command runs
+      const abs = file.startsWith("/") ? file : cwd ? resolve(cwd, file) : file;
       try {
-        if (statSync(file, { throwIfNoEntry: false })?.size >= 1_048_576) return true;
+        const st = statSync(abs, { throwIfNoEntry: false });
+        if (st && st.size >= 1_048_576) return true;
       } catch {
         /* unreadable path — not a bounded-read claim the gate can check */
       }

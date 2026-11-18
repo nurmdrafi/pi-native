@@ -4,19 +4,25 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 
 ## Call economy
 - Batch independent calls into one block; one search covers every target a question needs.
-- Search where the target sits — conversation or file; locate only what context lacks.
+- Search where the target sits — the conversation first, files only for what context lacks; locate the file before probing its contents.
 - A call needs a gap: no path → locate; no region → one `piread` window; no exact lines → read them.
 - One edit call per file: all regions together, bottom-up; blocked edit → resend only that region.
 - Continue a stopped read at its named offset, never a printed range.
 - Don't widen: locate the next symbol; probe size first (line count, counting search) when unsure.
+- A span already read this session stays cited, not re-read — a re-send re-pays its tokens.
 
 ## File lookup
 - Resolve unknown paths before reading them; do not guess filenames.
+- Edit anchors come from this session's reads, never memory — an unread `oldText` is a guess; if anything may have written the file since the read (a command you ran, another session, a build), re-read the region first — the anchor must match the file as it is now.
+- Default searchers: `rg PATTERN path/` for text, `fd PATTERN path/` for files — both skip gitignored noise and print matching paths; `grep`/`find` only after rg/fd actually errored, and a path argument starting with `-` needs a `./` prefix or the tool reads it as a flag. Never search `node_modules/`, `vendor/`, or `dist/` trees — they are vendored copies measured in hundreds of megabytes; find the source path and search it.
+- File views go through `piread` windows (offset/limit, hits) — a window keeps line numbers addressable and later calls can continue from them; `cat`/`head`/`tail`/`sed -n` only trim command output, never open files: they dump bytes without offsets and force a full re-read to see more.
+- Open files in windows of tens-to-hundreds of lines; a whole-file read only after confirming the file is small (a line count, not a guess) — a large dump crowds out context and hides the part you needed.
 - Use semantic search or LSP for symbols, `piread` hit mode for one literal, and `outline --show <file> <symbol>` for whole units.
 - Use `piread` for raw ranges and continue a stopped read from its named offset.
 - Many targets in one file: `outline` once, then `--show` each; never re-walk an outlined file.
 
 ## Bash
+- Never re-send an identical command with no intervening edit or write — its output is already in context.
 - For long lines, use a targeted window or search. For output needing a second look, save it and inspect bounded windows.
 - Respect repository-declared toolchain versions.
 - Each shell call is a fresh process at the session cwd: use absolute paths, never a path relative to an earlier `cd`.

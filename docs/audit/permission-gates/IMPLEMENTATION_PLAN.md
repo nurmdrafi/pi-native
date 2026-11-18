@@ -105,3 +105,17 @@ Rollback: all phases are config/rule-local; revert = git revert of the phase com
 - reader-bypass composition gap (A4) — session 2026-11-18 clusters.
 - node -e false positive (A6) — exact payload preserved.
 - grep→rg dash-path arg shape (A15).
+
+## Standing policy (owner direction, 2026-11-18)
+Every gate rule ships with its standing-rule counterpart in SYSTEM.md
+(tool mechanics: condition + action + invariant) or AGENTS.md (behavior and
+judgment) — prevention precedes enforcement; the gate corrects after the
+fact within a ~220-char reason, the standing rule teaches before it with the
+full reasoning any model can generalize from. A rule without its invariant
+is vague and does not transfer; instruction files are model-agnostic.
+Queued follow-ups from the 2-week transcript audit: H2 confirm subjects name
+the offending segment (not the clamped command head — dashboards misread
+benign heads as the trigger). Refuted by evidence (anchor-audit, 1103
+sessions): compaction causes no Anchor Guard blocks — no post-compaction
+rule; Anchor Guard is a historical family (zero in-window blocks), its
+Unread variant is covered by the standing anchors rule.

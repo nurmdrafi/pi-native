@@ -44,15 +44,15 @@ Phase = plan.md phases. Tick only after its test passes.
 
 ## Phase 5 — Subagent briefs (A14)
 - [x] Spawn preamble carries gate composition recipe + no-destructive policy
-- [ ] Manual verification: one scout child session with <2 gate events
+- [x] Manual verification: one scout child session with <2 gate events (2026-11-18 scout run: 1 gate event, rerouted compliantly)
 
 ## Phase 6 — Binding parity + approval hardening (A9/A12)
-- [ ] Failing test: `echo x > tracked.md` confirm-checked
-- [ ] REDIRECT/TEE WB-equivalent binding
-- [ ] APPROVAL_RE negation-safe + test
-- [ ] Remembered approval keyed on (cmd, stat) + test
-- [ ] Post-write realpath re-check + test
-- [ ] security-toctou scene green
+- [x] Failing test: `echo x > tracked.md` confirm-checked
+- [x] REDIRECT/TEE WB-equivalent binding
+- [x] APPROVAL_RE negation-safe + test
+- [x] Remembered approval keyed on (cmd, stat) + test
+- [x] Post-write realpath re-check + test
+- [x] security-toctou scene green
 
 ## Phase 7 — Deny-by-default loadout (A10)
 - [x] Failing test: agent definition without `tools:` → empty allowlist

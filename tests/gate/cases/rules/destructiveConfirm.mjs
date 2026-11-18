@@ -867,6 +867,19 @@ export const cases = [
     async (pi) =>
       bash(pi, "git log --grep python3 -c", { hasUI: false, mode: "print" }),
   ],
+  [
+    "H2/R7: confirm subject names the offending segment, not the command head",
+    "blocked",
+    async (pi) => {
+      const r = await bash(pi, "ls; git reset --hard canary-doc", {
+        hasUI: false,
+        mode: "print",
+      });
+      return r.blocked && r.reason.includes("'git reset --hard")
+        ? r
+        : { blocked: false, reason: `subject misattributed: ${(r.reason || "").slice(0, 120)}` };
+    },
+  ],
   // ---- Phase 2 (2026-11-18 audit, A6): the interp tripwire judges the
   // BODY — the position pins below carry destructive bodies so they still
   // pin command-position anchoring; benign bodies now pass wherever their
@@ -966,6 +979,41 @@ export const cases = [
       });
       if (w.blocked) return w;
       return bash(pi, "cat /tmp/fp-p2b.js", { hasUI: false, mode: "print" });
+    },
+  ],
+  // ---- 2026-11-18 code review (findings 1-3): control-plane relative/copy
+  // lanes and prefixed execution. Shapes chosen so an UNGUARDED regression
+  // run fails harmlessly (absent parent dir / absent source / benign payload) ----
+  [
+    "P4/R1: relative redirect into the gate tree confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, "echo x > extensions/permission-gate/no-such-dir/canary", {
+        hasUI: false,
+        mode: "print",
+        cwd: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."),
+      }),
+  ],
+  [
+    "P4/R2: cp into the gate tree confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, "cp /no-such-src extensions/permission-gate/config.json", {
+        hasUI: false,
+        mode: "print",
+        cwd: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."),
+      }),
+  ],
+  [
+    "W2E/R3: env-prefixed run of a session-planted /tmp script confirms",
+    "blocked",
+    async (pi) => {
+      const w = await bash(pi, "printf 'echo hi' > /tmp/fp-r3.js", {
+        hasUI: false,
+        mode: "print",
+      });
+      if (w.blocked) return { blocked: false, reason: `write step blocked: ${w.reason}` };
+      return bash(pi, "FOO=1 /tmp/fp-r3.js", denyUi());
     },
   ],
 ];

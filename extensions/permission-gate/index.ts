@@ -10,6 +10,7 @@
  * git log.
  */
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { spawnSync } from "child_process";
 import { config, ruleBlocks, ruleEnabled, ruleSeverity, setYolo, yoloActive } from "./loader.ts";
 import { CADENCE_CTX_TOKENS, CADENCE_TURNS } from "./cadence.ts";
 
@@ -46,8 +47,10 @@ import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed, visibleL
 import { scrubBashText } from "./rules/output-scrub.ts";
 import {
   APPROVED_WINDOW_MS,
-  APPROVAL_RE,
+  approvalIn,
+  copyTargetOf,
   PROTECTED_PREFIX_RE,
+  writtenTargetsOf,
   isMutatingCommand,
   normalizeSegment,
   segmentDestructive,
@@ -55,6 +58,8 @@ import {
   splitSegments,
   tmpWriteTargetsOf,
   executesRecordedTmpTarget,
+  protectedWrittenTargetOf,
+  protectedCopyTargetOf,
 } from "./rules/destructive.ts";
 import { validateCommitMessages } from "./rules/commitlint.ts";
 import {
@@ -210,6 +215,19 @@ export default function (pi: ExtensionAPI) {
    * bash redirect/tee — feeding the write-then-execute confirm in the bash
    * tool_call lane. Session-scoped: session_start clears it. */
   const tmpWriteTargets = new Set<string>();
+  /** A9 (2026-11-18 audit): bash redirect/tee targets that bound — stat+hash
+   * recorded at the tool_result of the allowed write (post-write truth); a
+   * later shell write to the same path with a drifted stat blocks Stale
+   * (WB parity). Cleared at session_start like the rest. */
+  const bashWriteBinds = new Map<
+    string,
+    { stat: { mtimeMs: number; size: number }; hash?: string }
+  >();
+  /** A9: bash toolCallId -> bound write targets (absolute), awaiting the
+   * tool_result that records their post-write truth. */
+  const pendingBashWrites = new Map<string, string[]>();
+  /** A9: absolute path -> git-tracked verdict (git ls-files), session cache. */
+  const vcsTrackedCache = new Map<string, boolean>();
   /** Record R1c search targets. Local closure: the path resolver and the
    * on-disk probe are already in scope. */
   const recordSearchedPaths = (segs: string[], cwd: string | undefined) => {
@@ -239,6 +257,9 @@ export default function (pi: ExtensionAPI) {
       preStat?: { mtimeMs: number; size: number };
       fuzzy?: boolean;
       kind: "edit" | "write";
+      /** A12c (2026-11-18 audit): the realpath the confirm covered, set on
+       * confirmed write-lane calls — re-checked when the write lands. */
+      realExpected?: string;
     }
   >();
   /** read toolCallId -> { path, win }, awaiting its tool_result */
@@ -303,8 +324,17 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
-  /** H2: last user-approved destructive command (verbatim) + when */
-  let lastApprovedDestructive: { cmd: string; ts: number } | undefined;
+  /** H2: last user-approved destructive command (verbatim) + when. A12
+   * (2026-11-18 audit): the memory additionally keys on the stat (mtime+size)
+   * of the affected paths captured at approval time — drift re-asks;
+   * undefined stats (no derivable path) replay on command text alone. */
+  let lastApprovedDestructive:
+    | {
+        cmd: string;
+        ts: number;
+        stats?: { path: string; stat?: { mtimeMs: number; size: number } }[];
+      }
+    | undefined;
   /** A15 (2026-11-18): session-scoped warn counter per rule family — a warn
    * ignored three times in one session promotes to a block (behavior-change
    * loop; 2026-11-18 taxonomy: 21% of blocks ended in partial compliance and
@@ -321,7 +351,7 @@ export default function (pi: ExtensionAPI) {
   let lastUserPrompt = "";
   const GATE_TREE = dirname(fileURLToPath(import.meta.url));
   const gateMaintenanceNamed = () =>
-    APPROVAL_RE.test(lastUserPrompt) && /gate\s+maintenance/i.test(lastUserPrompt);
+    approvalIn(lastUserPrompt) && /gate\s+maintenance/i.test(lastUserPrompt);
   const inGateTree = (abs: string): boolean => {
     if (!abs) return false;
     let real = abs;
@@ -542,6 +572,107 @@ export default function (pi: ExtensionAPI) {
       return `${tool} '${abs.slice(0, 28)}' → an existing file (overwrite) and`;
     return undefined;
   };
+  /** A12b: the stats recorded at approval time still describe the disk —
+   * every affected path's mtime+size matches, and a then-missing path is
+   * still missing. Undefined stats (no derivable affected path — e.g. a
+   * plain `git reset`) match trivially, so the verbatim fast path survives. */
+  const approvalStatsStillMatch = async (
+    stats: { path: string; stat?: { mtimeMs: number; size: number } }[] | undefined,
+  ): Promise<boolean> => {
+    if (!stats) return true;
+    for (const s of stats) {
+      const now = await snapshot(s.path);
+      if (s.stat === undefined || now === undefined) {
+        if ((s.stat === undefined) !== (now === undefined)) return false; // appeared/vanished
+        continue;
+      }
+      if (s.stat.mtimeMs !== now.mtimeMs || s.stat.size !== now.size)
+        return false;
+    }
+    return true;
+  };
+  /** A9: is the absolute path tracked by git? `git ls-files --error-unmatch`
+   * answers for one path without listing the repo; per-path session cache,
+   * fail-open (no git / not a repo → not tracked → no binding). */
+  const vcsTracked = (abs: string): boolean => {
+    const hit = vcsTrackedCache.get(abs);
+    if (hit !== undefined) return hit;
+    let tracked = false;
+    try {
+      tracked =
+        spawnSync(
+          "git",
+          ["-C", dirname(abs), "ls-files", "--error-unmatch", "--", abs],
+          { encoding: "utf8", timeout: 5_000 },
+        ).status === 0;
+    } catch {
+      /* fail open */
+    }
+    vcsTrackedCache.set(abs, tracked);
+    return tracked;
+  };
+  /** A9/A12b: the paths a bash command writes — redirect/tee targets plus
+   * cp/mv/install/rsync destinations, resolved absolute and deduped. The
+   * bash write binding and the remembered-approval stat key both key on
+   * these. */
+  const bashWrittenPaths = (segs: string[], cwd?: string): string[] => {
+    const out: string[] = [];
+    for (const seg of segs) {
+      for (const t of writtenTargetsOf(seg)) out.push(normPath(t, cwd));
+      const d = copyTargetOf(seg);
+      if (d) out.push(normPath(d, cwd));
+    }
+    return [...new Set(out)];
+  };
+  /** A9: WB-equivalent binding check for one bash write target. Mirrors the
+   * write lane: certified-coverage stat/hash first, then the last shell
+   * write's recorded stat/hash, then the Unread floor for VCS-tracked
+   * files. Disproven state is dropped BEFORE blocking so the recommended
+   * re-read passes (same loop-avoidance as the write lane). */
+  const bashWriteBindingBlock = async (
+    abs: string,
+    toolCallId: string,
+  ): Promise<{ block: true; reason: string } | undefined> => {
+    const shown = abs.length > 57 ? `…${abs.slice(-56)}` : abs;
+    const prior = coverage.get(abs);
+    const bind = bashWriteBinds.get(abs);
+    const refStat = prior?.stat ?? bind?.stat;
+    const refHash = prior?.hash ?? bind?.hash;
+    const now = await snapshot(abs);
+    if (
+      refStat &&
+      now &&
+      (refStat.mtimeMs !== now.mtimeMs || refStat.size !== now.size)
+    ) {
+      coverage.delete(abs); // disproven spans/stat — let the re-read through
+      bashWriteBinds.delete(abs);
+      return enforce(
+        "writeBindingGuard",
+        `Anchor Guard (Stale): '${shown}' changed on disk since your last read (your own shell write or an external edit) — re-read it, then re-send.`,
+        toolCallId,
+      );
+    }
+    if (refStat && now && refHash) {
+      const h = await hashFile(abs);
+      if (h && h !== refHash) {
+        coverage.delete(abs);
+        bashWriteBinds.delete(abs);
+        return enforce(
+          "writeBindingGuard",
+          `Anchor Guard (Stale): '${shown}' changed without mtime/size change (fast write / restored mtime) — re-read before overwriting.`,
+          toolCallId,
+        );
+      }
+    }
+    if (!prior && !bind && existsSync(abs) && vcsTracked(abs))
+      return enforce(
+        "writeBindingGuard",
+        `Anchor Guard (Unread): '${shown}' is VCS-tracked and was never read this session — piread it before a shell write.`,
+        toolCallId,
+      );
+    return undefined;
+  };
+
   /** H2 approval ladder, shared by destructive bash segments and the S4
    * fix 8 write/edit protected-path confirm: chat approval (promptApproves)
    * → remembered verbatim approval (2 min) → UI dialog with timeout (S-3) →
@@ -558,6 +689,10 @@ export default function (pi: ExtensionAPI) {
           ui?: { confirm(t: string, m: string): Promise<boolean> };
         }
       | undefined,
+    /** A12b (2026-11-18 audit): affected paths for the remembered-approval
+     * stat key — redirect/tee/copy targets for bash, the target itself for
+     * write/edit. Undefined (no derivable path) replays on text alone. */
+    affectedPaths?: string[],
   ): Promise<string | undefined> => {
     // read at call time, not import time — the marker can differ per
     // invocation in the same process
@@ -572,7 +707,10 @@ export default function (pi: ExtensionAPI) {
     if (
       lastApprovedDestructive &&
       lastApprovedDestructive.cmd === key &&
-      Date.now() - lastApprovedDestructive.ts < APPROVED_WINDOW_MS
+      Date.now() - lastApprovedDestructive.ts < APPROVED_WINDOW_MS &&
+      // A12b: verbatim text alone no longer replays — the affected paths'
+      // stats must still match; drift falls through to the re-ask below
+      (await approvalStatsStillMatch(lastApprovedDestructive.stats))
     ) {
       logDecision("allow", key); // remembered approval: still this call's verdict
       return undefined;
@@ -595,7 +733,17 @@ export default function (pi: ExtensionAPI) {
       }
     }
     if (approved) {
-      lastApprovedDestructive = { cmd: key, ts: Date.now() };
+      // A12b: remember the stat of every affected path — the replay above
+      // re-asks when any of them drifts (or appears/vanishes).
+      lastApprovedDestructive = {
+        cmd: key,
+        ts: Date.now(),
+        stats: affectedPaths
+          ? await Promise.all(
+              affectedPaths.map(async (p) => ({ path: p, stat: await snapshot(p) })),
+            )
+          : undefined,
+      };
       logDecision("allow", key); // at the moment the verdict is decided, not on a later state change
       return undefined;
     }
@@ -657,7 +805,7 @@ export default function (pi: ExtensionAPI) {
     turn.turnsSeen++;
     const prompt = event.messageType === "user" ? event.prompt : "";
     lastUserPrompt = prompt;
-    promptApproves = APPROVAL_RE.test(prompt);
+    promptApproves = approvalIn(prompt);
     // LG1: a new user turn is the loop boundary — churn/error counters reset
     lg1Reset();
     // PH1: a new user turn re-arms the phase label
@@ -685,7 +833,7 @@ export default function (pi: ExtensionAPI) {
         ? protectedPathReason("edit", path)
         : undefined;
       if (prot) {
-        const r = await confirmDestructive(`edit:${path}`, prot, ctx);
+        const r = await confirmDestructive(`edit:${path}`, prot, ctx, [path]);
         if (r) return blockCall(r);
       }
       // WC: the native edit name gets the confinement confirm — edits always
@@ -695,7 +843,7 @@ export default function (pi: ExtensionAPI) {
           ? writeConfinementReason("piedit", path, ctx?.cwd, false)
           : undefined;
         if (wc) {
-          const r = await confirmDestructive(`piedit:${path}`, wc, ctx);
+          const r = await confirmDestructive(`piedit:${path}`, wc, ctx, [path]);
           if (r) return blockCall(r);
         }
       }
@@ -962,9 +1110,11 @@ export default function (pi: ExtensionAPI) {
       const prot = ruleEnabled("destructiveConfirm")
         ? protectedPathReason("write", path)
         : undefined;
+      let confirmedLanding = false; // A12c: realpath recorded for the landing check
       if (prot) {
-        const r = await confirmDestructive(`write:${path}`, prot, ctx);
+        const r = await confirmDestructive(`write:${path}`, prot, ctx, [path]);
         if (r) return blockCall(r);
+        confirmedLanding = true;
       }
       // WC: native-name confinement — outside-cwd targets confirm through
       // the same ladder (see the helper above). The existing-file overwrite
@@ -984,8 +1134,9 @@ export default function (pi: ExtensionAPI) {
             )
           : undefined;
         if (wc) {
-          const r = await confirmDestructive(`piwrite:${path}`, wc, ctx);
+          const r = await confirmDestructive(`piwrite:${path}`, wc, ctx, [path]);
           if (r) return blockCall(r);
+          confirmedLanding = true;
         }
       }
       // S5 M1+M3+M2 (2026-10-16): write binding (spec §5.1–§5.3), keyed as WB
@@ -1058,6 +1209,8 @@ export default function (pi: ExtensionAPI) {
         path,
         spans: [{ start: 1, end: Infinity }],
         kind: "write",
+        // A12c: re-realpath at the result; undefined skips the check
+        realExpected: confirmedLanding ? realpathish(path) : undefined,
       });
     }
 
@@ -1175,7 +1328,7 @@ export default function (pi: ExtensionAPI) {
       const r = enforce("errorSwallow", sw, event.toolCallId);
       if (r) return r;
     }
-    const rb = readerBypassCheck(cmd);
+    const rb = readerBypassCheck(cmd, ctx?.cwd);
     if (rb) {
       const r = enforce("readerBypass", rb, event.toolCallId);
       if (r) return r;
@@ -1199,13 +1352,38 @@ export default function (pi: ExtensionAPI) {
     // bypass — git push/history asks auto-approve; git commit keeps its gate
     // via commitMessageLint in YOLO_FLOOR. Non-git signals confirm as before.
     const destructiveJudge = yoloActive() ? segmentDestructiveExceptGit : segmentDestructive;
-    if (ruleEnabled("destructiveConfirm") && normSegs.some(destructiveJudge)) {
+    const offender = normSegs.find(destructiveJudge);
+    if (ruleEnabled("destructiveConfirm") && offender !== undefined) {
       const r = await confirmDestructive(
         cmd,
-        `'${cmd.slice(0, 33)}' mutates files, deps, or history and`, // 33c clamp: reason stays ≤ the 220c diet cap for any cmd length
+        // 2026-11-18 transcript audit: name the OFFENDING SEGMENT — the old
+        // command-head clamp reported `cd X && cat > f <<EOF` as "'cd X …'
+        // mutates files", and dashboards misread benign heads as the trigger
+        `'${offender.slice(0, 33)}' mutates files, deps, or history and`, // 33c clamp: reason stays ≤ the 220c diet cap
         ctx,
+        bashWrittenPaths(normSegs, ctx?.cwd), // A12b: stat-key the remembered approval
       );
       if (r) return blockCall(r);
+    }
+
+    // 2026-11-18 code review (findings 1-2): the control-plane floor must
+    // also catch RELATIVE redirect/tee spellings (resolved against the bash
+    // cwd — the structural judge sees absolute targets only) and copy
+    // commands (cp/mv/install/rsync carry no redirect at all).
+    if (ruleEnabled("destructiveConfirm")) {
+      for (const seg of normSegs) {
+        const prot =
+          protectedWrittenTargetOf(seg, ctx?.cwd) ??
+          protectedCopyTargetOf(seg, ctx?.cwd);
+        if (!prot) continue;
+        const r = await confirmDestructive(
+          cmd,
+          `'${cmd.slice(0, 33)}' targets a protected tree and`,
+          ctx,
+          bashWrittenPaths(normSegs, ctx?.cwd), // A12b: same stat key as the H2 ask
+        );
+        if (r) return blockCall(r);
+      }
     }
 
     // Phase 2 (audit A6, 2026-11-18): write-then-execute — a file this
@@ -1223,6 +1401,24 @@ export default function (pi: ExtensionAPI) {
           ctx,
         );
         if (r) return blockCall(r);
+      }
+    }
+
+    // A9 (2026-11-18 audit): write-binding parity for the bash lane —
+    // REDIRECT/TEE (and copy-destination) targets that are VCS-tracked or
+    // session-covered bind exactly like write-tool targets (the WB pattern
+    // in the write lane above, same rule key/severity): stat/hash drift
+    // since the certified read (or the last shell write) blocks Stale, a
+    // never-read existing tracked file blocks Unread. Untracked scratch
+    // and new files stay free; missing stat/hash fails open throughout.
+    if (ruleEnabled("writeBindingGuard")) {
+      const targets = [...new Set(bashWrittenPaths(normSegs, ctx?.cwd))];
+      if (targets.length) {
+        for (const t of targets) {
+          const r = await bashWriteBindingBlock(t, event.toolCallId);
+          if (r) return r;
+        }
+        pendingBashWrites.set(event.toolCallId, targets);
       }
     }
 
@@ -1692,6 +1888,33 @@ export default function (pi: ExtensionAPI) {
       traceGate({ ev: "drop-edit-error", path: entry.path, callId: event.toolCallId });
       lg1Note = lg1RecordResult(turn, true);
     } else {
+      // A12c (2026-11-18 audit): a CONFIRMED write's landing path is
+      // re-realpathed — a symlink swap between the approval and the landing
+      // put the bytes somewhere the user never approved. Fail closed:
+      // surface an error and drop certification; an unresolvable target
+      // (deleted again) falls through — the result's own error covers it.
+      if (entry.realExpected !== undefined) {
+        try {
+          const landed = realpathSync(entry.path);
+          if (landed !== entry.realExpected) {
+            coverage.delete(entry.path);
+            traceGate({ ev: "symlink-drift", path: entry.path, callId: event.toolCallId });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Permission Gate (Symlink drift): the confirmed write landed at '${
+                    landed.length > 40 ? `…${landed.slice(-39)}` : landed
+                  }' — not the approved path (symlink swap mid-flight). Re-realpath and verify before trusting this write.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        } catch {
+          /* target unresolvable — nothing to compare */
+        }
+      }
       // R10: a successful edit/write mutates the tree — verify re-runs become legitimate
       turn.mutationSeq++;
       // LG1: count the landed mutation; may arm the one-shot loop block
@@ -1779,6 +2002,27 @@ export default function (pi: ExtensionAPI) {
       };
   });
 
+  // A9 (2026-11-18 audit): an allowed bash redirect/tee write landed — record
+  // the target's post-write stat+hash as the binding truth (a later shell
+  // write with a drifted stat blocks Stale), and drop certified coverage: the
+  // shell wrote unknown content over the file, so prior spans no longer
+  // describe it (a re-read stays legitimate — only savings are lost).
+  on("tool_result", async (event) => {
+    if (!isBashKind(event)) return;
+    const targets = pendingBashWrites.get(event.toolCallId);
+    if (!targets) return;
+    pendingBashWrites.delete(event.toolCallId);
+    for (const t of targets) {
+      const snap = await snapshot(t);
+      if (!snap) {
+        bashWriteBinds.delete(t); // gone on disk — nothing to bind
+        continue;
+      }
+      bashWriteBinds.set(t, { stat: snap, hash: await hashFile(t) });
+      coverage.delete(t);
+    }
+  });
+
   // cadence nudge (2026-10-11): NON-blocking — appended once to the next real
   // tool_result when turns or context tokens cross the AGENTS.md Token
   // Economy thresholds; never rides a synthesized block result
@@ -1849,6 +2093,8 @@ export default function (pi: ExtensionAPI) {
     pendingSearchCalls.clear();
     searchHits.clear();
     tmpWriteTargets.clear();
+    bashWriteBinds.clear();
+    pendingBashWrites.clear();
     warnEscalation.clear();
     // A3 (2026-11-18): hash config.json + loader.ts; a drift vs the last
     // session warns in-context before the first tool call — a silent control-

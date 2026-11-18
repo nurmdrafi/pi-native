@@ -7,7 +7,7 @@
  * determined rewrite escapes it. AGENTS.md discipline and the user's eyes are
  * the actual boundary. */
 import { homedir } from "os";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { realpathSync } from "fs";
 import { fileURLToPath } from "url";
 import { config } from "../loader.ts";
@@ -280,9 +280,14 @@ const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
  * exemption is subsumed — destinations no longer matter to this judge).
  * Vocabulary stays deletion-only — rm/rmdir/unlink semantics plus
  * AppleScript deletion (A13); moves and writes are not destructive confirms.
- * The planted-file follow-up is the write-then-execute signal (index.ts). */
+ * 2026-11-18 code review (finding 4): argument-or-call shapes, not bare
+ * words — a dotted member (fs.rm, os.unlink), a call paren, or an argument
+ * token after rm/unlink. A word with NO argument (`console.log("rm")`,
+ * "the rm case") is prose and must not confirm; `rm <arg>` keeps confirming
+ * (an embedded-shell `system("rm canary")` is the same shape as prose —
+ * accepted confirm-only FP, deletion asymmetry wins). */
 const INTERP_BODY_DESTRUCTIVE =
-  /\b(?:rmSync|rmdirSync|unlinkSync|unlink|shutil\.rmtree|os\.remove|fs\.rm|promises\.rm|rm)\b|\btell\s+application\b[^\n]*\b(?:delete|empty\s+trash)\b/;
+  /\b(?:shutil\.rmtree|os\.(?:remove|unlink|rmdir)|fs\.(?:rm|rmdir)|promises\.(?:rm|rmdir))\b|\.(?:rm|unlink|rmdir)(?:Sync)?\b|\b(?:rm|unlink|rmdir)(?:Sync)?\s*\(|\b(?:rm|unlink)\s+\S|\brm\s+-[a-zA-Z]*[rRf]|\btell\s+application\b[^\n]*\b(?:delete|empty\s+trash)\b/;
 
 /** Structural destructive signals shared by both judges: protected
  * redirect/tee targets, wrapped payloads, interpreter escapes, encoded
@@ -352,7 +357,10 @@ const heredocOf = (seg: string) => {
   if (!m) return undefined;
   const tag = m[2] ?? m[3] ?? m[4];
   if (!tag) return undefined;
-  const word = INTERP_OPENER_WORD.exec(seg)?.[0]?.toLowerCase();
+  // 2026-11-18 code review (finding 6): the interpreter word must sit in the
+  // COMMAND position before `<<` — a delimiter named like an interpreter
+  // (`cat <<node`) feeds cat, and its body stays data.
+  const word = INTERP_OPENER_WORD.exec(seg.slice(0, m.index))?.[0]?.toLowerCase();
   return { tag, stripTabs: m[1] === "-", word };
 };
 
@@ -495,6 +503,34 @@ export const normalizeSegment = (seg: string) => {
 export const APPROVAL_RE =
   /\b(?:yes|y|approve[ds]?|go[ -]ahead|run it|do it|proceed|ship it)\b|^\/(?:ship|issue|update-changelog)\b/im;
 
+/** Phase 6 (audit A12): negation-hardened approval. An affirmative riding a
+ * negation is a refusal — "don't proceed", "no, do not run it", "not
+ * approved" previously armed the destructive bypass. The pre-scan voids
+ * any match whose clause (text since the last sentence boundary) contains
+ * a negation word before the affirmative; clean matches in other
+ * sentences still count. Slash-command invocations are explicit commands,
+ * not prose — they always count. */
+const NEGATION_WORD =
+  /\b(?:no|not|never|don'?t|dont|do\s+not|stop|can(?:not|'t)|won'?t|will\s+not|neither|nor)\b/i;
+const CLAUSE_BOUNDARY = /[.!?\n]/;
+/** matchAll needs the global flag; a g-clone of the immutable APPROVAL_RE
+ * (matchAll clones again per call, so lastIndex state never leaks) */
+const APPROVAL_GLOBAL = new RegExp(APPROVAL_RE.source, APPROVAL_RE.flags + "g");
+export const approvalIn = (text: string): boolean => {
+  for (const m of text.matchAll(APPROVAL_GLOBAL)) {
+    if (m[0].startsWith("/")) return true; // slash-command invocation
+    const before = text.slice(0, m.index ?? 0);
+    let start = 0;
+    for (let i = before.length - 1; i >= 0; i--)
+      if (CLAUSE_BOUNDARY.test(before[i])) {
+        start = i + 1;
+        break;
+      }
+    if (!NEGATION_WORD.test(before.slice(start))) return true;
+  }
+  return false;
+};
+
 /** Phase 2 (audit A6, 2026-11-18): write-then-execute — the lane the A6
  * body-judging relaxation opens (a benign inline body planting a scratch
  * file, then running it). index.ts records every /tmp redirect/tee target
@@ -506,22 +542,27 @@ export const APPROVAL_RE =
  * session_start. Benign re-reads (cat/grep/wc) never match: only execution
  * positions do. */
 const TMP_WRITE_PREFIX = /^\/(?:private\/)?tmp\//;
+/** ALL written targets (redirect + tee, expanded) of one segment — raw
+ * material for the /tmp recording below and the protected-lane checks. */
+export const writtenTargetsOf = (seg: string): string[] =>
+  [
+    ...[...seg.matchAll(REDIRECT_TARGET)].map((m) => m[1]),
+    ...[...seg.matchAll(TEE_TARGET)].map((m) => m[1]),
+  ].map(expandWrittenTarget);
+
 /** /tmp write targets of one segment, as written (realpath appended when it
  * resolves — macOS /tmp is /private/tmp; a not-yet-written target still
  * matches by its written spelling). */
 export const tmpWriteTargetsOf = (seg: string): string[] => {
   const out: string[] = [];
-  for (const re of [REDIRECT_TARGET, TEE_TARGET]) {
-    for (const m of seg.matchAll(re)) {
-      const t = expandWrittenTarget(m[1]);
-      if (!TMP_WRITE_PREFIX.test(t)) continue;
-      out.push(t);
-      try {
-        const rp = realpathSync(t);
-        if (rp !== t) out.push(rp);
-      } catch {
-        /* not on disk yet — the written spelling still matches */
-      }
+  for (const t of writtenTargetsOf(seg)) {
+    if (!TMP_WRITE_PREFIX.test(t)) continue;
+    out.push(t);
+    try {
+      const rp = realpathSync(t);
+      if (rp !== t) out.push(rp);
+    } catch {
+      /* not on disk yet — the written spelling still matches */
     }
   }
   return out;
@@ -532,6 +573,7 @@ export const tmpWriteTargetsOf = (seg: string): string[] => {
 const TMP_EXEC_INTERP =
   /^(?:python3?|node|deno|bun|osascript|(?:ba|z|da|k)?sh)$/;
 const TMP_EXEC_WRAPPER = /^(?:sudo|env|command|exec|nohup|nice|xargs)$/;
+const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 /** the recorded path this command executes (command position or interpreter
  * operand), or undefined when it only reads/mentions recorded paths */
 export const executesRecordedTmpTarget = (
@@ -545,8 +587,17 @@ export const executesRecordedTmpTarget = (
     const toks = seg
       .split(/\s+/)
       .map((t) => t.replace(/^["']+|["']+$/, ""));
-    if (toks.length > 0 && recorded.has(toks[0]) && !own.has(toks[0]))
-      return toks[0];
+    // 2026-11-18 code review (finding 3): env assignments and transparent
+    // wrappers may precede the command word — FOO=1 /tmp/fp.js and
+    // sudo /tmp/fp.js execute the planted file just the same.
+    let start = 0;
+    while (
+      start < toks.length &&
+      (ENV_ASSIGN.test(toks[start]) || TMP_EXEC_WRAPPER.test(toks[start]))
+    )
+      start++;
+    if (start < toks.length && recorded.has(toks[start]) && !own.has(toks[start]))
+      return toks[start];
     for (let i = 0; i < toks.length; i++) {
       if (!TMP_EXEC_INTERP.test(toks[i])) continue;
       if (
@@ -560,4 +611,58 @@ export const executesRecordedTmpTarget = (
     }
   }
   return undefined;
+};
+
+/** 2026-11-18 code review (findings 1-2): resolve a written/copied target the
+ * way the shell would — cwd-relative when not absolute — then compare in
+ * realpath space. Returns the resolved target when it lands in a protected
+ * tree (the gate's own tree included since A2), else undefined. */
+const protectedTarget = (t: string, cwd?: string): string | undefined => {
+  const abs = t.startsWith("/") ? t : cwd ? resolve(cwd, t) : t;
+  let real = abs;
+  try {
+    real = realpathSync(abs);
+  } catch {
+    /* not on disk yet — the resolved spelling still names the destination */
+  }
+  return PROTECTED_PREFIX_RE.test(real) ? real : undefined;
+};
+
+/** Finding 1: a relative redirect/tee target into a protected tree. The
+ * structural judge sees absolute spellings only; from the agent-home cwd
+ * the relative form is the common one. */
+export const protectedWrittenTargetOf = (
+  seg: string,
+  cwd?: string,
+): string | undefined => {
+  for (const t of writtenTargetsOf(seg)) {
+    const hit = protectedTarget(t, cwd);
+    if (hit) return hit;
+  }
+  return undefined;
+};
+
+/** Finding 2: cp/mv/install/rsync place files without a redirect — the
+ * final operand is the destination. Flag tokens are skipped; fewer than two
+ * operands is not a copy. copyTargetOf returns the raw destination (A12b
+ * approval stat key, A9 write binding); protectedCopyTargetOf judges it
+ * against the protected prefixes as before. */
+const COPY_CMD = /^(?:sudo\s+|env\s+\S*\s+|command\s+)?(?:cp|mv|install|rsync)\b/;
+export const copyTargetOf = (seg: string): string | undefined => {
+  const head = COPY_CMD.exec(seg)?.[0] ?? "";
+  if (!head) return undefined;
+  const operands = seg
+    .slice(head.length)
+    .split(/\s+/)
+    .map((t) => t.replace(/^["']+|["']+$/, ""))
+    .filter((t) => t && !t.startsWith("-"));
+  if (operands.length < 2) return undefined;
+  return operands[operands.length - 1];
+};
+export const protectedCopyTargetOf = (
+  seg: string,
+  cwd?: string,
+): string | undefined => {
+  const dest = copyTargetOf(seg);
+  return dest === undefined ? undefined : protectedTarget(dest, cwd);
 };
