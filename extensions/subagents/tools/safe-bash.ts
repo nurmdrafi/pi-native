@@ -27,8 +27,9 @@ const DANGEROUS_PATTERNS = [
 	/\bkill\s+-9\s+1\b/,
 	/\bkillall\b/,
 	// 2026-11-07 audit (LOW) — blocklist depth: three families the
-	// permission gate already catches (commit 1f4e67c); defense-in-depth,
-	// since the worker lane does not run the gate.
+	// permission gate already catches (commit 1f4e67c); defense-in-depth:
+	// the sandbox re-enables the gate by default, but a dropped
+	// PI_SUBAGENT_EXTRA_EXTENSIONS entry still leaves the child ungated.
 	// Heredoc-to-sh: a shell interpreter fed by a heredoc runs its body as
 	// commands (`bash <<EOF ... EOF`) — the body must not count as data.
 	// `\b...sh\b` keeps ssh/fish out; the char class before `<<` stops a

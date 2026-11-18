@@ -12,10 +12,10 @@ Phase = plan.md phases. Tick only after its test passes.
 - [x] `npm run gate:eval` green
 
 ## Phase 1 — Doc/comment truth (A11)
-- [ ] subagent-orchestration.md env var spelling fixed
-- [ ] rg repo-wide: no PI_SUBAGENTS_EXTRA_EXTENSIONS remains
-- [ ] config.json SS1/SS2 doc text matches severity
-- [ ] toolchain.ts, safe-bash.ts, index.ts:1057 stale comments fixed
+- [x] subagent-orchestration.md env var spelling fixed
+- [x] rg repo-wide: no PI_SUBAGENTS_EXTRA_EXTENSIONS remains
+- [x] config.json SS1/SS2 doc text matches severity
+- [x] toolchain.ts, safe-bash.ts, index.ts:1057 stale comments fixed
 
 ## Phase 2 — Judge accuracy (A6/A7/A13)
 - [x] Failing test: `node -e "1+1"` allowed, `node -e "fs.rmSync"` confirmed

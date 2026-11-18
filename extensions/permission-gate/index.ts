@@ -1060,8 +1060,8 @@ export default function (pi: ExtensionAPI) {
     // split into segments; each checked independently (quote-aware — a quoted
     // ';' is part of the command, not a separator). normalizeSegment strips env
     // prefixes and git global flags once, here, and the SAME normalized
-    // segments feed self-modify, R9 and destructive (2026-10-11:
-    // destructive judged the raw segment, so `git -C . push` skipped
+    // segments feed R9, destructive, and the /tmp write-target recording
+    // (2026-10-11: destructive judged the raw segment, so `git -C . push` skipped
     // the confirm while R9 caught `git -C x commit`)
     const normSegs = splitSegments(cmd).map(normalizeSegment);
 
@@ -1132,14 +1132,14 @@ export default function (pi: ExtensionAPI) {
     }
 
     // H2 (2026-10-08): destructive/mutating commands need explicit user
-    // approval — AFTER lint and self-modify (never ask permission for a
+    // approval — AFTER commitlint (never ask permission for a
     // command commitlint will reject anyway) and BEFORE R10. Approval order:
     // an affirmative in the invoking/latest user message (single ask — chat
     // approval was previously unwired: the dialog double-asked in UI mode and
     // headless was unwinnable), else the UI confirm dialog, else fail CLOSED,
     // teaching the model to ask in chat and wait (suite t08/t09: 6/6 without).
     // H2 (2026-10-08): destructive/mutating commands need explicit user
-    // approval — AFTER lint and self-modify (never ask permission for a
+    // approval — AFTER commitlint (never ask permission for a
     // command commitlint will reject anyway) and BEFORE R10. Approval order:
     // chat approval → remembered verbatim → UI confirm dialog → fail CLOSED.
     // S4 (2026-10-15): ladder extracted into confirmDestructive(), shared
