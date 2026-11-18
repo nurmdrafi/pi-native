@@ -24,6 +24,7 @@ Core: **design in grayscale first, color last.** Great UI = systems, not talent 
 Apply when "polish" touches data flow, not just styles:
 - Fetch-on-selection: staleness guard (cancelled flag / compare requested id) AND `.catch` clearing previous entity's data — late/failed response must never leave old data savable against new selection.
 - Clearing/resetting state: enumerate every derived field (rg its consumers). Common survivors: derived data field alive after its "Clear" action; dependent list alive after parent selection changes.
+- Dependent-select hierarchies (drill-down ladders like channel > business unit > category > brand): strictly sequential — a child select stays disabled until the level above holds a real pick ('all' counts as a pick); users must never jump levels. Clearing a level (emptying it, not picking 'all') clears every pick below it and re-locks those selects; a narrowed parent prunes stale children.
 - Form pre-filled from row 1 + `values.x ?? o.x` fallback = dead fallback; bulk saves apply row 1's value to every row. Open fields empty or track touched fields.
 - Lazy tab panes drop `setFieldsValue` made before mount (rc-tabs) — `forceRender: true` or prefill on tab activation.
 - AntD edit forms: `initialValues` bind only at Form mount — fetch-then-fill needs remount gate (loading spinner) or `form.setFieldsValue`; display-only `defaultValue` inside `Form.Item` leaves store empty, submits placeholder garbage (`moment(undefined)` formats as today).
