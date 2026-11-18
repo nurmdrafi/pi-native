@@ -5,7 +5,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { piread, write, bash, runBash, ROOT } from "../../harness/helpers.mjs";
+import { piread, write, bash, runBash, nextId, ROOT } from "../../harness/helpers.mjs";
 
 const lineText = (n) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
 const tmpFile = (name) => {
@@ -81,5 +81,109 @@ export const cases = [
     'WB: bash redirect into an untracked scratch file passes (no binding)',
     'pass',
     async (pi) => bash(pi, `echo x > ${tmpFile("scratch-free.ts")}`),
+  ],
+  // ---- Phase 3 (agent-behaviour audit AB-3, 2026-11-18): the 3d79dd5d
+  // evasion shape — a subagent's piwrite to a path outside its session dir
+  // is denied (WC confinement confirms, subagents fail closed), and the
+  // write is rerouted through a pibash heredoc to the SAME path. The bash
+  // write lane must honor the same confinement: the reroute blocks, the
+  // ungated lane does not exist. The scene-setting piwrite denial is part
+  // of the assertion — if confinement stops denying, the case fails loudly.
+  // Plain (no-heredoc) variant included: a redirect target is a write
+  // whatever feeds it.
+  [
+    'WB: subagent heredoc write to the path piwrite was denied is blocked (3d79dd5d)',
+    'blocked',
+    async (pi) => {
+      const session = mkdtempSync(join(tmpdir(), "pgate-ab3-session-"));
+      const target = join(
+        mkdtempSync(join(tmpdir(), "pgate-ab3-target-")),
+        "icon-research.ndjson",
+      );
+      const hadMarker = "PI_SUBAGENT_NAME" in process.env;
+      const prevMarker = process.env.PI_SUBAGENT_NAME;
+      process.env.PI_SUBAGENT_NAME = "icon-research";
+      try {
+        const denied = await pi.invoke(
+          "tool_call",
+          {
+            type: "tool_call",
+            toolName: "piwrite",
+            toolCallId: `tc${nextId()}`,
+            input: {
+              path: target,
+              content: '{"ts":"2026-11-08","src":"3d79dd5d"}',
+            },
+          },
+          { cwd: session },
+        );
+        if (!denied)
+          return {
+            blocked: false,
+            reason:
+              "scene broken: piwrite to the confined path was not denied",
+          };
+        // approving UI on purpose: the reroute must block even with a
+        // dialog that would say yes — subagent lanes fail closed. The await
+        // is load-bearing: an un-awaited `return bash(...)` lets the finally
+        // env-restore delete PI_SUBAGENT_NAME while the gate handler is still
+        // mid-flight (it reads the marker at call time), silently disarming
+        // the very guard under test.
+        return await bash(
+          pi,
+          `cat > ${target} <<'EOF'\n{"ts":"2026-11-08","src":"3d79dd5d"}\nEOF`,
+          { hasUI: true, mode: "tui", cwd: session, ui: { confirm: async () => true } },
+        );
+      } finally {
+        if (hadMarker) process.env.PI_SUBAGENT_NAME = prevMarker;
+        else delete process.env.PI_SUBAGENT_NAME;
+      }
+    },
+  ],
+  [
+    'WB: subagent plain redirect (no heredoc) to a confined path is blocked',
+    'blocked',
+    async (pi) => {
+      const session = mkdtempSync(join(tmpdir(), "pgate-ab3b-session-"));
+      const target = join(
+        mkdtempSync(join(tmpdir(), "pgate-ab3b-target-")),
+        "icon-research.ndjson",
+      );
+      const hadMarker = "PI_SUBAGENT_NAME" in process.env;
+      const prevMarker = process.env.PI_SUBAGENT_NAME;
+      process.env.PI_SUBAGENT_NAME = "icon-research";
+      try {
+        const denied = await pi.invoke(
+          "tool_call",
+          {
+            type: "tool_call",
+            toolName: "piwrite",
+            toolCallId: `tc${nextId()}`,
+            input: {
+              path: target,
+              content: '{"ts":"2026-11-08","src":"3d79dd5d"}',
+            },
+          },
+          { cwd: session },
+        );
+        if (!denied)
+          return {
+            blocked: false,
+            reason:
+              "scene broken: piwrite to the confined path was not denied",
+          };
+        // same load-bearing await as the heredoc case above — the finally
+        // must not restore the env before the gate handler reads it.
+        return await bash(pi, `cat > ${target}`, {
+          hasUI: true,
+          mode: "tui",
+          cwd: session,
+          ui: { confirm: async () => true },
+        });
+      } finally {
+        if (hadMarker) process.env.PI_SUBAGENT_NAME = prevMarker;
+        else delete process.env.PI_SUBAGENT_NAME;
+      }
+    },
   ],
 ];

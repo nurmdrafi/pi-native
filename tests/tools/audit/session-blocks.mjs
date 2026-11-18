@@ -109,6 +109,7 @@ const FAMILIES = [
   ["bash", /^Bash cap/],
   ["output", /^Output scrub/],
   ["phase", /^Phase/],
+  ["hygiene", /^Hygiene(?: \([^)]*\))?/],
   ["other", /.*/],
 ];
 /**

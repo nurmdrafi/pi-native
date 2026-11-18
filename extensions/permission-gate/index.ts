@@ -803,6 +803,14 @@ export default function (pi: ExtensionAPI) {
   // latest prompt arms/disarms chat approval for the destructive gate
   on("before_agent_start", (event) => {
     turn.turnsSeen++;
+    // TE1: the ended turn's shape feeds the single-call streak — exactly
+    // one call extends it, a batch (or any multi-call turn) resets it
+    if (teCallsThisTurn === 1) teSingleStreak += 1;
+    else if (teCallsThisTurn > 1) {
+      teSingleStreak = 0;
+      teWarnedStreak = false;
+    }
+    teCallsThisTurn = 0;
     const prompt = event.messageType === "user" ? event.prompt : "";
     lastUserPrompt = prompt;
     promptApproves = approvalIn(prompt);
@@ -814,6 +822,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   on("tool_call", async (event, ctx) => {
+    // TE1: every tool call counts toward the current turn's batch shape
+    teCallsThisTurn += 1;
     if (isToolCallEventType("edit", event) || isToolCallEventType("piedit", event)) {
       // S4 fix 3: malformed edit input — explicit block, never an analyzer throw
       if (typeof event.input.path !== "string" || !event.input.path.trim())
@@ -1419,6 +1429,25 @@ export default function (pi: ExtensionAPI) {
           if (r) return r;
         }
         pendingBashWrites.set(event.toolCallId, targets);
+      }
+    }
+
+    // AB-3 (agent-behaviour audit, 2026-11-18): subagent write-confinement
+    // parity for the bash lane — the 3d79dd5d evasion shape. A piwrite
+    // outside the session dir is denied above (WC + H2 fail-closed); the
+    // same write rerouted through a redirect/tee/heredoc must not find an
+    // ungated lane. Doctrine is subagent-specific by design: parents keep
+    // free scratch (H1 spills under /tmp), subagents are confined to the
+    // session dir — so out-of-cwd written targets confirm, and the
+    // subagent ladder fails closed. Parents never reach a new ask here.
+    if (ruleEnabled("destructiveConfirm") && process.env.PI_SUBAGENT_NAME) {
+      for (const t of [...new Set(bashWrittenPaths(normSegs, ctx?.cwd))]) {
+        const wc = writeConfinementReason("pibash", t, ctx?.cwd,
+          existsSync(t) && config.severity.writeBindingGuard === "off");
+        if (wc) {
+          const r = await confirmDestructive(`pibash:${t}`, wc, ctx, [t]);
+          if (r) return blockCall(r);
+        }
       }
     }
 
@@ -2062,6 +2091,36 @@ export default function (pi: ExtensionAPI) {
     turn.lastBashRun.clear();
     pendingBashFull.clear();
     turn.lastBlockedBash = undefined;
+    // TE1: compaction starts a fresh turn budget like cadence
+    teCallsThisTurn = 0;
+    teSingleStreak = 0;
+    teWarnedStreak = false;
+  });
+
+  // TE1 (agent-behaviour audit AB-5, 2026-11-18): linear one-call-per-turn
+  // chains dominate the heaviest sessions (78.5% of window sessions were
+  // size-1-batch dominated; the 10 heaviest scored parallel share 7-23%).
+  // NON-blocking by contract (warn never block), so severity gates only
+  // on/off and this handler cannot return a block whatever the config says.
+  let teCallsThisTurn = 0;
+  let teSingleStreak = 0;
+  let teWarnedStreak = false;
+  on("tool_result", async (event) => {
+    if (!ruleEnabled("tokenEconomy")) return;
+    if (teWarnedStreak) return;
+    if (teCallsThisTurn !== 1) return; // only a lone call's result qualifies
+    if (teSingleStreak + 1 < 5) return;
+    if (blockFamilyOf(event)) return; // never ride a synthesized block result
+    teWarnedStreak = true;
+    return {
+      content: [
+        ...(event.content ?? []),
+        {
+          type: "text",
+          text: "Token Economy (Batching): 5 consecutive single-call turns — batch independent calls in one turn (parallel tool calls in one message) to cut round-trips and prefix re-billing.",
+        },
+      ],
+    };
   });
 
   // R1 resume hydration (2026-10-07): a resumed/continued session replays its
@@ -2093,6 +2152,10 @@ export default function (pi: ExtensionAPI) {
     pendingSearchCalls.clear();
     searchHits.clear();
     tmpWriteTargets.clear();
+    // TE1: new session, fresh batching streak
+    teCallsThisTurn = 0;
+    teSingleStreak = 0;
+    teWarnedStreak = false;
     bashWriteBinds.clear();
     pendingBashWrites.clear();
     warnEscalation.clear();

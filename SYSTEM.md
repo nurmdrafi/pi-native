@@ -40,9 +40,10 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 - Before planning from lesson records, inspect the log tail; compose new records with `jq -c -n`. Check the final byte before appending with `>>`; add a newline first if the file is non-empty and lacks one.
 
 ## Commit calls
-- Write the commit message to a file and validate every line with:
+- Gate-checked route (default): inline `git commit -m` is acceptable because the commit-message gate is a hard floor — it enforces the shape (no `#` anywhere, <=100 chars per line). On rejection, rewrite the message only; never resend it unchanged, never commit past the gate.
+- Message-file route (no gate active): write the message to a file and validate every line with:
   `awk 'length>100 || index($0,"#") {print "line " FNR ": " length " chars or contains #"; exit 1}' <msgfile>`
-- Run `git add` and `git commit -F <msgfile>` in one shell call.
+  then run `git add` and `git commit -F <msgfile>` in one shell call.
 
 ## Portability
 - Apply `~/.pi/agent/docs/portability.md` before shell or path work.

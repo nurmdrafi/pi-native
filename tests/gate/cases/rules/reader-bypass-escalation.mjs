@@ -71,4 +71,54 @@ export const cases = [
     "pass",
     async (pi) => notedBy(await runBash(pi, "find src -name '*.ts'"), "Search (fd-first)", "./"),
   ],
+  // ---- Phase 5 T5.1 (audit AB-4): the heavy-session reader shape is many
+  // command-position single-file `cat` views. The A8 counter contract holds
+  // for that shape too — warns carry the recipe twice, the 3rd distinct
+  // command-position reader blocks — and pipeline trims (| head, | rg) are
+  // exempt by design (search-guard.ts headTailReadsFile): they filter output
+  // a command already produced, so they stay free AND never count.
+  [
+    "AB4: 3rd command-position cat file view in one session escalates to a block",
+    "blocked",
+    async (pi) => {
+      // distinct files so R10 (re-run guard) cannot absorb the repeats
+      const views = ["a", "b", "c"].map((n) => {
+        const f = join(tmp, `ab4-${n}.log`);
+        writeFileSync(f, `log line\n`.repeat(20));
+        return f;
+      });
+      const r1 = await runBash(pi, `cat ${views[0]}`);
+      if (r1.blocked) return { blocked: false, reason: "1st cat view already blocked (precondition)" };
+      if (!noteOf(r1).includes("Reader-bypass"))
+        return { blocked: false, reason: "1st cat view carried no Reader-bypass recipe warn" };
+      const r2 = await runBash(pi, `cat ${views[1]}`);
+      if (r2.blocked) return { blocked: false, reason: "2nd cat view already blocked (precondition)" };
+      const r3 = await runBash(pi, `cat ${views[2]}`);
+      return r3.blocked && /3rd|session/.test(r3.reason)
+        ? { blocked: true, reason: r3.reason }
+        : { blocked: false, reason: `3rd cat view not escalated: ${r3.blocked ? r3.reason : "passed"}` };
+    },
+  ],
+  [
+    "AB4: pipeline trims (| head, | rg) stay free and never count as reader bypass",
+    "pass",
+    async (pi) => {
+      const trims = [
+        "npm test | head -40",
+        "node --test tests/gate/runner.test.mjs | tail -20",
+        "npm test | rg FAIL",
+        "git log --oneline -5 | head -3",
+      ];
+      const notes = [];
+      for (const cmd of trims) {
+        const r = await runBash(pi, cmd);
+        if (r.blocked)
+          return { blocked: true, reason: `trim blocked: ${cmd} -> ${r.reason.slice(0, 80)}` };
+        notes.push(noteOf(r));
+      }
+      return notes.every((n) => !n.includes("Reader-bypass"))
+        ? { blocked: false }
+        : { blocked: true, reason: `a pipeline trim was flagged as a reader bypass: ${notes.join(" | ").slice(0, 120)}` };
+    },
+  ],
 ];

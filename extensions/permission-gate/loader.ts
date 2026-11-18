@@ -112,6 +112,10 @@ export const RULE_IDS = {
   /** Hygiene (reader-bypass) — SE2: a read-position `cat`/`sed -n`/`head`/`tail`
    *  reading a file blocks; the reason names the piread call that replaces it. */
   readerBypass: "SE2",
+  /** Token Economy (batching) — TE1: 5 consecutive single-call assistant
+   *  turns ride a non-blocking batching-recipe note on the 5th turn's
+   *  tool_result; a batched turn resets the streak. Warn by contract. */
+  tokenEconomy: "TE1",
   /** Hygiene (view credit) — VC: printed lines of a mappable view command
    *  (head/tail/sed -n/cat) certify read spans; any non-"off" enables. */
   bashViewCredit: "VC",
