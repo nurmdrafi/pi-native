@@ -18,13 +18,13 @@ Phase = plan.md phases. Tick only after its test passes.
 - [ ] toolchain.ts, safe-bash.ts, index.ts:1057 stale comments fixed
 
 ## Phase 2 — Judge accuracy (A6/A7/A13)
-- [ ] Failing test: `node -e "1+1"` allowed, `node -e "fs.rmSync"` confirmed
-- [ ] INTERP_BODY_DESTRUCTIVE applied to inline -e/-c bodies
-- [ ] Failing test: `python3 - <<EOF ... rmtree ... EOF` confirmed
-- [ ] Heredoc interpreter bodies judged line-by-line
-- [ ] osascript -e added to INTERP_INLINE
-- [ ] Write-then-execute signal implemented + tested
-- [ ] security-fixture corpus extended (bash-block.txt additions)
+- [x] Failing test: `node -e "1+1"` allowed, `node -e "fs.rmSync"` confirmed
+- [x] INTERP_BODY_DESTRUCTIVE applied to inline -e/-c bodies
+- [x] Failing test: `python3 - <<EOF ... rmtree ... EOF` confirmed
+- [x] Heredoc interpreter bodies judged line-by-line
+- [x] osascript -e added to INTERP_INLINE
+- [x] Write-then-execute signal implemented + tested
+- [x] security-fixture corpus extended (bash-block.txt additions)
 
 ## Phase 3 — Teach + escalate + composition (A4/A8/A15)
 - [ ] Failing test: SE2/SS2/SS3 messages carry composition recipe

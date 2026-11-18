@@ -79,3 +79,9 @@ ls -R . 2>/dev/null
 find .
 find . -exec grep x {} ;
 cat big.log 2>&1 ## npm test
+# Phase 2 (2026-11-18 audit, A6): benign inline-interpreter bodies are judged
+# on their code, not their destination — arithmetic to /tmp is a scratch write
+node -e 'console.log(1+1)' > /tmp/arith.js
+# Phase 2 write-then-execute: re-reading a session-planted /tmp file is benign
+# (rg — the sanctioned reader; the corpus's cat steps hit the live Reader-bypass block)
+printf 'rm -rf canary' > /tmp/fp-w2e-rd.js ## rg -n 'rm' /tmp/fp-w2e-rd.js

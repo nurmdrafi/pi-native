@@ -52,6 +52,8 @@ import {
   segmentDestructive,
   segmentDestructiveExceptGit,
   splitSegments,
+  tmpWriteTargetsOf,
+  executesRecordedTmpTarget,
 } from "./rules/destructive.ts";
 import { validateCommitMessages } from "./rules/commitlint.ts";
 import {
@@ -203,6 +205,10 @@ export default function (pi: ExtensionAPI) {
   const coverage = new Map<string, CoverageEntry>();
   /** R1c locate-first: absolute paths a search command named this session. */
   const searchedPaths = new Set<string>();
+  /** Phase 2 (audit A6, 2026-11-18): /tmp paths this session planted via a
+   * bash redirect/tee — feeding the write-then-execute confirm in the bash
+   * tool_call lane. Session-scoped: session_start clears it. */
+  const tmpWriteTargets = new Set<string>();
   /** Record R1c search targets. Local closure: the path resolver and the
    * on-disk probe are already in scope. */
   const recordSearchedPaths = (segs: string[], cwd: string | undefined) => {
@@ -1059,6 +1065,12 @@ export default function (pi: ExtensionAPI) {
     // the confirm while R9 caught `git -C x commit`)
     const normSegs = splitSegments(cmd).map(normalizeSegment);
 
+    // Phase 2 (audit A6, 2026-11-18): record /tmp write targets for the
+    // write-then-execute check below — a file this session planted stays
+    // suspect when something executes it later in the session.
+    for (const seg of normSegs)
+      for (const t of tmpWriteTargetsOf(seg)) tmpWriteTargets.add(t);
+
     for (const seg of normSegs) {
       // R9: commit message must follow the commitlint conventional pattern
       if (ruleEnabled("commitMessageLint") && /^git commit\b/.test(seg)) {
@@ -1144,6 +1156,24 @@ export default function (pi: ExtensionAPI) {
         ctx,
       );
       if (r) return blockCall(r);
+    }
+
+    // Phase 2 (audit A6, 2026-11-18): write-then-execute — a file this
+    // session planted under /tmp, now executed (command position or
+    // interpreter operand), is the planted-payload lane the A6 body-judging
+    // relaxation opened; it confirms through the same ladder (H2 is
+    // yolo-floored, so the ask survives /yolo). Benign re-reads (cat/grep)
+    // never match — only execution positions do.
+    if (ruleEnabled("destructiveConfirm")) {
+      const hit = executesRecordedTmpTarget(normSegs, tmpWriteTargets);
+      if (hit) {
+        const r = await confirmDestructive(
+          cmd,
+          `'${cmd.slice(0, 33)}' runs a file this session wrote (write-then-execute) and`,
+          ctx,
+        );
+        if (r) return blockCall(r);
+      }
     }
 
     // R10 (2026-10-06 audit; rekeyed 2026-10-07): identical re-run guard — the
@@ -1768,6 +1798,7 @@ export default function (pi: ExtensionAPI) {
     pendingBashFull.clear();
     pendingSearchCalls.clear();
     searchHits.clear();
+    tmpWriteTargets.clear();
     turn.lastBlockedBash = undefined;
     turn.turnsSeen = 0;
     turn.cadenceFired = false;

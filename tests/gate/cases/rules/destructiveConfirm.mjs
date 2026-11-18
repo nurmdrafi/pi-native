@@ -867,35 +867,44 @@ export const cases = [
     async (pi) =>
       bash(pi, "git log --grep python3 -c", { hasUI: false, mode: "print" }),
   ],
+  // ---- Phase 2 (2026-11-18 audit, A6): the interp tripwire judges the
+  // BODY — the position pins below carry destructive bodies so they still
+  // pin command-position anchoring; benign bodies now pass wherever their
+  // stdout lands (write-then-execute covers the planted-file follow-up) ----
   [
     "16.3 interp inline: node -e at segment start confirms",
     "blocked",
-    async (pi) => bash(pi, 'node -e "console.log(1)"', denyUi()),
+    async (pi) => bash(pi, 'node -e "rmSync(\'x\')"', denyUi()),
   ],
   [
     "16.3 interp inline: after a separator confirms",
     "blocked",
-    async (pi) => bash(pi, "ls; node -e x", denyUi()),
+    async (pi) => bash(pi, 'ls; node -e \'rmSync("x")\'', denyUi()),
   ],
   [
     "16.3 interp inline: inside a command substitution confirms",
     "blocked",
-    async (pi) => bash(pi, "echo $(node -e x)", denyUi()),
+    async (pi) => bash(pi, "echo $(node -e 'rmSync(\"x\")')", denyUi()),
   ],
   [
     "16.3 interp inline: backtick substitution confirms",
     "blocked",
-    async (pi) => bash(pi, "echo `perl -e x`", denyUi()),
+    async (pi) => bash(pi, "echo `perl -e 'system(\"rm -rf /tmp/x\")'`", denyUi()),
   ],
   [
     "16.3 interp inline: env-prefixed python -c confirms",
     "blocked",
-    async (pi) => bash(pi, "FOO=1 python3 -c 'print(1)'", denyUi()),
+    async (pi) => bash(pi, 'FOO=1 python3 -c \'import os; os.remove("x")\'', denyUi()),
   ],
   [
     "16.3 interp inline: sudo-wrapped node -e confirms",
     "blocked",
-    async (pi) => bash(pi, "sudo node -e x", denyUi()),
+    async (pi) => bash(pi, 'sudo node -e \'rmSync("x")\'', denyUi()),
+  ],
+  [
+    "16.4 interp body: benign node -e arithmetic to /tmp passes",
+    "pass",
+    async (pi) => bash(pi, "node -e '1+1' > /tmp/fp.js", { hasUI: false, mode: "print" }),
   ],
   [
     "interp scratch: node -e writing under .cache is allowed",
@@ -903,8 +912,60 @@ export const cases = [
     async (pi) => bash(pi, "node -e 'x' > .cache/out.jsonl", denyUi()),
   ],
   [
-    "interp scratch: node -e writing into the tree still confirms",
-    "blocked",
+    "16.4 interp body: benign body writing into the tree passes (A6)",
+    "pass",
     async (pi) => bash(pi, "node -e 'x' > src/generated.ts", denyUi()),
+  ],
+  // ---- Phase 2 (audit A7): interpreter heredocs — the body is code ----
+  [
+    "P2 heredoc: python heredoc body with shutil.rmtree confirms",
+    "blocked",
+    async (pi) =>
+      bash(
+        pi,
+        "python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/tmp/victim')\nEOF",
+        denyUi(),
+      ),
+  ],
+  [
+    "P2 heredoc: benign python heredoc body passes",
+    "pass",
+    async (pi) =>
+      bash(pi, "python3 - <<'EOF'\nprint(sum(range(10)))\nEOF", {
+        hasUI: false,
+        mode: "print",
+      }),
+  ],
+  // ---- Phase 2 (audit A13 partial): osascript -e joins the tripwire ----
+  [
+    "P2 osascript: -e Finder delete confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, 'osascript -e \'tell application "Finder" to empty trash\'', denyUi()),
+  ],
+  // ---- Phase 2 (audit A6): write-then-execute session signal ----
+  [
+    "P2 write-then-execute: running a session-written /tmp script confirms",
+    "blocked",
+    async (pi) => {
+      const w = await bash(pi, "printf 'rm -rf /tmp/x' > /tmp/fp-p2.js", {
+        hasUI: false,
+        mode: "print",
+      });
+      if (w.blocked) return { blocked: false, reason: `write step blocked: ${w.reason}` };
+      return bash(pi, "bash /tmp/fp-p2.js", denyUi());
+    },
+  ],
+  [
+    "P2 write-then-execute: re-reading a session-written /tmp file passes",
+    "pass",
+    async (pi) => {
+      const w = await bash(pi, "printf 'rm -rf /tmp/x' > /tmp/fp-p2b.js", {
+        hasUI: false,
+        mode: "print",
+      });
+      if (w.blocked) return w;
+      return bash(pi, "cat /tmp/fp-p2b.js", { hasUI: false, mode: "print" });
+    },
   ],
 ];

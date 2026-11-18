@@ -7,7 +7,6 @@
  * determined rewrite escapes it. AGENTS.md discipline and the user's eyes are
  * the actual boundary. */
 import { homedir } from "os";
-import { join } from "path";
 import { realpathSync } from "fs";
 import { config } from "../loader.ts";
 
@@ -196,12 +195,14 @@ const DESTRUCTIVE_ANYWHERE = new RegExp(DESTRUCTIVE_CORE_SRC, "i");
  * position — segment start (after env assignments and known wrappers) or right
  * after a command-substitution opener. Unanchored matching confirmed a quoted
  * mention (`rg -n "node -e" docs`) as destructive although nothing ran, which
- * blocked read-only review children probing their own docs. */
+ * blocked read-only review children probing their own docs.
+ * Phase 2 (audit A13, 2026-11-18): osascript -e joins the list — an inline
+ * AppleScript payload is the same unscannable-exec lane. */
 const INTERP_INLINE = new RegExp(
   "(?:^|`|\\$\\(\\s*)" +
     "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*" +
     "(?:(?:sudo|env|command|nohup|time|nice|xargs)\\s+(?:-\\S+\\s+)*)*" +
-    "(?:\\b(?:perl|ruby|php|node|deno|bun)\\b[^|;&]*\\s(?:-e|--eval)\\b" +
+    "(?:\\b(?:perl|ruby|php|node|deno|bun|osascript)\\b[^|;&]*\\s(?:-e|--eval)\\b" +
     "|\\bpython3?\\b[^|;&]*\\s-[cm]\\b" +
     "|\\bawk\\b[^|;&]*\\bsystem\\s*\\()",
   "i",
@@ -256,36 +257,16 @@ const expandWrittenTarget = (t: string) =>
 const REDIRECT_TARGET = /(?<![=>!\-\d])(?:>>?)\s+([^\s&>]+)/g;
 const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
 
-/**
- * 2026-11-02: scratch writes — an inline-interpreter payload whose every
- * redirect/tee target lands under the agent home's `.cache/` (absolute, or a
- * repo-relative `.cache/...`) writes throwaway data only. Log forensics and
- * replay dumps run there, and the interpreter tripwire used to confirm every
- * one of them. At least one target is required: a payload with no redirect can
- * still mutate the tree, so it keeps the confirm.
- */
-const scratchWriteOnly = (seg: string): boolean => {
-  const targets = [
-    ...[...seg.matchAll(REDIRECT_TARGET)].map((m) => m[1]),
-    ...[...seg.matchAll(TEE_TARGET)].map((m) => m[1]),
-  ].map(expandWrittenTarget);
-  if (targets.length === 0) return false;
-  const agentCache = join(homedir(), ".pi", "agent", ".cache");
-  return targets.every(
-    (t) =>
-      t.startsWith(agentCache + "/") ||
-      t.startsWith(join(homedir(), ".cache") + "/") ||
-      /^\.{0,2}\/?\.cache\//.test(t),
-  );
-};
-
-/** 2026-11-07 HIGH fix: the scratch exemption above is only for payloads
- * that merely WRITE throwaway data. An inline-interpreter body that itself
- * deletes (node fs rmSync, python shutil.rmtree/os.remove, an embedded
- * `rm -r…`) is destructive no matter where stdout lands — the destination
- * of the print never sanitizes the code that runs. */
+/** Phase 2 (audit A6, 2026-11-18): an inline-interpreter payload confirms on
+ * its BODY's deletion/unlink vocabulary — never on where its stdout lands
+ * (the `node -e` arithmetic false positive confirmed on a /tmp redirect and
+ * rerouted writers into scratch files; 2026-11-02's .cache destination
+ * exemption is subsumed — destinations no longer matter to this judge).
+ * Vocabulary stays deletion-only — rm/rmdir/unlink semantics plus
+ * AppleScript deletion (A13); moves and writes are not destructive confirms.
+ * The planted-file follow-up is the write-then-execute signal (index.ts). */
 const INTERP_BODY_DESTRUCTIVE =
-  /\b(?:rmSync|rmdirSync|unlinkSync|shutil\.rmtree|os\.remove)\b|\brm\s+-[a-zA-Z]*[rRf]/;
+  /\b(?:rmSync|rmdirSync|unlinkSync|unlink|shutil\.rmtree|os\.remove|fs\.rm|promises\.rm|rm)\b|\btell\s+application\b[^\n]*\b(?:delete|empty\s+trash)\b/;
 
 /** Structural destructive signals shared by both judges: protected
  * redirect/tee targets, wrapped payloads, interpreter escapes, encoded
@@ -302,11 +283,11 @@ const structuralDestructive = (s: string): boolean =>
   ) ||
   (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
   // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
-  // 2026-11-07 HIGH fix: scratch destinations exempt only benign bodies —
-  // a destructive interpreter payload confirms regardless of where its
-  // redirects or tees land.
-  (INTERP_INLINE.test(s) &&
-    (!scratchWriteOnly(s) || INTERP_BODY_DESTRUCTIVE.test(s))) ||
+  // 2026-11-18 (audit A6): the inline-interpreter tripwire judges the BODY's
+  // own vocabulary only — never where a benign payload's stdout lands (the
+  // `node -e` arithmetic false positive); protected redirects confirm above,
+  // and the planted-file follow-up is index.ts's write-then-execute signal.
+  (INTERP_INLINE.test(s) && INTERP_BODY_DESTRUCTIVE.test(s)) ||
   EVAL_ENCODED.test(s) ||
   (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s));
 
@@ -342,11 +323,21 @@ export const isMutatingCommand = (cmd: string): boolean =>
  * last tag — earlier bodies are swallowed by its body, still never scanned. */
 const HEREDOC_OPENER =
   /(?<!<)<<(?!<)(-?)\s*(?:"([^"\s]+)"|'([^'\s]+)'|([^\s'";&|<>]+))\s*$/;
+/** Phase 2 (audit A7, 2026-11-18): heredoc openers that feed an interpreter
+ * run their body as code. Two families: shell words (re-emitted body lines
+ * judge as plain shell segments) and inline-code interpreters (destructive
+ * body lines re-emit as the equivalent inline call). Non-interpreter openers
+ * (cat, wc, psql…) keep the 16.1 rule — body lines are data. */
+const INTERP_OPENER_WORD =
+  /\b(?:python3?|node|deno|bun|perl|ruby|php|osascript|(?:ba|z|da|k)?sh)\b/i;
+const INLINE_CODE_WORD = /\b(?:python3?|node|deno|bun|perl|ruby|php|osascript)\b/;
 const heredocOf = (seg: string) => {
   const m = HEREDOC_OPENER.exec(seg);
   if (!m) return undefined;
   const tag = m[2] ?? m[3] ?? m[4];
-  return tag ? { tag, stripTabs: m[1] === "-" } : undefined;
+  if (!tag) return undefined;
+  const word = INTERP_OPENER_WORD.exec(seg)?.[0]?.toLowerCase();
+  return { tag, stripTabs: m[1] === "-", word };
 };
 
 /** 2026-11-07 HIGH fix: a heredoc feeding a shell runs its body —
@@ -367,8 +358,8 @@ export function splitSegments(cmd: string): string[] {
   // blocked three review children on /tmp durability writes); only the opener
   // segment is emitted and scanned. Delimiter match: raw body line, leading
   // tabs stripped first for `<<-`, exact equality with the (unquoted) tag.
-  let armed: { tag: string; stripTabs: boolean } | undefined;
-  let heredoc: { tag: string; stripTabs: boolean } | undefined;
+  let armed: { tag: string; stripTabs: boolean; word?: string } | undefined;
+  let heredoc: { tag: string; stripTabs: boolean; word?: string } | undefined;
   let line = "";
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i];
@@ -386,7 +377,19 @@ export function splitSegments(cmd: string): string[] {
         // 2026-11-07 HIGH fix: a destructive body line is re-emitted as its
         // own segment — heredoc-fed shells must not launder `rm -rf` past
         // the confirm. Prose mid-line mentions stay dropped (16.1 pins).
+        // 2026-11-18 (audit A7): an opener that names an interpreter feeds a
+        // PROGRAM — its body is additionally judged on interpreter-destructive
+        // words mid-line. sh-family openers re-emit the line raw (plain shell
+        // judging covers command words and substitutions); inline-code openers
+        // re-emit the equivalent inline call so the interp judge sees the body.
         else if (HEREDOC_BODY_CMD.test(raw)) out.push(raw);
+        else if (heredoc.word && INTERP_BODY_DESTRUCTIVE.test(raw)) {
+          out.push(
+            INLINE_CODE_WORD.test(heredoc.word)
+              ? `${heredoc.word} ${/^python/.test(heredoc.word) ? "-c" : "-e"} ${raw}`
+              : raw,
+          );
+        }
         line = "";
       } else {
         line += ch;
@@ -475,3 +478,70 @@ export const normalizeSegment = (seg: string) => {
  * approval in the invoking message counts — incl. /ship, /issue, /update-changelog) */
 export const APPROVAL_RE =
   /\b(?:yes|y|approve[ds]?|go[ -]ahead|run it|do it|proceed|ship it)\b|^\/(?:ship|issue|update-changelog)\b/im;
+
+/** Phase 2 (audit A6, 2026-11-18): write-then-execute — the lane the A6
+ * body-judging relaxation opens (a benign inline body planting a scratch
+ * file, then running it). index.ts records every /tmp redirect/tee target
+ * per session (as written, plus realpath so symlink spellings match);
+ * a later command in the SAME session executing one of those paths — at
+ * command position or as an operand of a shell/script interpreter — is the
+ * planted-payload shape and confirms through the ordinary ladder. The pure
+ * halves live here so segment logic keeps one home; session state resets on
+ * session_start. Benign re-reads (cat/grep/wc) never match: only execution
+ * positions do. */
+const TMP_WRITE_PREFIX = /^\/(?:private\/)?tmp\//;
+/** /tmp write targets of one segment, as written (realpath appended when it
+ * resolves — macOS /tmp is /private/tmp; a not-yet-written target still
+ * matches by its written spelling). */
+export const tmpWriteTargetsOf = (seg: string): string[] => {
+  const out: string[] = [];
+  for (const re of [REDIRECT_TARGET, TEE_TARGET]) {
+    for (const m of seg.matchAll(re)) {
+      const t = expandWrittenTarget(m[1]);
+      if (!TMP_WRITE_PREFIX.test(t)) continue;
+      out.push(t);
+      try {
+        const rp = realpathSync(t);
+        if (rp !== t) out.push(rp);
+      } catch {
+        /* not on disk yet — the written spelling still matches */
+      }
+    }
+  }
+  return out;
+};
+/** interpreters whose file operand EXECUTES that file (osascript included,
+ * A13). A bare word before the interpreter must be a pipe or a transparent
+ * wrapper — `grep bash <file>` is a pattern, not an execution. */
+const TMP_EXEC_INTERP =
+  /^(?:python3?|node|deno|bun|osascript|(?:ba|z|da|k)?sh)$/;
+const TMP_EXEC_WRAPPER = /^(?:sudo|env|command|exec|nohup|nice|xargs)$/;
+/** the recorded path this command executes (command position or interpreter
+ * operand), or undefined when it only reads/mentions recorded paths */
+export const executesRecordedTmpTarget = (
+  segs: string[],
+  recorded: Set<string>,
+): string | undefined => {
+  for (const seg of segs) {
+    // the segment's OWN redirect/tee targets are destinations, not operands
+    // — `node -e '1+1' > /tmp/fp.js` writes the file, it does not run it
+    const own = new Set(tmpWriteTargetsOf(seg));
+    const toks = seg
+      .split(/\s+/)
+      .map((t) => t.replace(/^["']+|["']+$/, ""));
+    if (toks.length > 0 && recorded.has(toks[0]) && !own.has(toks[0]))
+      return toks[0];
+    for (let i = 0; i < toks.length; i++) {
+      if (!TMP_EXEC_INTERP.test(toks[i])) continue;
+      if (
+        i > 0 &&
+        toks[i - 1] !== "|" &&
+        !TMP_EXEC_WRAPPER.test(toks[i - 1])
+      )
+        continue;
+      for (let j = i + 1; j < toks.length; j++)
+        if (recorded.has(toks[j]) && !own.has(toks[j])) return toks[j];
+    }
+  }
+  return undefined;
+};
