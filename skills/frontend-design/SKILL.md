@@ -45,6 +45,7 @@ Match existing patterns before introducing new ones. New framework = new file un
 
 - Mutating routes/admin panels: permission gating from day one.
 - Fetch-on-selection effects: staleness guard + `.catch` + clear list while refetching (out-of-order responses never repaint old entity's data).
+- Dependent-select hierarchies (drill-down ladders like channel > business unit > category): ship them sequential — a child select stays disabled until the level above holds a real pick ('all' counts); clearing a level clears every pick below it and re-locks the children.
 - Bulk-edit forms: open empty or track touched fields — pre-filled field makes every `values.x ?? o.x` fallback dead code.
 - Conditional visibility: check polarity + DEFAULT state of every span/collapse condition before shipping.
 - Framework-specific guards (AntD forms/tabs/tables): [references/ant-design.md](references/ant-design.md).

@@ -160,11 +160,12 @@ export type Severity = "off" | "warn" | "error";
  * editAnchorGuard left this set 2026-10-28 by user direction: the edit
  * pipeline itself enforces oldText existence/uniqueness/overlap, so AG is
  * a teaching layer — warn notes carry the fix; content match decides.
- * destructiveConfirm left this set 2026-11-17 by user direction (global
- * allow-all): it is config-controlled like every other rule — shipped
- * "off"; re-arm via config.json H2 or PGATE_H2=error. */
+ * destructiveConfirm re-entered this set 2026-11-18 by owner direction
+ * (audit A1): the approval boundary is re-armed — never below error,
+ * whatever config says, and yolo-proof via YOLO_FLOOR. */
 export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
   "commitMessageLint",
+  "destructiveConfirm",
 ] as RuleKey[]);
 
 
@@ -355,15 +356,16 @@ export const config: GateConfig = loadGateConfig();
 let yolo = false;
 
 /** Rules the /yolo bypass cannot silence: the commit-message gate
- * (commitMessageLint). destructiveConfirm left the floor 2026-11-17 by
- * user direction (global allow-all): it is an ordinary configurable rule
- * now, governed by config.json H2 / PGATE_H2 — silent when off, armed
- * when re-enabled (and, re-armed, silencable by yolo like any non-floor
- * rule). The git-family confirm entries' bypass auto-approval
- * (segmentDestructiveExceptGit, user direction 2026-11-12) is moot while
- * H2 is off. Same shape as HARD_RULES: a floor the mode cannot lower. */
+ * (commitMessageLint) and the destructive confirm (destructiveConfirm,
+ * re-floored 2026-11-18 by owner direction, audit A1 — yolo cannot silence
+ * the approval boundary). Under yolo the confirm ladder still runs with the
+ * except-git judge (segmentDestructiveExceptGit, user direction
+ * 2026-11-12): git-family asks auto-approve, every other destructive signal
+ * confirms as before. Same shape as HARD_RULES: a floor the mode cannot
+ * lower. */
 export const YOLO_FLOOR: ReadonlySet<RuleKey> = new Set([
   "commitMessageLint",
+  "destructiveConfirm",
 ] as RuleKey[]);
 
 /** True while the `/yolo` bypass is active (this process, this session). */

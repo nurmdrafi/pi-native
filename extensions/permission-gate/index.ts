@@ -38,6 +38,7 @@ import {
 } from "fs";
 import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
 import { toLF, validateEditAnchors } from "./rules/anchor-guard.ts";
@@ -52,6 +53,8 @@ import {
   segmentDestructive,
   segmentDestructiveExceptGit,
   splitSegments,
+  tmpWriteTargetsOf,
+  executesRecordedTmpTarget,
 } from "./rules/destructive.ts";
 import { validateCommitMessages } from "./rules/commitlint.ts";
 import {
@@ -203,6 +206,10 @@ export default function (pi: ExtensionAPI) {
   const coverage = new Map<string, CoverageEntry>();
   /** R1c locate-first: absolute paths a search command named this session. */
   const searchedPaths = new Set<string>();
+  /** Phase 2 (audit A6, 2026-11-18): /tmp paths this session planted via a
+   * bash redirect/tee — feeding the write-then-execute confirm in the bash
+   * tool_call lane. Session-scoped: session_start clears it. */
+  const tmpWriteTargets = new Set<string>();
   /** Record R1c search targets. Local closure: the path resolver and the
    * on-disk probe are already in scope. */
   const recordSearchedPaths = (segs: string[], cwd: string | undefined) => {
@@ -298,9 +305,41 @@ export default function (pi: ExtensionAPI) {
 
   /** H2: last user-approved destructive command (verbatim) + when */
   let lastApprovedDestructive: { cmd: string; ts: number } | undefined;
+  /** A15 (2026-11-18): session-scoped warn counter per rule family — a warn
+   * ignored three times in one session promotes to a block (behavior-change
+   * loop; 2026-11-18 taxonomy: 21% of blocks ended in partial compliance and
+   * warns were dead letters). Reset at session_start like the rest. */
+  const warnEscalation = new Map<string, number>();
+  const ESCALATE_AT = 3;
+  const ESCALATABLE = new Set(["readerBypass", "searchMidPipe", "findFirst"] as const);
   /** H2/chat (2026-10-11): the latest user message approved destructive work —
    * counts as approval for the turn it arrived in (single ask; see APPROVAL_RE) */
   let promptApproves = false;
+  /** A2 (2026-11-18): the gate's own tree is control plane — write/edit into
+   * extensions/permission-gate/** requires a chat affirmative that names gate
+   * maintenance, so a self-modify cannot ride a generic "yes". */
+  let lastUserPrompt = "";
+  const GATE_TREE = dirname(fileURLToPath(import.meta.url));
+  const gateMaintenanceNamed = () =>
+    APPROVAL_RE.test(lastUserPrompt) && /gate\s+maintenance/i.test(lastUserPrompt);
+  const inGateTree = (abs: string): boolean => {
+    if (!abs) return false;
+    let real = abs;
+    try {
+      real = realpathSync(abs);
+    } catch {
+      try {
+        real = join(realpathSync(dirname(abs)), basename(abs));
+      } catch {
+        return false;
+      }
+    }
+    return real === GATE_TREE || real.startsWith(GATE_TREE + "/");
+  };
+  const controlPlaneBlock = (tool: string, abs: string) =>
+    blockCall(
+      `Permission Gate (Control plane): ${tool} into the permission-gate tree needs chat approval naming gate maintenance (e.g. "yes, approve gate maintenance").`,
+    );
 
   /**
    * A block returns the reason to the model; nothing is persisted. Session
@@ -341,8 +380,17 @@ export default function (pi: ExtensionAPI) {
     key: Parameters<typeof ruleSeverity>[0],
     reason: string,
     id?: string,
-  ): { block: true; reason: string } | undefined =>
-    ruleBlocks(key) ? blockCall(reason) : ruleEnabled(key) ? warnCall(reason, id) : undefined;
+  ): { block: true; reason: string } | undefined => {
+    if (ruleBlocks(key)) return blockCall(reason);
+    if (!ruleEnabled(key)) return undefined;
+    if (ESCALATABLE.has(key as never)) {
+      const n = (warnEscalation.get(key) ?? 0) + 1;
+      warnEscalation.set(key, n);
+      if (n >= ESCALATE_AT)
+        return blockCall(`${reason} [${n === 3 ? "3rd" : `${n}th`} this session — warns block]`);
+    }
+    return warnCall(reason, id);
+  };
   // S4 fix 1 (2026-10-15, spec §5.2): fail-closed handler wrap — an unexpected
   // exception in ANY handler must never fail open. tool_call → generic internal
   // block (the call never runs; a rejected handler otherwise lets the tool
@@ -403,7 +451,7 @@ export default function (pi: ExtensionAPI) {
       setYolo(next);
       ctx.ui.notify(
         next
-          ? "yolo ON: permission asks are off for this session (destructive/protected confirm stays) — /yolo off restores"
+          ? "yolo ON: permission asks off for this session — commit-message lint and destructive/protected confirms stay — /yolo off restores"
           : "yolo OFF: permission gates restored",
         next ? "warning" : "info",
       );
@@ -553,8 +601,9 @@ export default function (pi: ExtensionAPI) {
     }
     logDecision("block", key);
     return (
-      `Permission Gate (Destructive): ${subject} needs the user's approval ` +
-      `first — ${ctx?.hasUI ? "the user declined" : "no chat approval, no confirm dialog"}; ask in chat and wait. Never run it unprompted.`
+      `Permission Gate (Destructive): ${subject} needs user approval ` +
+      `first — ${ctx?.hasUI ? "the user declined" : "no approval yet"} — ` +
+      `ask in chat (yes), wait; never reroute; edits: piedit/piwrite.`
     );
   };
 
@@ -607,6 +656,7 @@ export default function (pi: ExtensionAPI) {
   on("before_agent_start", (event) => {
     turn.turnsSeen++;
     const prompt = event.messageType === "user" ? event.prompt : "";
+    lastUserPrompt = prompt;
     promptApproves = APPROVAL_RE.test(prompt);
     // LG1: a new user turn is the loop boundary — churn/error counters reset
     lg1Reset();
@@ -625,6 +675,9 @@ export default function (pi: ExtensionAPI) {
       const path = normPath(event.input.path, ctx?.cwd);
       const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);
+      // A2: control-plane floor — gate-tree edits need the maintenance phrase
+      if (ruleEnabled("destructiveConfirm") && inGateTree(path) && !gateMaintenanceNamed())
+        return controlPlaneBlock("edit", path);
       // S4 fix 8: symlink-resolved protected targets confirm through the
       // same H2 ladder as destructive bash — a write into <fake-home>/.ssh
       // via an in-cwd link must never land silently
@@ -902,6 +955,9 @@ export default function (pi: ExtensionAPI) {
       const path = normPath(event.input.path, ctx?.cwd);
       const lg1Block = lg1GateMutation(turn, path);
       if (lg1Block) return blockCall(lg1Block);
+      // A2: control-plane floor — gate-tree writes need the maintenance phrase
+      if (ruleEnabled("destructiveConfirm") && inGateTree(path) && !gateMaintenanceNamed())
+        return controlPlaneBlock("write", path);
       // S4 fix 8: same symlink-resolved protected-path confirm as edit
       const prot = ruleEnabled("destructiveConfirm")
         ? protectedPathReason("write", path)
@@ -1054,10 +1110,16 @@ export default function (pi: ExtensionAPI) {
     // split into segments; each checked independently (quote-aware — a quoted
     // ';' is part of the command, not a separator). normalizeSegment strips env
     // prefixes and git global flags once, here, and the SAME normalized
-    // segments feed self-modify, R9 and destructive (2026-10-11:
-    // destructive judged the raw segment, so `git -C . push` skipped
+    // segments feed R9, destructive, and the /tmp write-target recording
+    // (2026-10-11: destructive judged the raw segment, so `git -C . push` skipped
     // the confirm while R9 caught `git -C x commit`)
     const normSegs = splitSegments(cmd).map(normalizeSegment);
+
+    // Phase 2 (audit A6, 2026-11-18): record /tmp write targets for the
+    // write-then-execute check below — a file this session planted stays
+    // suspect when something executes it later in the session.
+    for (const seg of normSegs)
+      for (const t of tmpWriteTargetsOf(seg)) tmpWriteTargets.add(t);
 
     for (const seg of normSegs) {
       // R9: commit message must follow the commitlint conventional pattern
@@ -1120,14 +1182,14 @@ export default function (pi: ExtensionAPI) {
     }
 
     // H2 (2026-10-08): destructive/mutating commands need explicit user
-    // approval — AFTER lint and self-modify (never ask permission for a
+    // approval — AFTER commitlint (never ask permission for a
     // command commitlint will reject anyway) and BEFORE R10. Approval order:
     // an affirmative in the invoking/latest user message (single ask — chat
     // approval was previously unwired: the dialog double-asked in UI mode and
     // headless was unwinnable), else the UI confirm dialog, else fail CLOSED,
     // teaching the model to ask in chat and wait (suite t08/t09: 6/6 without).
     // H2 (2026-10-08): destructive/mutating commands need explicit user
-    // approval — AFTER lint and self-modify (never ask permission for a
+    // approval — AFTER commitlint (never ask permission for a
     // command commitlint will reject anyway) and BEFORE R10. Approval order:
     // chat approval → remembered verbatim → UI confirm dialog → fail CLOSED.
     // S4 (2026-10-15): ladder extracted into confirmDestructive(), shared
@@ -1144,6 +1206,24 @@ export default function (pi: ExtensionAPI) {
         ctx,
       );
       if (r) return blockCall(r);
+    }
+
+    // Phase 2 (audit A6, 2026-11-18): write-then-execute — a file this
+    // session planted under /tmp, now executed (command position or
+    // interpreter operand), is the planted-payload lane the A6 body-judging
+    // relaxation opened; it confirms through the same ladder (H2 is
+    // yolo-floored, so the ask survives /yolo). Benign re-reads (cat/grep)
+    // never match — only execution positions do.
+    if (ruleEnabled("destructiveConfirm")) {
+      const hit = executesRecordedTmpTarget(normSegs, tmpWriteTargets);
+      if (hit) {
+        const r = await confirmDestructive(
+          cmd,
+          `'${cmd.slice(0, 33)}' runs a file this session wrote (write-then-execute) and`,
+          ctx,
+        );
+        if (r) return blockCall(r);
+      }
     }
 
     // R10 (2026-10-06 audit; rekeyed 2026-10-07): identical re-run guard — the
@@ -1768,6 +1848,29 @@ export default function (pi: ExtensionAPI) {
     pendingBashFull.clear();
     pendingSearchCalls.clear();
     searchHits.clear();
+    tmpWriteTargets.clear();
+    warnEscalation.clear();
+    // A3 (2026-11-18): hash config.json + loader.ts; a drift vs the last
+    // session warns in-context before the first tool call — a silent control-
+    // plane edit must not arm unannounced. Best-effort: an unreadable state
+    // file never blocks the session.
+    try {
+      const statePath = join(GATE_TREE, "../../.cache/permission-gate-state.json");
+      const sha = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
+      const cur = sha(join(GATE_TREE, "config.json")) + sha(join(GATE_TREE, "loader.ts"));
+      mkdirSync(dirname(statePath), { recursive: true });
+      const prev = existsSync(statePath)
+        ? (JSON.parse(readFileSync(statePath, "utf8")) as { gateFiles?: string })
+        : undefined;
+      if (prev?.gateFiles && prev.gateFiles !== cur)
+        ctx?.ui?.notify?.(
+          "permission-gate: config.json/loader.ts changed since the last session — review before trusting the gate",
+          "warning",
+        );
+      writeFileSync(statePath, JSON.stringify({ gateFiles: cur, ts: Date.now() }));
+    } catch {
+      /* best-effort drift check */
+    }
     turn.lastBlockedBash = undefined;
     turn.turnsSeen = 0;
     turn.cadenceFired = false;

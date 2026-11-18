@@ -1354,9 +1354,9 @@ describe("subagent discovery", () => {
     );
   });
 
-  it("buildSubagentToolAllowlist returns null without an explicit tool restriction", () => {
-    assert.equal(testApi.buildSubagentToolAllowlist(undefined), null);
-    assert.equal(testApi.buildSubagentToolAllowlist(""), null);
+  it("buildSubagentToolAllowlist denies by default without an explicit tool restriction", () => {
+    assert.equal(testApi.buildSubagentToolAllowlist(undefined), "ask_question");
+    assert.equal(testApi.buildSubagentToolAllowlist(""), "ask_question");
   });
 
   it("default extra-extension path is the permission-gate directory, not a .ts file", () => {

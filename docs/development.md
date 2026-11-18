@@ -56,12 +56,41 @@ Native tools register unconditionally and always run the Rust binary; nothing op
 | `npm/`, `git/`            | pi-managed package stores, re-created on next install                             |
 | `skills/**/node_modules/` | Per-skill deps — regenerable via `npm install` in the skill dir                   |
 | `models-store.json`       | Provider model catalog (regenerable cache)                                        |
-| `sessions/`               | Session history, keyed by absolute project paths → per-machine                    |
+| `sessions/`               | **Session transcript** — live session history, one JSONL per session (see [Session directories](#session-directories)) |
 | `audit-reports/`, `handoff/` | Dated audit artifacts and handoff drafts; reports name private projects        |
 | `*.log`, `logs/`          | Debug logs only — no gate telemetry writer (that store was removed)               |
 | `trust.json`             | pi-core project-trust store — removed and never recreated: `settings.json` ships `defaultProjectTrust: always`, so the trust ask never runs. Vendor-owned (`ProjectTrustStore` in pi-core); `-na`/`--no-approve` distrusts a run |
 
 Everything else — `AGENTS.md`, `docs/`, `settings.json`, `models.json`, `skills/`, `extensions/`, `agents/`, `prompts/`, `tests/`, `rust-tools/` (workspace + lockfile), `.github/workflows/`, `package.json`, `CHANGELOG.md`, `LICENSE`, `.nvmrc` — is tracked in git and portable across OSes.
+
+### Session directories
+
+A **session transcript** is the JSONL log pi writes per session, at
+`sessions/<cwd-slug>/<ISO-timestamp>_<session-uuid>.jsonl`. The directory slug is the
+session's absolute cwd with `/` replaced by `-` and wrapped in `--` (e.g.
+`--Users-nur-proj--`). Each line is one event: messages, tool calls with full params,
+tool results.
+
+Three different directories are named `sessions`. They are not interchangeable — only
+the first is live:
+
+| Path | Purpose | What is there |
+| ---- | ------- | ------------- |
+| `~/.pi/agent/sessions/` | **Live transcripts** — every run appends here; canonical source for audits | 852 JSONL in 57 `<cwd-slug>/` dirs, 274M, spanning Sep–Nov 2026. One session per file; newest is the current session. Gitignored (`/sessions/`) as per-machine data. |
+| `~/.pi/backup/sessions/` | **Frozen snapshot** — a manual/one-off copy taken before a reset or migration; nothing writes to it now | 93 JSONL in 10 project dirs, 24M, all dated Aug 10–27 2026 — strictly older than the live set's Sep–Nov range. Holds projects the live dir lacks (`barikoiapis-golang`, `pickaboo-frontend`, `react-bkoi-gl`, `dropx-admin`, `dropx-merchant`, `jti-dashboard`), so it is the only copy of those transcripts. |
+| `~/.pi/bench/sessions/` | **Benchmark fixtures** — inputs to the bench harness, not real work | 15 JSONL in 15 run dirs (`codemode-gate-r1..r3`, `codemode-r1..r3`, `direct-r1..`, `gate-block-r1`, …), 692K, all dated 2026-10-18. One file per run; regenerable by re-running the bench, safe to delete. |
+
+**There is no `~/.pi/sessions/`.** The config root holds only `agent/`, `backup/`,
+`bench/`, `efforts/`, and `node_modules/` — every transcript lives under one of the
+three paths above. A note or memory that cites `~/.pi/sessions/` is wrong; do not look
+there.
+
+- The transcript is the superset of what the TUI renders; collapsed output is present
+  in the file.
+- It is the **agent** transcript, not the user's shell history — typed shell commands
+  live in the shell's own history file, a different store.
+- Query it through the [session-audit skill](../skills/session-audit/SKILL.md) (`pidx`
+  for compact extracts); that skill forbids reading raw JSONL directly.
 
 ## Sync between machines
 

@@ -17,7 +17,7 @@
  * `ls node_modules/<pkg>` stays allowed (presence checks are legitimate);
  * rg is gitignore-aware and fast, so unscoped rg passes by design.
  */
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 
 /** quote-aware tokenizer: quoted runs stay one token (quotes stripped);
  * shell operators | < > stand alone so tokens past them are another command */
@@ -84,14 +84,17 @@ const isNodeModulesPath = (t: string) =>
 
 /** SS2 (2026-10-16): AGENTS.md tooling defaults — rg is the search default;
  * grep/egrep/fgrep (segment head or mid-pipe) is fallback only when rg errors.
- * Fires after PB1/SS1 so their specific reasons still teach first. */
+ * Fires after PB1/SS1 so their specific reasons still teach first.
+ * 2026-11-18 (A15): dash-path clause; trimmed so an escalated block
+ * (warn promoted at the 3rd session occurrence) fits the 220c diet cap. */
 const SS2_MSG =
-  "Search (rg-first): 'grep' is the fallback, not the default — use 'rg PATTERN path/' (scope with -t <lang> or a glob). If rg genuinely errored, say so in chat and wait for approval before using grep.";
+  "Search (rg-first): 'grep' is the fallback — use 'rg PATTERN path/' (args starting with '-' need a ./ prefix; -g for globs). If rg errored, say so in chat and wait.";
 
 /** SS3 (2026-10-16): AGENTS.md tooling defaults — fd is the file-find default;
- * find is fallback only when fd errors. */
+ * find is fallback only when fd errors. 2026-11-18 (A15): dash-path clause,
+ * lean wording for the same 220c cap. */
 const SS3_MSG =
-  "Search (fd-first): 'find' is the fallback, not the default — use 'fd PATTERN path/' (regex pattern; -e exact, -H hidden, -t f files). If fd genuinely errored, say so in chat and wait for approval before using find.";
+  "Search (fd-first): 'find' is the fallback — use 'fd PATTERN path/' (-e exact, -g glob; args starting with '-' need a ./ prefix). If fd errored, say so in chat and wait.";
 
 /** SS4 (2026-11-01): `-r` is a grep habit, not an rg recursion flag — rg recurses
  * by default and reads `-r`/`--replace` as display substitution, so the common
@@ -151,7 +154,24 @@ export function swallowCheck(seg: string): string | undefined {
  *   headTailReadsFile. */
 export function readerBypassCheck(cmd: string): string | undefined {
   const reason =
-    "Hygiene (Reader-bypass): read file windows with piread — offset/limit for a range, hits for a search with context, 'outline --show <file> <sym>' for a unit; cat/sed/head/tail print bytes without offsets.";
+    "Hygiene (Reader-bypass): read windows with piread (offset/limit, hits, outline --show). Pipes: piread a spill slice, pibash over it; jq -r '<f>' <file> ok under 1 MB.";
+  const jqOversized = (() => {
+    // 2026-11-18 (A4): jq single-file reads are a legitimate bounded read —
+    // but an unbounded one (>= 1 MB) is a reader bypass like cat. Filter and
+    // file are the two non-flag operands; more operands stay unflagged
+    // (multi-file jq is usually a transform, not a view).
+    for (const m of cmd.matchAll(/(?:^|&&|\|\||;)\s*jq\s+([^|;&]+)/g)) {
+      const rest = (m[1] ?? "").trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
+      if (rest.length !== 2) continue;
+      const file = rest[1].replace(/^(?:'|")|(?:'|")$/g, "");
+      try {
+        if (statSync(file, { throwIfNoEntry: false })?.size >= 1_048_576) return true;
+      } catch {
+        /* unreadable path — not a bounded-read claim the gate can check */
+      }
+    }
+    return false;
+  })();
   const head = String.raw`(?:^|&&|\|\||;|\bdo\b|\bthen\b)\s*`;
   const seg = String.raw`[^|;&]*`;
   const sedReader = new RegExp(String.raw`${head}(sed\s+${seg}-n\b${seg})`, "g");
@@ -165,7 +185,7 @@ export function readerBypassCheck(cmd: string): string | undefined {
   const headTailReader = [...cmd.matchAll(viewReader)].some((m) => headTailReadsFile(m[1] ?? ""));
   const readsSegment = (re: RegExp) =>
     [...cmd.matchAll(re)].some((m) => !writesOutput(m[1] ?? ""));
-  return readsSegment(sedReader) || readsSegment(catReader) || pipedCat.test(cmd) || headTailReader
+  return readsSegment(sedReader) || readsSegment(catReader) || pipedCat.test(cmd) || headTailReader || jqOversized
     ? reason
     : undefined;
 }

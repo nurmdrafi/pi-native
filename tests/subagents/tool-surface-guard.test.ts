@@ -240,3 +240,110 @@ describe("getToolExtensionPath declarative resolution", () => {
     assert.equal(__test__.getToolExtensionPath("read"), undefined);
   });
 });
+
+describe("applySandboxToParts gateless-spawn guard (Phase 4, audit A3)", () => {
+  // A parent session that runs the permission gate must not silently spawn
+  // sandboxed children without it: an extra-extensions override (or a dropped
+  // entry) that leaves the gate out of the resolved -e set fails the spawn.
+  afterEach(() => {
+    mock.restoreAll();
+    __test__.resetChannelState();
+    __test__.setUiContext(null);
+    if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+    delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
+  });
+
+  /** Config dir whose extensions tree ships a permission-gate directory plus
+   *  an unrelated sibling extension to point a gate-omitting override at. */
+  function configWithGate(): string {
+    const dir = mkdtempSync(join(tmpdir(), "gateless-guard-"));
+    for (const name of ["permission-gate", "unrelated-ext"]) {
+      mkdirSync(join(dir, "extensions", name), { recursive: true });
+      writeFileSync(join(dir, "extensions", name, "index.ts"), "");
+    }
+    return dir;
+  }
+
+  it("refuses the spawn when an existing override omits the installed gate", () => {
+    const dir = configWithGate();
+    process.env.PI_CODING_AGENT_DIR = dir;
+    process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = join(dir, "extensions", "unrelated-ext");
+    try {
+      const parts: string[] = [];
+      assert.throws(
+        () => __test__.applySandboxToParts(parts, baseLoadout("read"), { artifactDir: dir, name: "g1" }),
+        /gateless child/i,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses the spawn when the override entry was dropped entirely", () => {
+    const dir = configWithGate();
+    process.env.PI_CODING_AGENT_DIR = dir;
+    process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = join(dir, "extensions", "no-such-ext");
+    try {
+      const parts: string[] = [];
+      assert.throws(
+        () => __test__.applySandboxToParts(parts, baseLoadout("read"), { artifactDir: dir, name: "g2" }),
+        /gateless child/i,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("spawns normally when the override still carries the gate", () => {
+    const dir = configWithGate();
+    process.env.PI_CODING_AGENT_DIR = dir;
+    process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = [
+      join(dir, "extensions", "unrelated-ext"),
+      join(dir, "extensions", "permission-gate"),
+    ].join(":");
+    try {
+      const parts: string[] = [];
+      __test__.applySandboxToParts(parts, baseLoadout("read"), { artifactDir: dir, name: "g3" });
+      const exts = parts
+        .map((p, i) => (parts[i - 1] === "-e" ? p.replace(/'/g, "") : null))
+        .filter((p): p is string => !!p);
+      assert.ok(
+        exts.includes(join(dir, "extensions", "permission-gate")),
+        `expected the gate on -e, got: ${exts.join(" ")}`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not enforce when the parent session ships no gate", () => {
+    const dir = mkdtempSync(join(tmpdir(), "no-gate-"));
+    mkdirSync(join(dir, "extensions", "unrelated-ext"), { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = dir;
+    process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = join(dir, "extensions", "unrelated-ext");
+    try {
+      const parts: string[] = [];
+      __test__.applySandboxToParts(parts, baseLoadout("read"), { artifactDir: dir, name: "g4" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips the guard for unrestricted loadouts (null allowlist)", () => {
+    const dir = configWithGate();
+    process.env.PI_CODING_AGENT_DIR = dir;
+    process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = join(dir, "extensions", "unrelated-ext");
+    try {
+      const parts: string[] = [];
+      __test__.applySandboxToParts(
+        parts,
+        { ...baseLoadout("read"), toolAllowlist: null },
+        { artifactDir: dir, name: "g5" },
+      );
+      assert.ok(!parts.includes("--no-extensions"), "unrestricted spawns replay as-is");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

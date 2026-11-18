@@ -13,7 +13,10 @@
  * - an entry with no existing target is dropped loudly: one stderr warning
  *   per dropped path per spawn, naming the path;
  * - the shipped default (env unset) never warns on a healthy install, and
- *   warns the same way when the default gate directory itself is missing.
+ *   warns the same way when the default gate directory itself is missing;
+ * - Phase 4 (audit A3): when the parent's config dir ships the permission
+ *   gate, a sandboxed spawn whose resolved -e set lacks it throws (hard
+ *   fail) instead of warning and spawning a gateless child.
  */
 // Scrub inherited child-identity env and redirect the durable inbox BEFORE any
 // extension import loads — every invocation style must get the same isolation.
@@ -31,6 +34,7 @@ delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
 const { __test__ } = await import("../../extensions/subagents/index.ts");
 
 const savedExtraExt = process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
+const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 beforeEach(() => {
   delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
@@ -44,6 +48,8 @@ afterEach(() => {
   __test__.setUiContext(null);
   if (savedExtraExt === undefined) delete process.env.PI_SUBAGENT_EXTRA_EXTENSIONS;
   else process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = savedExtraExt;
+  if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
 });
 
 function makeTempDir(): string {
@@ -143,6 +149,10 @@ describe("applySandboxToParts extra-extension guard", () => {
   it("loads <gate>/index.ts as the directory when the directory exists, without warning", () => {
     const dir = makeTempDir();
     try {
+      // Gate-less parent config dir: the heal behavior under test here is
+      // independent of the Phase 4 gateless-spawn guard, which would refuse
+      // the spawn because the healed temp gate is not the parent's gate.
+      process.env.PI_CODING_AGENT_DIR = dir;
       const gate = join(dir, "gate");
       mkdirSync(gate);
       process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = join(gate, "index.ts");
@@ -161,6 +171,9 @@ describe("applySandboxToParts extra-extension guard", () => {
   it("warns on stderr naming an entry that cannot be resolved, and omits it from launch args", () => {
     const dir = makeTempDir();
     try {
+      // Gate-less parent: the drop warns and the spawn continues without the
+      // entry — there is no parent gate to lose.
+      process.env.PI_CODING_AGENT_DIR = dir;
       const orphan = join(dir, "missing", "gate");
       process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = orphan;
       const parts: string[] = [];
@@ -175,6 +188,27 @@ describe("applySandboxToParts extra-extension guard", () => {
       assert.ok(
         !parts.some((p) => p.replace(/'/g, "").includes(orphan)),
         `dropped entry leaked into launch args: ${parts.join(" ")}`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses the spawn when the parent ships the gate and the entry cannot be resolved (Phase 4)", () => {
+    const dir = makeTempDir();
+    try {
+      // Parent config dir = the real agent home on this repo's layout, which
+      // ships the gate; an override that resolves to nothing is a gateless
+      // spawn and must hard-fail, not warn-and-continue.
+      if (savedAgentDir !== undefined) process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+      else delete process.env.PI_CODING_AGENT_DIR;
+      const parentGate = join(homedir(), ".pi", "agent", "extensions", "permission-gate");
+      if (!existsSync(parentGate)) return; // nothing to lose in this layout
+      process.env.PI_SUBAGENT_EXTRA_EXTENSIONS = join(dir, "missing", "gate");
+      const parts: string[] = [];
+      assert.throws(
+        () => __test__.applySandboxToParts(parts, baseLoadout(), { artifactDir: dir, name: "worker" }),
+        /refusing to spawn a gateless child/,
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });

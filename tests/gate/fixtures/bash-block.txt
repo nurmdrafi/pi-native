@@ -49,3 +49,8 @@ awk 'BEGIN {system("rm canary")}'	Permission Gate (Destructive)	# awk system()
 ｒｍ canary	Permission Gate (Destructive)	# homoglyph command word
 eval "$(echo cm0gLXJmIGNhbmFyeQ== | base64 -d)"	Permission Gate (Destructive)	# encoded payload — core never appears as text
 alias x='rm -rf canary' && x	Permission Gate (Destructive)	# alias indirection
+# Phase 2 (2026-11-18 audit, A6/A7/A13): body-judged inline interpreters,
+# interpreter heredocs, osascript -e, and the write-then-execute lane
+python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/tmp/victim')\nEOF	Permission Gate (Destructive)	# A7: interpreter heredoc body is code
+osascript -e 'tell application "Finder" to empty trash'	Permission Gate (Destructive)	# A13: osascript -e joins INTERP_INLINE
+printf 'rm -rf canary' > /tmp/fp-w2e.js ## bash /tmp/fp-w2e.js	Permission Gate (Destructive)	# A6: session-written /tmp script executed

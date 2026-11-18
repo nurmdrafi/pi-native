@@ -6,6 +6,7 @@ import { cases as mWB } from "./rules/writeBindingGuard.mjs";
 import { cases as m1 } from "./rules/destructiveConfirm.mjs";
 import { cases as mES } from "./rules/errorSwallow.mjs";
 import { cases as mRB } from "./rules/readerBypass.mjs";
+import { cases as mRBE } from "./rules/reader-bypass-escalation.mjs";
 import { cases as mVC } from "./rules/viewCredit.mjs";
 import { cases as m2 } from "./rules/failureLoopGuard.mjs";
 import { cases as m3 } from "./rules/largeReadGuard.mjs";
@@ -34,6 +35,6 @@ import { cases as m24 } from "./scenes/security-failure-path.mjs";
 import { cases as m25 } from "./scenes/security-protected-paths.mjs";
 import { cases as m26 } from "./scenes/security-toctou.mjs";
 
-const modules = [m0, mWB, m1, mES, mRB, mVC, m2, m3, mLF, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26];
+const modules = [m0, mWB, m1, mES, mRB, mRBE, mVC, m2, m3, mLF, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26];
 
 export const cases = modules.flat();

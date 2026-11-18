@@ -13,6 +13,7 @@
 
 ## Safety
 - Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps (except a ship run whose gates pass — commit and push immediately), anything public, out-of-scope edits.
+- Destructive commands are last resort and rarely required: default to non-destructive equivalents (piedit over `sed -i`/`perl -pi`, read-then-write, scratch copies under `/tmp`). In yolo mode or any subagent session, no destructive command at all — take the non-destructive path or stop and ask.
 - Never without explicit approval: secrets (`.env`, `~/.ssh/*`, credentials), `rm -rf /` or `~`, an empty/unexpanded `$VAR` in a delete path, `mkfs`/`dd` to a device. A denial is final — no retries or disguises.
 
 ## Communication

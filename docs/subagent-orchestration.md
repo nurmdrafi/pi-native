@@ -10,7 +10,7 @@ Spawn tools inactive (zero prompt tokens) until `/subagents on|off`, any `/subag
 - `files_changed` = hashless git-status delta: concurrent siblings land in it; prior-work injection may be stale — verify before relying.
 - Unscoped spawns never queue: always declare `files`, or two writers collide silently.
 - A queued spawn is not yet a session: `subagent_message` cannot address it ("No subagent named X") and only `subagent_control` can cancel it. Absorb the queued task by steering the running owner; if the residue launches, stand it down.
-- `PI_SUBAGENTS_EXTRA_EXTENSIONS` replaces the default permission-gate entry — omit the gate path, child runs ungated.
+- `PI_SUBAGENT_EXTRA_EXTENSIONS` replaces the default permission-gate entry — omit the gate path, child runs ungated.
 - Cleanup is pane-scoped: background jobs, servers, browsers can outlive the child.
 - A short parent window makes the launch split fail (`no space for a new pane`): enlarge the window before spawning; on failure list panes, kill an idle shell pane by id, retry once.
 - Live TUI state is not observable from inside the session: capture widget and pane symptoms from the host terminal, not through tool calls.
@@ -20,7 +20,7 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 
 ## Agents
 - Definitions in `~/.pi/agent/agents/`, inert while spawn tools are gated. Discovery: project > global; `<project>/.pi/agents/<name>.md` shadows the shipped name outright, `tools:` included. No `model` pin.
-- Every definition declares `tools:`; undeclared = denied (deny-by-default; unrestricted toolset reserved for top-level fork clones).
+- Every definition declares `tools:`; undeclared = denied (deny-by-default). `tools: all` is the one explicit unrestricted route — it warns at spawn; otherwise the unrestricted toolset is reserved for top-level fork clones.
 - `tools:` names resolve from extension manifests and the naming convention first (that makes the `-e` path); `registerToolExtension` last. Unresolved names silently fall back to the built-in — so entries name the natives (`piread`, `piedit`, `pibash`) alongside built-in fallbacks.
 
 | Agent | Tools | Role |
@@ -37,7 +37,7 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 | rust-engineer | piwrite, piread, piedit, pibash (`rust-skills`) | Rust implementer — cargo-workspace code changes, clippy/fmt cleanups, unsafe discipline; use instead of worker when the task is Rust |
 | scout | ls, piread, pibash | Fast codebase recon — explores files, finds patterns, maps module structure and dependencies |
 | security-reviewer | ls, piread, pibash | Security reviewer — read-only pass over diffs crossing trust boundaries (auth, secrets, injection, data loss) and guard/permission-enforcement logic; use instead of reviewer when the change touches permissions or untrusted input |
-| sentry-triage | piwrite, piread, piedit, pibash (`sentry`) | Sentry issue triager — pulls unresolved issues from the self-hosted Sentry (org from SENTRY_ORG in the secrets env), maps stacktraces to repo code, ships failing-test-first fixes, resolves when the token allows (else fixed-not-resolved + manual-resolve URL), appends NDJSON audit; use for any Sentry issue task instead of worker |
+| sentry-triage | piwrite, piread, piedit, pibash (`sentry`) | Sentry issue triager — pulls unresolved issues from the self-hosted Sentry (org from SENTRY_ORG in the secrets env), maps stacktraces to repo code, ships failing-test-first fixes, resolves when the token allows (read-only token → fixed-not-resolved + manual-resolve URL), appends NDJSON audit; use for any Sentry issue task instead of worker |
 | session-auditor | ls, piread, pibash, pidx (`session-audit`) | Session-history analyst — indexes session logs and extracts turns, tool-call patterns, recurring work, and lessons; use for workflow profiling and post-incident audits |
 | ui-verifier | ls, piread, pibash (`browser-tools`) | UI verification sweep — drives the running app via headless Chromium + CDP; verifies rendered behavior, never restarts the server or browser |
 | verifier | ls, piread, pibash | Acceptance-criteria verifier — runs the change/probe and reports per-criterion PASS/FAIL; verifies behavior, never fixes |

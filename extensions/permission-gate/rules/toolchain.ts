@@ -19,7 +19,8 @@
  * mise/asdf/fnm use, direnv) are honored — the shell switches PATH itself.
  * process.version is the pi interpreter; the bash tool's fresh shell resolves
  * the same default PATH node (audit evidence), so it is the right proxy.
- * PGATE_TOOLCHAIN=0 disables the whole module.
+ * Severity per rule from config.json TC1/TC2 (loader keys toolchainPnpm/
+ * toolchainNode); env overrides PGATE_TOOLCHAIN_PNPM=0 / PGATE_TOOLCHAIN_NODE=0.
  */
 import { readFileSync, statSync } from "fs";
 import { join } from "path";
