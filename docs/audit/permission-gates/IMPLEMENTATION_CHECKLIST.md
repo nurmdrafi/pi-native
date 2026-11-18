@@ -3,13 +3,13 @@
 Phase = plan.md phases. Tick only after its test passes.
 
 ## Phase 0 — Re-arm approval boundary (A1)
-- [ ] Failing test: destructiveConfirm confirm-path re-enabled (H2 error default)
-- [ ] config.json `"H2": "error"`
-- [ ] loader.ts HARD_RULES += destructiveConfirm
-- [ ] destructiveConfirm.mjs case updated and green
-- [ ] yolo test: H2 floored, yolo cannot silence it
-- [ ] /yolo banner text corrected (A5)
-- [ ] `npm run gate:eval` green
+- [x] Failing test: destructiveConfirm confirm-path re-enabled (H2 error default)
+- [x] config.json `"H2": "error"`
+- [x] loader.ts HARD_RULES += destructiveConfirm
+- [x] destructiveConfirm.mjs case updated and green
+- [x] yolo test: H2 floored, yolo cannot silence it
+- [x] /yolo banner text corrected (A5)
+- [x] `npm run gate:eval` green
 
 ## Phase 1 — Doc/comment truth (A11)
 - [ ] subagent-orchestration.md env var spelling fixed

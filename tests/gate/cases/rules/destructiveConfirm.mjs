@@ -8,6 +8,9 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { textBlocks, lineText, read, edit, editApplied, editsApplied, bash, pibash, write, denyUi, tmp, nextId } from "../../harness/helpers.mjs";
+// yolo seam (Phase 0 re-arm, audit A1): the floor lives in loader.ts; a case
+// that toggles it MUST restore it — the runner runs every case in one process.
+import { setYolo } from "../../../../extensions/permission-gate/loader.ts";
 
 export const cases = [
   // ---- H2 (2026-10-08, suite t08/t09 evidence): destructive confirm ----
@@ -42,6 +45,51 @@ export const cases = [
         mode: "tui",
         ui: { confirm: async () => false },
       }),
+  ],
+  // ---- Phase 0 (2026-11-18, audit A1): H2 re-armed — explicit rm -rf payloads
+  [
+    "H2: rm -rf payload without UI fails closed",
+    "blocked",
+    async (pi) => bash(pi, "rm -rf /tmp/gate-h2-rearm", { hasUI: false, mode: "print" }),
+  ],
+  [
+    "H2: rm -rf with UI denial is blocked",
+    "blocked",
+    async (pi) =>
+      bash(pi, "rm -rf /tmp/gate-h2-rearm", {
+        hasUI: true,
+        mode: "tui",
+        ui: { confirm: async () => false },
+      }),
+  ],
+  // ---- Phase 0 (audit A1): yolo cannot silence the floored confirm ----
+  [
+    "H2/yolo: yolo ON cannot silence the destructive confirm",
+    "blocked",
+    async (pi) => {
+      setYolo(true);
+      try {
+        return await bash(pi, "rm -rf /tmp/gate-h2-rearm", { hasUI: false, mode: "print" });
+      } finally {
+        setYolo(false); // module-global: restore or every later case runs yolo
+      }
+    },
+  ],
+  [
+    "H2/yolo: commitlint stays floored while yolo is on",
+    "blocked",
+    async (pi) => {
+      setYolo(true);
+      try {
+        const r = await bash(pi, 'git commit -m "bad message"', {
+          hasUI: false,
+          mode: "print",
+        });
+        return r.blocked && r.reason.startsWith("Commitlint") ? r : { blocked: false };
+      } finally {
+        setYolo(false);
+      }
+    },
   ],
   [
     "H2: approved destructive re-send skips re-confirm (2 min window)",

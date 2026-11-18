@@ -16,7 +16,7 @@
     "H1": "error",
     "H1b": "error",
     "OS": "error",
-    "H2": "off",
+    "H2": "error",
     "R9": "error",
     "R10": "warn",
     "RB": "error",

@@ -403,7 +403,7 @@ export default function (pi: ExtensionAPI) {
       setYolo(next);
       ctx.ui.notify(
         next
-          ? "yolo ON: permission asks are off for this session (destructive/protected confirm stays) — /yolo off restores"
+          ? "yolo ON: permission asks off for this session — commit-message lint and destructive/protected confirms stay — /yolo off restores"
           : "yolo OFF: permission gates restored",
         next ? "warning" : "info",
       );
