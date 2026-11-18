@@ -43,7 +43,7 @@ Phase = plan.md phases. Tick only after its test passes.
 - [ ] security-canary scene extended, green
 
 ## Phase 5 — Subagent briefs (A14)
-- [ ] Spawn preamble carries gate composition recipe + no-destructive policy
+- [x] Spawn preamble carries gate composition recipe + no-destructive policy
 - [ ] Manual verification: one scout child session with <2 gate events
 
 ## Phase 6 — Binding parity + approval hardening (A9/A12)

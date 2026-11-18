@@ -1713,6 +1713,15 @@ function armWidgetForSession(ctx: ExtensionContext): void {
   if (runningSubagents.size > 0) startWidgetRefresh();
 }
 
+/** Phase 5 (audit A14, 2026-11-18): one gate-brief paragraph in every
+ * blank-session child's task prompt. Observed cost without it: 12+ gate
+ * events per child re-learning the same shapes (2026-11-18 clusters) —
+ * the rules fire identically in child sessions, so the recipe rides the
+ * prompt instead of the rediscovery loop. Fork clones inherit the parent
+ * conversation and skip this path by design. */
+const GATE_BRIEF =
+  "Permission-gate brief (your tool calls are gated like the parent's): read file windows with piread (offset/limit for a range, hits for a search, outline --show for a unit) — read-position cat/sed -n/head/tail are flagged; search with 'rg PATTERN path/' and 'fd PATTERN path/' (grep/find only after a real error, said in chat); path args starting with '-' need a ./ prefix (or -g glob); for pipe needs, piread the slice to a spill or /tmp file and pibash over it — jq -r '<filter>' <file> is fine for one small file. Destructive commands are banned in subagent sessions: use piedit/piwrite for changes, or stop and ask. A block reason names the compliant call — follow it, never reroute.";
+
 /**
  * Build the positional prompt args for a Pi CLI subagent launch.
  *
@@ -2917,7 +2926,7 @@ async function launchSubagent(
   const fullTask =
     (inheritsConversationContext
       ? params.task
-      : `${roleBlock}\n\n${modeHint}\n\n${params.task}\n\n${summaryInstruction}`) +
+      : `${roleBlock}\n\n${modeHint}\n\n${GATE_BRIEF}\n\n${params.task}\n\n${summaryInstruction}`) +
     (priorWorkBlock ? `\n\n${priorWorkBlock}` : "");
   // ── Claude Code CLI path ──
   if (agentDefs?.cli === "claude") {
