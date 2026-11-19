@@ -13,7 +13,7 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 
 ## File lookup
 - Resolve unknown paths before reading them; do not guess filenames.
-- Edit anchors come from this session's reads, never memory — an unread `oldText` is a guess; if anything may have written the file since the read (a command you ran, another session, a build), re-read the region first — the anchor must match the file as it is now.
+- Edit anchors come from this session's reads, never memory — an unread `oldText` is a guess; if anything may have written the file since the read (a command you ran, another session, a build), re-read the region first — the anchor must match the file as it is now. An anchor miss means the file moved past the read: re-read the region and rebuild the anchor — resending the same `oldText` re-pays the failure.
 - Default searchers: `rg PATTERN path/` for text, `fd PATTERN path/` for files — both skip gitignored noise and print matching paths; `grep`/`find` only after rg/fd actually errored, and a path argument starting with `-` needs a `./` prefix or the tool reads it as a flag. Never search `node_modules/`, `vendor/`, or `dist/` trees — they are vendored copies measured in hundreds of megabytes; find the source path and search it.
 - `rg -r` is `--replace` (rewrites matched text in the output), not recursion: rg recurses by default, so never reach for `-r` to mean "search everywhere" — the run succeeds silently with rewritten results.
 - File views go through `piread` windows (offset/limit, hits) — a window keeps line numbers addressable and later calls can continue from them; `cat`/`head`/`tail`/`sed -n` only trim command output, never open files: they dump bytes without offsets and force a full re-read to see more.
