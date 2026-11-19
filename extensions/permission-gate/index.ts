@@ -26,7 +26,7 @@ function isBashKind(event: { toolName: string }): boolean {
 
 import type { ExtensionAPI, ExtensionHandler } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "crypto";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import {
   appendFileSync,
   mkdirSync,
@@ -551,6 +551,19 @@ export default function (pi: ExtensionAPI) {
    * target: a symlinked home still matches, and a not-yet-created efforts
    * dir falls back to its realpathed parent + basename. */
   const effortsRoot = (): string => realpathish(join(homedir(), ".pi", "efforts"));
+  /** Tmp allowance (user direction 2026-11-19): the temp trees carry no
+   * write permission — /tmp and the OS tmp dir are agent scratch for
+   * parents and subagents alike (scout durability files, H1 spill slices).
+   * The write-then-execute seam still confirms: planting a script in a tmp
+   * tree and running it is execution, not scratch. PGATE_TMP_ROOTS
+   * (colon-separated) replaces the default pair — test sandboxes live
+   * under the real tmp trees and must stay confinable; read per call so a
+   * process can retarget it mid-run. */
+  const tmpAllowRoots = (): string[] => {
+    const raw = process.env.PGATE_TMP_ROOTS;
+    const roots = raw ? raw.split(":").filter(Boolean) : ["/tmp", tmpdir()];
+    return [...new Set(roots.map(realpathish))];
+  };
   const writeConfinementReason = (
     tool: string,
     abs: string,
@@ -566,6 +579,7 @@ export default function (pi: ExtensionAPI) {
     }
     const real = realpathish(abs);
     if (underRoot(real, effortsRoot())) return undefined; // efforts ledger tree
+    if (tmpAllowRoots().some((r) => underRoot(real, r))) return undefined; // tmp scratch trees
     if (!underRoot(real, root))
       return `${tool} '${abs.slice(0, 28)}' → outside the session directory and`;
     if (overwrite)
