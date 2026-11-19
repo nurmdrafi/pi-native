@@ -7,6 +7,7 @@
  *   2. tests/tools/audit/block-recovery.mjs (historical block recovery; exit code
  *                                      ignored — its <85% gate is advisory here)
  *   3. tests/tools/audit/replay.mjs              (historical bash replay; fp_rate proxy)
+ *   4. tests/gate/eval/pre-edit-read.mjs          (pre-edit-read adherence canary)
  *
  * Metrics printed:
  *   METRIC tokens_per_task=<n>
@@ -43,6 +44,9 @@ console.log(audit.stdout.trim());
 const replay = run('tests/tools/audit/replay.mjs');
 console.log(replay.stdout.trim().split('\n').filter((l) => !l.startsWith('{')).join('\n'));
 
+const preEdit = run('tests/gate/eval/pre-edit-read.mjs');
+console.log(preEdit.stdout.trim());
+
 const lastJson = (s) => {
   for (const l of s.trim().split('\n').reverse()) {
     if (l.startsWith('{')) { try { return JSON.parse(l); } catch {} }
@@ -51,6 +55,7 @@ const lastJson = (s) => {
 };
 const fx = lastJson(gateEval.stdout) ?? {};
 const rp = lastJson(replay.stdout) ?? {};
+const pe = lastJson(preEdit.stdout) ?? {};
 const recoveryPct = /one-shot-recovery=\d+ \((\d+)%\)/.exec(audit.stdout)?.[1];
 
 // tokens_per_task — exact definition in the header comment
@@ -78,4 +83,6 @@ console.log(JSON.stringify({
   ctx_saved_pct: rp.ctx_saved_pct ?? null,
   ctx_tok_per_task: ctxTokPerTask,
   spill_count: rp.spill_count ?? null,
+  pre_edit_read_rate: pe.pre_edit_read_rate ?? null,
+  unread_blocks: pe.unreadBlocks ?? 0,
 }));
