@@ -43,7 +43,7 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 - Before planning from lesson records, inspect the log tail; compose new records with `jq -c -n`. Appends follow the `>>` final-byte probe rule in Bash.
 
 ## Commit calls
-- Gate-checked route (default): inline `git commit -m` is acceptable because the commit-message gate is a hard floor — it enforces the shape (no `#` anywhere, <=100 chars per line). On rejection, rewrite the message only; never resend it unchanged, never commit past the gate.
+- Gate-checked route (default): inline `git commit -m` is acceptable because the commit-message gate is a hard floor — it enforces the shape (no `#` anywhere, <=100 chars per line). On rejection, rewrite the message only; never resend it unchanged, never commit past the gate. A rejected compound command (add + commit in one call) never ran — the index is untouched, so re-stage together with the rewritten message.
 - Message-file route (no gate active): write the message to a file and validate every line with:
   `awk 'length>100 || index($0,"#") {print "line " FNR ": " length " chars or contains #"; exit 1}' <msgfile>`
   then run `git add` and `git commit -F <msgfile>` in one shell call.
