@@ -116,6 +116,19 @@ test("healthFrom rolls open rule-gap tasks up by rule id — one behavior, one l
   assert.deepEqual(h.ruleGapById, [{ id: "AG", tasks: 2, events: 8 }, { id: "R1", tasks: 1, events: 2 }]);
 });
 
+test("parseSession: retired tools are not harvested — dead signal, not recurrence", () => {
+  const retired = [
+    JSON.stringify({ message: { role: "assistant", content: [{ type: "toolCall", id: "cm1", name: "codemode", arguments: { code: "return 1" } }] } }),
+    JSON.stringify({ message: { role: "toolResult", toolCallId: "cm1", toolName: "codemode", isError: true, content: [{ type: "text", text: "Script failed" }] } }),
+    JSON.stringify({ message: { role: "assistant", content: [{ type: "toolCall", id: "ls1", name: "pibash", arguments: { command: "ls nope" } }] } }),
+    JSON.stringify({ message: { role: "toolResult", toolCallId: "ls1", toolName: "pibash", isError: true, content: [{ type: "text", text: "ls: nope: No such file or directory" }] } }),
+  ].join("\n");
+  const { gate, fails } = parseSession(retired, "r.jsonl", "T");
+  assert.equal(fails.length, 1);
+  assert.equal(fails[0].tool, "pibash");
+  assert.equal(gate.length, 0);
+});
+
 test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", () => {
   const home = mkdtempSync(join(tmpdir(), "hw-home-"));
   const sess = join(home, "sessions/proj");

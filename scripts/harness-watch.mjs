@@ -97,6 +97,10 @@ const SHAPE_LEN = 64;
 const shapeOf = (arg) => String(arg ?? "").trim().split(/\s+/).slice(0, 8).join(" ").slice(0, SHAPE_LEN);
 const head = (s, n) => String(s ?? "").split("\n")[0].slice(0, n);
 
+/** Tools retired by owner decision — their failures are dead signal, not
+ * recurrence evidence; harvesting them would reopen noise forever. */
+const RETIRED_TOOLS = new Set(["codemode"]);
+
 /** Parse one session JSONL into gate events + plain tool failures (pure).
  * A gate block is an isError result led by a gate label; a warn is a
  * non-error result led by one (the note rides normal output); everything
@@ -132,6 +136,7 @@ export function parseSession(text, session, fileTs) {
   const gate = [];
   const fails = [];
   results.forEach((r, i) => {
+    if (RETIRED_TOOLS.has(r.tool)) return;
     const first = head(r.text, 120);
     if (isGateBlockText(first)) {
       const kind = r.isError ? "block" : "warn";
