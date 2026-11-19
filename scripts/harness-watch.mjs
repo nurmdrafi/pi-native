@@ -198,6 +198,15 @@ export function updateTasks(prevTasks, newEvents, docsText, historyBefore) {
 const readNdjson = (file) =>
   existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 
+/** Fold an append-only task ledger: the ledger grows one record per
+ * harvest, so raw reads see every historical count as a separate task.
+ * Latest record per key wins — the same rule the repair loop reads by. */
+export const foldTasks = (records) => {
+  const latest = new Map();
+  for (const t of records) latest.set(t.key, t);
+  return [...latest.values()];
+};
+
 const appendNdjson = (file, records) => {
   if (!records.length) return;
   mkdirSync(join(file, ".."), { recursive: true });
@@ -218,7 +227,7 @@ export function summarize(events, tasks) {
 /** Health snapshot from the ledgers alone (no harvest) — the "report"
  * command: open tasks by class, top recurrence, newest incidents. */
 export function healthFrom(events, tasks) {
-  const s = summarize(events, tasks);
+  const s = summarize(events, foldTasks(tasks));
   const byClass = {};
   for (const t of s.openTasks) byClass[t.class] = (byClass[t.class] ?? 0) + 1;
   const last = events.slice(-5).map((e) => `${e.ts} ${e.source}:${e.id} ${String(e.reason).slice(0, 60)}`);

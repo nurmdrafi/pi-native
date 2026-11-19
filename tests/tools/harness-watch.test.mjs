@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSession, parseSuiteLog, classify, updateTasks, summarize } from "../../scripts/harness-watch.mjs";
+import { parseSession, parseSuiteLog, classify, updateTasks, summarize, healthFrom, foldTasks } from "../../scripts/harness-watch.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -86,6 +86,17 @@ test("summarize counts per source:id:kind and lists open tasks", () => {
   assert.equal(s.events, 5);
   assert.equal(s.byId["gate:H2:block"], 1);
   assert.equal(s.byId["tool:pibash:fail"], 2);
+});
+
+test("healthFrom/foldTasks: append-only task ledger folds — latest record per key wins", () => {
+  const rec = (count, status = "open") => ({ ts: "T1", lastTs: "T2", key: "rule-gap:tool:codemode:", class: "rule-gap", source: "tool", id: "codemode", shape: "", count, status });
+  const events = [{ ts: "T3", source: "tool", id: "codemode", kind: "fail", reason: "Script failed" }];
+  const h = healthFrom(events, [rec(1), rec(2), rec(3), rec(4)]); // one key, four historical appends
+  assert.equal(h.open, 1, "one open task after folding");
+  assert.equal(h.topRecurrence.length, 1);
+  assert.equal(h.topRecurrence[0].count, 4, "latest count wins");
+  assert.deepEqual(foldTasks([rec(1), { ...rec(2), status: "fixed" }]).map((t) => t.status), ["fixed"], "fixed supersedes earlier open");
+  assert.equal(healthFrom(events, [rec(1), { ...rec(2), status: "fixed" }]).open, 0);
 });
 
 test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", () => {
