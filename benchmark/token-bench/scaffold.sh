@@ -5,8 +5,7 @@
 #
 # Copies the repo working tree (no .git, no caches, no sessions, no bench/) into
 # <runtime>/pi-homes/<variant>/, then applies the per-variant policy edits:
-#   - settings.json  defaultTools / codemode on-off
-#   - AGENTS.md      one policy line (direct vs codemode mandate)
+#   - settings.json  defaultTools (built-ins off, direct tools on)
 #   - permission-gate config rules (gate-on vs gate-block vs off)
 set -euo pipefail
 
@@ -59,13 +58,12 @@ gatecfg="$home/extensions/permission-gate/config.json"
 
 case "$variant" in
   direct)
-    # direct Rust tools only; codemode off; no gate
+    # direct Rust tools only; no gate
     node -e '
       const fs=require("fs");
       const p=process.argv[1];
       const s=JSON.parse(fs.readFileSync(p,"utf8"));
       s.defaultTools = ["-read","-bash","-edit","-write"];
-      s.codemode = { mode:"off", inlineBudget:0 };
       fs.writeFileSync(p, JSON.stringify(s,null,2)+"\n");
     ' "$settings"
     # disable permission-gate rules (gate effectively off)
@@ -77,36 +75,6 @@ case "$variant" in
       fs.writeFileSync(p, JSON.stringify(c,null,2)+"\n");
     ' "$gatecfg"
     ;;
-  codemode)
-    # codemode mandated; no gate
-    node -e '
-      const fs=require("fs");
-      const p=process.argv[1];
-      const s=JSON.parse(fs.readFileSync(p,"utf8"));
-      s.defaultTools = ["-read","-bash","-edit","+codemode"];
-      s.codemode = { mode:"on", inlineBudget:0 };
-      fs.writeFileSync(p, JSON.stringify(s,null,2)+"\n");
-    ' "$settings"
-    node -e '
-      const fs=require("fs");
-      const p=process.argv[1];
-      const c=JSON.parse(fs.readFileSync(p,"utf8"));
-      for (const k in c.rules) c.rules[k]=false;
-      fs.writeFileSync(p, JSON.stringify(c,null,2)+"\n");
-    ' "$gatecfg"
-    ;;
-  codemode-gate)
-    # codemode mandated + gate loaded, compliant run
-    node -e '
-      const fs=require("fs");
-      const p=process.argv[1];
-      const s=JSON.parse(fs.readFileSync(p,"utf8"));
-      s.defaultTools = ["-read","-bash","-edit","+codemode"];
-      s.codemode = { mode:"on", inlineBudget:0 };
-      fs.writeFileSync(p, JSON.stringify(s,null,2)+"\n");
-    ' "$settings"
-    # gate rules already true in source config; leave as-is
-    ;;
   gate-on)
     # direct tools, gate loaded, compliant run
     node -e '
@@ -114,7 +82,6 @@ case "$variant" in
       const p=process.argv[1];
       const s=JSON.parse(fs.readFileSync(p,"utf8"));
       s.defaultTools = ["-read","-bash","-edit","-write"];
-      s.codemode = { mode:"off", inlineBudget:0 };
       fs.writeFileSync(p, JSON.stringify(s,null,2)+"\n");
     ' "$settings"
     # gate rules already true in source config; leave as-is
@@ -126,7 +93,6 @@ case "$variant" in
       const p=process.argv[1];
       const s=JSON.parse(fs.readFileSync(p,"utf8"));
       s.defaultTools = ["-read","-bash","-edit","-write"];
-      s.codemode = { mode:"off", inlineBudget:0 };
       fs.writeFileSync(p, JSON.stringify(s,null,2)+"\n");
     ' "$settings"
     # ensure commitMessageLint is ON (already true), and leave the rest default

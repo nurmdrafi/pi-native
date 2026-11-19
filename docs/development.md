@@ -78,7 +78,7 @@ the first is live:
 | ---- | ------- | ------------- |
 | `~/.pi/agent/sessions/` | **Live transcripts** — every run appends here; canonical source for audits | 852 JSONL in 57 `<cwd-slug>/` dirs, 274M, spanning Sep–Nov 2026. One session per file; newest is the current session. Gitignored (`/sessions/`) as per-machine data. |
 | `~/.pi/backup/sessions/` | **Frozen snapshot** — a manual/one-off copy taken before a reset or migration; nothing writes to it now | 93 JSONL in 10 project dirs, 24M, all dated Aug 10–27 2026 — strictly older than the live set's Sep–Nov range. Holds projects the live dir lacks (`barikoiapis-golang`, `pickaboo-frontend`, `react-bkoi-gl`, `dropx-admin`, `dropx-merchant`, `jti-dashboard`), so it is the only copy of those transcripts. |
-| `~/.pi/bench/sessions/` | **Benchmark fixtures** — inputs to the bench harness, not real work | 15 JSONL in 15 run dirs (`codemode-gate-r1..r3`, `codemode-r1..r3`, `direct-r1..`, `gate-block-r1`, …), 692K, all dated 2026-10-18. One file per run; regenerable by re-running the bench, safe to delete. |
+| `~/.pi/bench/sessions/` | **Benchmark fixtures** — inputs to the bench harness, not real work | 15 JSONL in 15 run dirs (`direct-r1..`, `gate-on-r1..`, `gate-block-r1`, plus retired codemode-variant dirs from 2026-10-18), 692K. One file per run; regenerable by re-running the bench, safe to delete. |
 
 **There is no `~/.pi/sessions/`.** The config root holds only `agent/`, `backup/`,
 `bench/`, `efforts/`, and `node_modules/` — every transcript lives under one of the

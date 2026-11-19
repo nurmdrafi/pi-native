@@ -2,7 +2,7 @@
 # runner.sh — runs one benchmark variant/rep in a fully isolated pi-home + workspace.
 #
 # Usage: runner.sh <variant> <rep>
-#   variant: direct | codemode | gate-on | gate-block
+#   variant: direct | gate-on | gate-block
 #   rep: run index (1-based)
 #
 # Layout (all under bench/):
@@ -66,18 +66,8 @@ PROMPT='In this repo, find and fix the failing check in src/auth.ts, add a regre
 
 case "$variant" in
   direct)
-    # no codemode, no gate; direct Rust tools only
+    # no gate; direct Rust tools only; codemode stays excluded (retired tool)
     TOOL_ARGS=("--tools" "+piread,+piedit,+pibash,+pidx" "--exclude-tools" "codemode")
-    EXTRA_ENV=()
-    ;;
-  codemode)
-    # codemode available and mandated (AGENTS.md), no gate
-    TOOL_ARGS=("--tools" "+codemode")
-    EXTRA_ENV=()
-    ;;
-  codemode-gate)
-    # codemode + gate loaded, compliant run
-    TOOL_ARGS=("--tools" "+codemode")
     EXTRA_ENV=()
     ;;
   gate-on)
