@@ -149,8 +149,8 @@ test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", (
 });
 
 test("evalSpawn: nightly eval writes into the harvested ledger, not the default home", () => {
-  const { args, env } = evalSpawn("/tmp/hw-home-x", "/tmp/hw-home-x/.cache/harness-watch");
-  assert.equal(args[0], process.execPath);
-  assert.equal(args[1], "/tmp/hw-home-x/tests/gate/eval/run.mjs");
+  const { file, args, env } = evalSpawn("/tmp/hw-home-x", "/tmp/hw-home-x/.cache/harness-watch");
+  assert.equal(file, process.execPath); // file/args split — execFileSync(file, args) runs the eval directly
+  assert.deepEqual(args, ["/tmp/hw-home-x/tests/gate/eval/run.mjs"]);
   assert.equal(env.GATE_EVAL_METRICS, "/tmp/hw-home-x/.cache/harness-watch/metrics.ndjson");
 });

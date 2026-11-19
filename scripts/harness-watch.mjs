@@ -260,7 +260,8 @@ export function healthFrom(events, tasks) {
  * keys) via GATE_EVAL_METRICS into the harvested ledger, so the series rides
  * the same --home the daemon watches instead of the homedir default. */
 export const evalSpawn = (home, stateDir) => ({
-  args: [process.execPath, join(home, "tests/gate/eval/run.mjs")],
+  file: process.execPath,
+  args: [join(home, "tests/gate/eval/run.mjs")],
   env: { GATE_EVAL_METRICS: join(stateDir, "metrics.ndjson") },
 });
 
@@ -331,7 +332,7 @@ async function main(passed = process.argv.slice(2)) {
     }
     const ev = evalSpawn(home, stateDir);
     try {
-      const out = execFileSync(ev.args[0], ev.args, { cwd: home, encoding: "utf8", timeout: 600_000, env: { ...process.env, ...ev.env }, stdio: ["ignore", "pipe", "pipe"] });
+      const out = execFileSync(ev.file, ev.args, { cwd: home, encoding: "utf8", timeout: 600_000, env: { ...process.env, ...ev.env }, stdio: ["ignore", "pipe", "pipe"] });
       console.log(out.trim());
     } catch (err) {
       console.error(`gate:eval failed: ${head(String(err?.message ?? err), 120)}`);
