@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSession, parseSuiteLog, classify, updateTasks, summarize, healthFrom, foldTasks } from "../../scripts/harness-watch.mjs";
+import { parseSession, parseSuiteLog, classify, updateTasks, summarize, healthFrom, foldTasks, evalSpawn } from "../../scripts/harness-watch.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -146,4 +146,11 @@ test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", (
   assert.match(out2, /0 new events/); // cursor + dedup: nothing re-harvested
   const status = run(["--status"]);
   assert.match(status, /open tasks/); // status reads ledgers without harvest
+});
+
+test("evalSpawn: nightly eval writes into the harvested ledger, not the default home", () => {
+  const { args, env } = evalSpawn("/tmp/hw-home-x", "/tmp/hw-home-x/.cache/harness-watch");
+  assert.equal(args[0], process.execPath);
+  assert.equal(args[1], "/tmp/hw-home-x/tests/gate/eval/run.mjs");
+  assert.equal(env.GATE_EVAL_METRICS, "/tmp/hw-home-x/.cache/harness-watch/metrics.ndjson");
 });

@@ -22,18 +22,52 @@
  *     Deterministic: no sampling randomness inside (replay.mjs uses a stable
  *     sort + slice when over its file cap, so the sample is identical each run).
  *   Final line: single JSON object with all metrics.
+ *
+ * Persistence: every scalar of the final object is appended to the harness-watch
+ * metrics ledger as one {ts,key,n} NDJSON record under eval:<name> keys
+ * (GATE_EVAL_METRICS overrides the path) — the nightly --with-suite run builds
+ * the series (pre_edit_read_rate, fp_rate, ...) the loop's gate-change
+ * decisions read; nulls and nested objects never enter the ledger.
  */
 import { spawnSync } from 'node:child_process';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const env = { ...process.env };
 
+/** eval metrics -> ledger records: one {ts,key,n} per finite number under
+ * eval:<name> keys; nulls and nested objects (by_family) stay out of the series. */
+export const evalMetricRecords = (m, ts) =>
+  Object.entries(m ?? {})
+    .filter(([, v]) => typeof v === "number" && Number.isFinite(v))
+    .map(([k, n]) => ({ ts, key: `eval:${k}`, n }));
+
+/** Append the records as NDJSON — creating parent dirs and healing a missing
+ * final newline first (the append-probe invariant). Returns records written. */
+export const appendEvalMetrics = (file, m, ts) => {
+  const recs = evalMetricRecords(m, ts);
+  if (!recs.length) return 0;
+  mkdirSync(dirname(file), { recursive: true });
+  let prefix = "";
+  if (existsSync(file) && statSync(file).size > 0) {
+    const size = statSync(file).size;
+    const fd = openSync(file, "r");
+    const b = Buffer.alloc(1);
+    readSync(fd, b, 0, 1, size - 1);
+    closeSync(fd);
+    if (b[0] !== 0x0a) prefix = "\n";
+  }
+  appendFileSync(file, prefix + recs.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  return recs.length;
+};
+
 const run = (script, args = []) =>
   spawnSync(process.execPath, [script, ...args], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
 
+function main() {
 const gateEval = run('tests/gate/eval/fixtures.mjs');
 console.log(gateEval.stdout.trim());
 if (gateEval.status !== 0) console.error(gateEval.stderr);
@@ -70,7 +104,7 @@ const ctxTokPerTask = sessions > 0 ? Math.round((rp.ctx_chars_capped ?? 0) / 4 /
 
 if (tokensPerTask !== null) console.log(`METRIC tokens_per_task=${tokensPerTask}`);
 if (ctxTokPerTask !== null) console.log(`METRIC ctx_tok_per_task=${ctxTokPerTask}`);
-console.log(JSON.stringify({
+const final = {
   fixture_pass: fx.fixture_pass ?? 0,
   fixture_total: fx.fixture_total ?? 0,
   allow_fail: fx.allow_fail ?? 0,
@@ -85,4 +119,11 @@ console.log(JSON.stringify({
   spill_count: rp.spill_count ?? null,
   pre_edit_read_rate: pe.pre_edit_read_rate ?? null,
   unread_blocks: pe.unreadBlocks ?? 0,
-}));
+};
+console.log(JSON.stringify(final));
+const metricsFile = process.env.GATE_EVAL_METRICS ?? join(homedir(), ".pi/agent/.cache/harness-watch/metrics.ndjson");
+const written = appendEvalMetrics(metricsFile, { ...final, tokens_per_task: tokensPerTask, ctx_tok_per_task: ctxTokPerTask }, new Date().toISOString());
+console.error(`eval metrics: ${written} records -> ${metricsFile}`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

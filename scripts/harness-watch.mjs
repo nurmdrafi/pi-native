@@ -256,6 +256,14 @@ export function healthFrom(events, tasks) {
   return { ...s, byClass, ruleGapById, lastIncidents: last };
 }
 
+/** Nightly gate:eval invocation — the eval persists its metrics (eval:<name>
+ * keys) via GATE_EVAL_METRICS into the harvested ledger, so the series rides
+ * the same --home the daemon watches instead of the homedir default. */
+export const evalSpawn = (home, stateDir) => ({
+  args: [process.execPath, join(home, "tests/gate/eval/run.mjs")],
+  env: { GATE_EVAL_METRICS: join(stateDir, "metrics.ndjson") },
+});
+
 async function main(passed = process.argv.slice(2)) {
   const argv = passed;
   const arg = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -320,6 +328,14 @@ async function main(passed = process.argv.slice(2)) {
       for (const ev of parseSuiteLog(String(err.stdout ?? ""), runTs)) newEvents.push(ev);
       if (!newEvents.some((e) => e.source === "suite"))
         newEvents.push({ ts: runTs, source: "suite", id: "suite:run", kind: "fail", reason: head(err.message, 120), shape: "suite run crashed" });
+    }
+    const ev = evalSpawn(home, stateDir);
+    try {
+      const out = execFileSync(ev.args[0], ev.args, { cwd: home, encoding: "utf8", timeout: 600_000, env: { ...process.env, ...ev.env }, stdio: ["ignore", "pipe", "pipe"] });
+      console.log(out.trim());
+    } catch (err) {
+      console.error(`gate:eval failed: ${head(String(err?.message ?? err), 120)}`);
+      if (err?.stdout) console.log(String(err.stdout).trim());
     }
   }
 

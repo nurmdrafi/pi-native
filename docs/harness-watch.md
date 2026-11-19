@@ -38,7 +38,7 @@ hand — it reads the ledgers, so evidence and action cannot drift.
     npm run harness:watch              # one harvest pass (cron-able)
     npm run harness:watch -- --daemon  # always-on: fs.watch sessions + lessons, 2 s debounce
     npm run harness:status             # health snapshot from the ledgers
-    node scripts/harness-watch.mjs --with-suite        # include a live full-suite check
+    node scripts/harness-watch.mjs --with-suite        # full-suite check + gate:eval (persists eval:* metrics)
     node scripts/harness-watch.mjs --suite-log FILE    # parse an existing test log
 
 Suggested wiring (machine schedulers stay out of the repo):
@@ -56,8 +56,11 @@ Repair runs on demand: open a session and invoke `/harness-watch`.
   text reduced to a ≤64c head — secrets never persist.
 - `tasks.ndjson` — one record per task state change; latest per key wins;
   `open → fixed(sha) → reverted(sha)`; a fixed task reopens on recurrence.
-- `metrics.ndjson` — per run per source:id:kind counts; the revert check
-  diffs these across a fix commit's date.
+- `metrics.ndjson` — per run per source:id:kind counts, plus `eval:<name>`
+  records from each gate:eval run (manual or nightly `--with-suite`): one
+  `{ts,key,n}` per scalar of the final metrics object, so series like
+  `eval:pre_edit_read_rate` accumulate; the revert check diffs these across a
+  fix commit's date.
 - `state.json` — cursors: session files (mtime) and lessons (ts).
 
 ## Revert policy
