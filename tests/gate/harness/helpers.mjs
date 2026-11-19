@@ -67,6 +67,7 @@ delete process.env.PI_SUBAGENT_NAME;
 // a per-process temp dir before the gate import; cases that need their own
 // home save this value and restore it.
 process.env.HOME = mkdtempSync(join(tmpdir(), "pgate-home-"));
+process.env.PGATE_TMP_ROOTS = mkdtempSync(join(tmpdir(), "pgate-tmpok-")); // tmp allowance pinned off the sandbox trees (2026-11-19)
 
 const gate = await import("../../../extensions/permission-gate/index.ts");
 const rc = await import("../../../extensions/permission-gate/rules/read-coverage.ts"); // S5: hash plumbing units

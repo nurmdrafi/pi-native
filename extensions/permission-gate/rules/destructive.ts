@@ -6,8 +6,8 @@
  * It catches the realistic unsanctioned shapes at command positions; a
  * determined rewrite escapes it. AGENTS.md discipline and the user's eyes are
  * the actual boundary. */
-import { homedir } from "os";
-import { join, dirname, resolve } from "path";
+import { homedir, tmpdir } from "os";
+import { join, dirname, basename, resolve } from "path";
 import { realpathSync } from "fs";
 import { fileURLToPath } from "url";
 import { config } from "../loader.ts";
@@ -173,7 +173,10 @@ const DESTRUCTIVE_BASH_SUFFIX =
   // new words require whitespace BEFORE the bar: real shell pipes leave
   // one, while a quoted pattern's alternation inside a word
   // (`rg "node -e|python3 -c"`, 16.3 pin) does not.
-  String.raw`|\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
+  // 2026-11-19: the sh alternative gets the same `(?<=\s)` — a quoted
+  // alternation like `rg '...(Destructive|Bash ...'` has no space before
+  // the bar but matched `\|\s*(?:ba)?sh` and blocked a read-only search.
+  String.raw`|(?<=\s)\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
   String.raw`|(?<=\s)\|\s*(?:node(?:js)?|python3?|perl|ruby|php|deno|bun)\b(?![\w-])` +
   String.raw`|\b(?:DROP\s+(?:TABLE|DATABASE)|DELETE\s+FROM)\b|\bfind\b[^|;&]*\s-[a-zA-Z]*delete\b`;
 
@@ -233,6 +236,27 @@ const GATE_DIR = (() => {
     return "";
   }
 })();
+/** Single source of the home-tree protection suffix (rc files, .ssh,
+ * .gnupg, systemd) — consumed by the ppRe builder below and by the
+ * tmp-allowance ranking (home protection outranks scratch: credentials
+ * stay protected even when a sandbox parks HOME under a tmp root). */
+const PROTECTED_HOME_SUFFIX_SRC =
+  String.raw`/\.(?:bashrc|zshrc|profile|bash_profile|bash_aliases|bash_login|tmux\.conf|gitconfig)(?:/|$)` +
+  String.raw`|` +
+  String.raw`/\.(?:ssh|gnupg)/` +
+  String.raw`|` +
+  String.raw`/\.config/systemd/`;
+const HOME_PROTECTED = new RegExp(PROTECTED_HOME_SUFFIX_SRC);
+
+/** Tmp allowance as a JUDGMENT (not a location): scratch under a tmp root
+ * is free EXCEPT credentials/rc files and the gate's own tree — those keep
+ * their protected confirm wherever they live. Used wherever the allowance
+ * could cancel a protected verdict (write/edit lane, redirect/tee judges). */
+export const tmpAllowed = (real: string): boolean =>
+  isTmpAllowPath(real) &&
+  !HOME_PROTECTED.test(real) &&
+  !(GATE_DIR !== "" && (real === GATE_DIR || real.startsWith(GATE_DIR + "/")));
+
 export const PROTECTED_PREFIX_RE = {
   test(p: string): boolean {
     // Compare in realpath space. Callers pass an already-realpathed target, so
@@ -250,12 +274,7 @@ export const PROTECTED_PREFIX_RE = {
       // Homes are tried in both spellings so callers that hand over a raw
       // (non-realpathed) path — e.g. bash redirect targets — still match.
       const homes = [resolved, raw].filter((v, i, a) => a.indexOf(v) === i).map(esc);
-      const suffix =
-        String.raw`/\.(?:bashrc|zshrc|profile|bash_profile|bash_aliases|bash_login|tmux\.conf|gitconfig)(?:/|$)` +
-        String.raw`|` +
-        String.raw`/\.(?:ssh|gnupg)/` +
-        String.raw`|` +
-        String.raw`/\.config/systemd/`;
+      const suffix = PROTECTED_HOME_SUFFIX_SRC;
       ppRe = new RegExp(
         String.raw`^(?:/etc|/usr|/var|/boot|/root)(?:/|$)` +
           homes.map((h) => String.raw`|^` + h + suffix).join("") +
@@ -273,6 +292,28 @@ const expandWrittenTarget = (t: string) =>
 const REDIRECT_TARGET = /(?<![=>!\-\d])(?:>>?)\s+([^\s&>]+)/g;
 const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
 
+/** System trees in RESOLVED space — darwin resolves /etc|/usr|/var to
+ * /private/*, so a realpathed target needs its own list. Kept separate
+ * from PROTECTED_PREFIX_RE (raw space, homes-aware): the write/edit lane
+ * tests only the resolved path and predates this list — extending the
+ * shared regex there would protect every darwin $TMPDIR sandbox; the bash
+ * lane below judges both spellings. */
+const PROTECTED_RESOLVED =
+  /^(?:\/etc|\/usr|\/var|\/boot|\/root|\/private\/etc|\/private\/usr|\/private\/var)(?:\/|$)/;
+
+/** Redirect/tee target judgment (2026-11-19): resolve the written target
+ * first — the raw text and the realpath can differ on both sides. Tmp
+ * allowance wins in resolved space (macOS $TMPDIR sits under protected
+ * /var; the allowance names the sanctioned per-user scratch); otherwise
+ * the target confirms when EITHER spelling hits a protected prefix, so a
+ * symlinked final hop into a system tree cannot launder the write. */
+const protectedWrittenTarget = (raw: string): boolean => {
+  const t = expandWrittenTarget(raw);
+  const real = realpathish(t);
+  if (tmpAllowed(real)) return false;
+  return PROTECTED_PREFIX_RE.test(t) || PROTECTED_RESOLVED.test(real);
+};
+
 /** Phase 2 (audit A6, 2026-11-18): an inline-interpreter payload confirms on
  * its BODY's deletion/unlink vocabulary — never on where its stdout lands
  * (the `node -e` arithmetic false positive confirmed on a /tmp redirect and
@@ -289,6 +330,37 @@ const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
 const INTERP_BODY_DESTRUCTIVE =
   /\b(?:shutil\.rmtree|os\.(?:remove|unlink|rmdir)|fs\.(?:rm|rmdir)|promises\.(?:rm|rmdir))\b|\.(?:rm|unlink|rmdir)(?:Sync)?\b|\b(?:rm|unlink|rmdir)(?:Sync)?\s*\(|\b(?:rm|unlink)\s+\S|\brm\s+-[a-zA-Z]*[rRf]|\btell\s+application\b[^\n]*\b(?:delete|empty\s+trash)\b/;
 
+/** Realpath with the write-lane fallback: an unresolvable tail still
+ * judges against its realpathed parent, so a not-yet-created target keeps
+ * its tree. Exported — index.ts judges confinement in the same space. */
+export const realpathish = (abs: string): string => {
+  try {
+    return realpathSync(abs);
+  } catch {
+    try {
+      return join(realpathSync(dirname(abs)), basename(abs));
+    } catch {
+      return abs; // unresolvable — judge the path as written
+    }
+  }
+};
+
+/** Tmp allowance (user direction 2026-11-19): /tmp and the OS tmp dir are
+ * agent scratch — never protected, never write-confined, parents and
+ * subagents alike (scout durability files, spill slices). macOS parks
+ * $TMPDIR under /var, a protected system tree, so the prefix test alone
+ * would confirm every scratch redirect. PGATE_TMP_ROOTS (colon-separated)
+ * replaces the default pair — test sandboxes pin it to stay confinable;
+ * read per call so a process can retarget mid-run. Write-then-execute from
+ * a tmp tree still confirms (index.ts): scratch is not execution. */
+export const tmpAllowRoots = (): string[] => {
+  const raw = process.env.PGATE_TMP_ROOTS;
+  const roots = raw ? raw.split(":").filter(Boolean) : ["/tmp", tmpdir()];
+  return [...new Set(roots.map(realpathish))];
+};
+export const isTmpAllowPath = (p: string): boolean =>
+  tmpAllowRoots().some((r) => p === r || p.startsWith(r.endsWith("/") ? r : r + "/"));
+
 /** Structural destructive signals shared by both judges: protected
  * redirect/tee targets, wrapped payloads, interpreter escapes, encoded
  * eval, alias indirection. One home — the judges never drift. */
@@ -296,12 +368,8 @@ const structuralDestructive = (s: string): boolean =>
   // S4 fix 7 (§6.7): persistence redirect/tee targets — same protected-prefix
   // source as the write/edit realpath check (replaces the old /etc-only
   // redirect alternative)
-  [...s.matchAll(REDIRECT_TARGET)].some((m) =>
-    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-  ) ||
-  [...s.matchAll(TEE_TARGET)].some((m) =>
-    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-  ) ||
+  [...s.matchAll(REDIRECT_TARGET)].some((m) => protectedWrittenTarget(m[1] ?? "")) ||
+  [...s.matchAll(TEE_TARGET)].some((m) => protectedWrittenTarget(m[1] ?? "")) ||
   (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
   // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
   // 2026-11-18 (audit A6): the inline-interpreter tripwire judges the BODY's
@@ -556,7 +624,10 @@ export const writtenTargetsOf = (seg: string): string[] =>
 export const tmpWriteTargetsOf = (seg: string): string[] => {
   const out: string[] = [];
   for (const t of writtenTargetsOf(seg)) {
-    if (!TMP_WRITE_PREFIX.test(t)) continue;
+    // 2026-11-19: every tmp-allow root records planted files, not just
+    // literal /tmp spellings — the seam follows the allowance wherever it
+    // points (darwin $TMPDIR sits outside /tmp).
+    if (!TMP_WRITE_PREFIX.test(t) && !isTmpAllowPath(realpathish(t))) continue;
     out.push(t);
     try {
       const rp = realpathSync(t);
@@ -619,13 +690,15 @@ export const executesRecordedTmpTarget = (
  * tree (the gate's own tree included since A2), else undefined. */
 const protectedTarget = (t: string, cwd?: string): string | undefined => {
   const abs = t.startsWith("/") ? t : cwd ? resolve(cwd, t) : t;
-  let real = abs;
-  try {
-    real = realpathSync(abs);
-  } catch {
-    /* not on disk yet — the resolved spelling still names the destination */
-  }
-  return PROTECTED_PREFIX_RE.test(real) ? real : undefined;
+  // 2026-11-19: resolve nonexistent tails through their parent so a raw
+  // /var spelling of a darwin $TMPDIR target lands in realpath space; the
+  // tmp allowance is judged there BEFORE the protected test — scratch wins
+  // over the system-tree prefix it happens to sit under.
+  const real = realpathish(abs);
+  if (tmpAllowed(real)) return undefined;
+  return PROTECTED_PREFIX_RE.test(real) || PROTECTED_RESOLVED.test(real)
+    ? real
+    : undefined;
 };
 
 /** Finding 1: a relative redirect/tee target into a protected tree. The

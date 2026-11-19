@@ -26,7 +26,7 @@ function isBashKind(event: { toolName: string }): boolean {
 
 import type { ExtensionAPI, ExtensionHandler } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "crypto";
-import { homedir, tmpdir } from "os";
+import { homedir } from "os";
 import {
   appendFileSync,
   mkdirSync,
@@ -52,6 +52,9 @@ import {
   PROTECTED_PREFIX_RE,
   writtenTargetsOf,
   isMutatingCommand,
+  isTmpAllowPath,
+  tmpAllowed,
+  realpathish,
   normalizeSegment,
   segmentDestructive,
   segmentDestructiveExceptGit,
@@ -511,7 +514,7 @@ export default function (pi: ExtensionAPI) {
         return undefined; // unresolvable — the tool's own error handles it
       }
     }
-    return PROTECTED_PREFIX_RE.test(real)
+    return !tmpAllowed(real) && PROTECTED_PREFIX_RE.test(real)
       ? `${tool} '${abs.slice(0, 28)}' → protected (symlink-resolved) and`
       : undefined;
   };
@@ -529,41 +532,20 @@ export default function (pi: ExtensionAPI) {
    * session cwd tree itself, plus the ~/.pi/efforts ledger tree (reinstated
    * by user direction 2026-11-17: effort ledgers are routine agent scratch
    * and every write confirmed; the exemption covers out-of-cwd AND
-   * overwrite, every mode). The confinement root is the handler ctx cwd —
+   * overwrite, every mode), plus the tmp trees — /tmp and the OS tmp dir
+   * (user direction 2026-11-19: agent scratch, parents and subagents
+   * alike; PGATE_TMP_ROOTS overrides — see isTmpAllowPath). The
+   * confinement root is the handler ctx cwd —
    * a context without one (stubbed harnesses) has nothing to confine
    * against, so the rule skips; the tools' own resolution rung still
    * rejects ../ escapes outright. Returns the H2 confirm subject when the
    * write must confirm, else undefined. */
-  const realpathish = (abs: string): string => {
-    try {
-      return realpathSync(abs);
-    } catch {
-      try {
-        return join(realpathSync(dirname(abs)), basename(abs));
-      } catch {
-        return abs; // unresolvable — judge the path as written
-      }
-    }
-  };
   const underRoot = (p: string, root: string): boolean =>
     p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
   /** ~/.pi/efforts allowlist root, judged in the same realpath space as the
    * target: a symlinked home still matches, and a not-yet-created efforts
    * dir falls back to its realpathed parent + basename. */
   const effortsRoot = (): string => realpathish(join(homedir(), ".pi", "efforts"));
-  /** Tmp allowance (user direction 2026-11-19): the temp trees carry no
-   * write permission — /tmp and the OS tmp dir are agent scratch for
-   * parents and subagents alike (scout durability files, H1 spill slices).
-   * The write-then-execute seam still confirms: planting a script in a tmp
-   * tree and running it is execution, not scratch. PGATE_TMP_ROOTS
-   * (colon-separated) replaces the default pair — test sandboxes live
-   * under the real tmp trees and must stay confinable; read per call so a
-   * process can retarget it mid-run. */
-  const tmpAllowRoots = (): string[] => {
-    const raw = process.env.PGATE_TMP_ROOTS;
-    const roots = raw ? raw.split(":").filter(Boolean) : ["/tmp", tmpdir()];
-    return [...new Set(roots.map(realpathish))];
-  };
   const writeConfinementReason = (
     tool: string,
     abs: string,
@@ -579,7 +561,7 @@ export default function (pi: ExtensionAPI) {
     }
     const real = realpathish(abs);
     if (underRoot(real, effortsRoot())) return undefined; // efforts ledger tree
-    if (tmpAllowRoots().some((r) => underRoot(real, r))) return undefined; // tmp scratch trees
+    if (isTmpAllowPath(real)) return undefined; // tmp scratch trees (user direction 2026-11-19)
     if (!underRoot(real, root))
       return `${tool} '${abs.slice(0, 28)}' → outside the session directory and`;
     if (overwrite)
@@ -1452,8 +1434,9 @@ export default function (pi: ExtensionAPI) {
     // same write rerouted through a redirect/tee/heredoc must not find an
     // ungated lane. Doctrine is subagent-specific by design: parents keep
     // free scratch (H1 spills under /tmp), subagents are confined to the
-    // session dir — so out-of-cwd written targets confirm, and the
-    // subagent ladder fails closed. Parents never reach a new ask here.
+    // session dir plus the tmp allowance trees (2026-11-19) — so
+    // out-of-cwd written targets confirm, and the subagent ladder fails
+    // closed. Parents never reach a new ask here.
     if (ruleEnabled("destructiveConfirm") && process.env.PI_SUBAGENT_NAME) {
       for (const t of [...new Set(bashWrittenPaths(normSegs, ctx?.cwd))]) {
         const wc = writeConfinementReason("pibash", t, ctx?.cwd,

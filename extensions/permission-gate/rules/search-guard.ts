@@ -218,6 +218,10 @@ function headTailReadsFile(seg: string): boolean {
     }
     if (t === "-n" || t === "--lines" || t === "-c" || t === "--bytes") {
       i++; // the count is a flag value, not an operand
+      // 2026-11-19: a one-BYTE tail is the newline probe AGENTS.md mandates
+      // before every `>>` append — a probe, not a window; anything wider
+      // stays a piread shape.
+      if (head === "tail" && toks[i] === "1") return false;
       continue;
     }
     if (/[fF]/.test(t)) return false; // -f/--follow: a watcher, not a read

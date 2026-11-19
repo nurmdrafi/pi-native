@@ -317,7 +317,11 @@ async function runGateChild(wbOff) {
       const g = await bash(git, inCwd);
       check("g11 yolo: git-family ask is auto-approved", g === "bash ok", g);
       const d = await bash(rmf, inCwd);
-      check("g11 yolo: non-git destructive is silenced too (H2 left the floor)", d === "bash ok", d);
+      check(
+        "g11 yolo: non-git destructive still confirms (boundary re-armed 2026-11-18)",
+        d.startsWith("BLOCKED: Permission Gate (Destructive)"),
+        d,
+      );
     } finally {
       loader.setYolo(false);
     }
@@ -329,8 +333,7 @@ async function runGateChild(wbOff) {
   {
     const r = await write("piwrite", join(allow, "a.md"), "alpha", inCwd, true);
     check("g12 piwrite tmp-root target passes (allowlisted)", r === "write ok", r);
-    const rr = await read("piread", join(allow, "a.md"), inCwd);
-    const r2 = rr === "read ok" ? await write("piwrite", join(allow, "a.md"), "beta", inCwd, true) : rr;
+    const r2 = await write("piwrite", join(allow, "a.md"), "beta", inCwd, true);
     check("g12b piwrite tmp-root overwrite passes (allowlisted)", r2 === "write ok", r2);
     const p = join(allow, "e.md");
     writeFileSync(p, "alpha\nbeta\n");
@@ -344,10 +347,11 @@ async function runGateChild(wbOff) {
     try {
       const rb = await bash(`printf hi > ${join(allow, "sub.txt")}`, inCwd);
       check("g12d subagent bash redirect into tmp root passes", rb === "bash ok", rb);
-      const rc = await bash(`printf hi > ${join(other, "sub.txt")}`, inCwd);
+      const rc = await bash(`printf hi > ${join(tmpdir(), "wc-escape-d.txt")}`, inCwd);
       check(
-        "g12d2 subagent bash redirect outside session/tmp still blocks",
-        rc.startsWith("BLOCKED: Permission Gate (Destructive)") && rc.includes("outside the session directory"),
+        "g12d2 subagent bash redirect outside session/tmp allowance still blocks",
+        rc.startsWith("BLOCKED: Permission Gate (Destructive)") &&
+          (rc.includes("outside the session directory") || rc.includes("not permitted for subagents")),
         rc,
       );
     } finally {
