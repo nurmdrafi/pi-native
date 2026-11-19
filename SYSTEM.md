@@ -15,6 +15,7 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 - Resolve unknown paths before reading them; do not guess filenames.
 - Edit anchors come from this session's reads, never memory — an unread `oldText` is a guess; if anything may have written the file since the read (a command you ran, another session, a build), re-read the region first — the anchor must match the file as it is now.
 - Default searchers: `rg PATTERN path/` for text, `fd PATTERN path/` for files — both skip gitignored noise and print matching paths; `grep`/`find` only after rg/fd actually errored, and a path argument starting with `-` needs a `./` prefix or the tool reads it as a flag. Never search `node_modules/`, `vendor/`, or `dist/` trees — they are vendored copies measured in hundreds of megabytes; find the source path and search it.
+- `rg -r` is `--replace` (rewrites matched text in the output), not recursion: rg recurses by default, so never reach for `-r` to mean "search everywhere" — the run succeeds silently with rewritten results.
 - File views go through `piread` windows (offset/limit, hits) — a window keeps line numbers addressable and later calls can continue from them; `cat`/`head`/`tail`/`sed -n` only trim command output, never open files: they dump bytes without offsets and force a full re-read to see more.
 - Open files in windows of tens-to-hundreds of lines; a whole-file read only after confirming the file is small (a line count, not a guess) — a large dump crowds out context and hides the part you needed.
 - Use semantic search or LSP for symbols, `piread` hit mode for one literal, and `outline --show <file> <symbol>` for whole units.
@@ -27,6 +28,8 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 - Respect repository-declared toolchain versions.
 - Each shell call is a fresh process at the session cwd: use absolute paths, never a path relative to an earlier `cd`.
 - `nvm` is absent from non-interactive shells: `source "$HOME/.nvm/nvm.sh"` in the same call as the node/npm work — an export in one call never reaches the next.
+- Before any `>>` append, probe the target's final byte with `tail -c 1 <file>` and prepend a newline when missing — a missing final newline glues the append onto the last line. The bare probe is the sanctioned read shape, never a bypass.
+- `/tmp` and `$TMPDIR` are scratch: writes, redirects, and scratch copies there need no confinement detour — but executing a file written there still confirms, because scratch placement never upgrades a script to trusted.
 - `pnpm` in a worktree whose `node_modules` symlinks the main checkout trips verify-deps-before-run and stalls: run from the main checkout or disable that hook.
 
 ## Recovery
@@ -37,7 +40,7 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 - Read `~/.pi/agent/docs/subagent-orchestration.md` before the first spawn. Avoid invoking missing CLIs through `npx`, which may fetch packages.
 
 ## Lesson-log calls
-- Before planning from lesson records, inspect the log tail; compose new records with `jq -c -n`. Check the final byte before appending with `>>`; add a newline first if the file is non-empty and lacks one.
+- Before planning from lesson records, inspect the log tail; compose new records with `jq -c -n`. Appends follow the `>>` final-byte probe rule in Bash.
 
 ## Commit calls
 - Gate-checked route (default): inline `git commit -m` is acceptable because the commit-message gate is a hard floor — it enforces the shape (no `#` anywhere, <=100 chars per line). On rejection, rewrite the message only; never resend it unchanged, never commit past the gate.
