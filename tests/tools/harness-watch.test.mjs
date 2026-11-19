@@ -51,6 +51,12 @@ test("parseSuiteLog: node --test failure lines become suite events", () => {
   assert.equal(ev[0].source, "suite"); assert.equal(ev[0].kind, "fail");
 });
 
+test("parseSuiteLog: spec-reporter failing-tests summary header is not a phantom failure", () => {
+  const ev = parseSuiteLog("✖ snapshot cache (1.3s)\n✖ failing tests:\n✖ second GET within the poll window (1.2s)\n", "T");
+  assert.equal(ev.length, 2); // real failures only — the literal header line is not a test
+  assert.ok(ev.every((e) => !/^failing tests:$/.test(e.id)));
+});
+
 const DOCS = "guard with `tail -c 1` and `jq -r` under the bound";
 
 test("classify: benign head → misfire; docs shape → contradiction; recurrence ≥3 → rule-gap; lesson/suite direct", () => {

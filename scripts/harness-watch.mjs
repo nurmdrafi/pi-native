@@ -161,7 +161,10 @@ export function parseSuiteLog(text, ts) {
   const out = [];
   for (const line of text.split("\n")) {
     const m = /^✖ (.+?)(?:\s+\([\d.]+m?s\))?$/.exec(line.trim()) ?? /^not ok \d+ - (.+)$/.exec(line.trim());
-    if (m) out.push({ ts, source: "suite", id: m[1].slice(0, 80), kind: "fail", reason: "test failure", shape: m[1].slice(0, SHAPE_LEN) });
+    // node's spec reporter ends with a literal `✖ failing tests:` summary
+    // header — a section label, not a test; harvesting it opened phantom tasks
+    if (m && !/^failing tests:$/.test(m[1]))
+      out.push({ ts, source: "suite", id: m[1].slice(0, 80), kind: "fail", reason: "test failure", shape: m[1].slice(0, SHAPE_LEN) });
   }
   return out;
 }
