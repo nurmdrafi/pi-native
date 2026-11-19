@@ -239,8 +239,16 @@ export function healthFrom(events, tasks) {
   const s = summarize(events, foldTasks(tasks));
   const byClass = {};
   for (const t of s.openTasks) byClass[t.class] = (byClass[t.class] ?? 0) + 1;
+  // rule-gap rollup: per-path keys fan one behavior out into many tasks;
+  // by-rule totals restore the one-behavior-one-line view for triage.
+  const gap = {};
+  for (const t of s.openTasks) if (t.class === "rule-gap") {
+    gap[t.id] ??= { id: t.id, tasks: 0, events: 0 };
+    gap[t.id].tasks += 1; gap[t.id].events += t.count;
+  }
+  const ruleGapById = Object.values(gap).sort((a, b) => b.events - a.events);
   const last = events.slice(-5).map((e) => `${e.ts} ${e.source}:${e.id} ${String(e.reason).slice(0, 60)}`);
-  return { ...s, byClass, lastIncidents: last };
+  return { ...s, byClass, ruleGapById, lastIncidents: last };
 }
 
 async function main(passed = process.argv.slice(2)) {
@@ -344,6 +352,10 @@ async function printStatus(home, asJson) {
   if (asJson) return console.log(JSON.stringify(h, null, 2));
   console.log(`harness-watch status — ${h.events} events tracked, ${h.open} open tasks`);
   for (const [k, n] of Object.entries(h.byClass)) console.log(`  ${k.padEnd(14)} ${n}`);
+  if (h.ruleGapById?.length) {
+    console.log("  rule-gap by rule (events/tasks):");
+    for (const g of h.ruleGapById.slice(0, 6)) console.log(`    ${g.id.padEnd(6)} ${g.events}/${g.tasks}`);
+  }
   for (const t of h.topRecurrence.slice(0, 5)) console.log(`  recur ${t.source}:${t.id} x${t.count}  ${String(t.shape).slice(0, 50)}`);
   for (const l of h.lastIncidents) console.log(`  last ${l}`);
 }

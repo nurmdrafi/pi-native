@@ -110,6 +110,12 @@ test("classify: contradiction needs a docs mandate — a named-but-forbidden sha
   assert.equal(classify({ source: "gate", id: "R9", kind: "block", shape: "git add AGENTS.md package.json" }, docs, []), "contradiction");
 });
 
+test("healthFrom rolls open rule-gap tasks up by rule id — one behavior, one line", () => {
+  const mk = (id, path, count) => ({ key: `rule-gap:gate:${id}:${path}`, class: "rule-gap", source: "gate", id, shape: path, count, status: "open" });
+  const h = healthFrom([], [mk("AG", "a.ts", 3), mk("AG", "b.ts", 5), mk("R1", "c.ts", 2), { ...mk("H2", "d.sh", 9), class: "misfire" }]);
+  assert.deepEqual(h.ruleGapById, [{ id: "AG", tasks: 2, events: 8 }, { id: "R1", tasks: 1, events: 2 }]);
+});
+
 test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", () => {
   const home = mkdtempSync(join(tmpdir(), "hw-home-"));
   const sess = join(home, "sessions/proj");
