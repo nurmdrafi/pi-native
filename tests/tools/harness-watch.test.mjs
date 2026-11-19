@@ -99,6 +99,17 @@ test("healthFrom/foldTasks: append-only task ledger folds — latest record per 
   assert.equal(healthFrom(events, [rec(1), { ...rec(2), status: "fixed" }]).open, 0);
 });
 
+test("classify: contradiction needs a docs mandate — a named-but-forbidden shape is not one", () => {
+  const docs = [
+    "File views go through piread windows; `cat`/`head`/`tail`/`sed -n` only trim command output, never open files.",
+    "then run `git add` and `git commit -F` <msgfile> in one shell call",
+  ].join("\n");
+  // sed -n named inside a prohibition line: gate and docs agree, so no contradiction
+  assert.notEqual(classify({ source: "gate", id: "SE2", kind: "block", shape: "sed -n 1,20p CHANGELOG.md" }, docs, []), "contradiction");
+  // git add mandated by the docs: a block on it is a real contradiction
+  assert.equal(classify({ source: "gate", id: "R9", kind: "block", shape: "git add AGENTS.md package.json" }, docs, []), "contradiction");
+});
+
 test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", () => {
   const home = mkdtempSync(join(tmpdir(), "hw-home-"));
   const sess = join(home, "sessions/proj");

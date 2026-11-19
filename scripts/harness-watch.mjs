@@ -84,6 +84,15 @@ const BENIGN_HEADS = {
  * reads before acting must agree with the gate (AGENTS.md invariant). */
 const DOC_FILES = ["AGENTS.md", "SYSTEM.md", "agents/scout.md"];
 
+/** Prohibition markers — a docs line naming a shape inside a prohibition
+ * ("never open files", "only trim output") is the docs and the gate
+ * agreeing; a contradiction needs a line that directs the agent to run it. */
+const PROHIBITION = /\b(never|only|don'?t|forbidden|avoid|instead|rather)\b/i;
+const docsMandate = (docsText, toks) => {
+  const lit = "`" + toks + "`";
+  return docsText.split("\n").some((l) => l.includes(lit) && !PROHIBITION.test(l));
+};
+
 const SHAPE_LEN = 64;
 const shapeOf = (arg) => String(arg ?? "").trim().split(/\s+/).slice(0, 8).join(" ").slice(0, SHAPE_LEN);
 const head = (s, n) => String(s ?? "").split("\n")[0].slice(0, n);
@@ -161,7 +170,7 @@ export function classify(event, docsText, history) {
     if (event.kind === "block" && benign?.test(event.shape)) return "misfire";
     if (event.kind === "block") {
       const toks = event.shape.split(/\s+/).slice(0, 2).join(" ");
-      if (toks && docsText.includes("`" + toks + "`")) return "contradiction";
+      if (toks && docsMandate(docsText, toks)) return "contradiction";
     }
   }
   const key = `${event.id}|${event.shape}`;
