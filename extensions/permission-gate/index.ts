@@ -1201,9 +1201,17 @@ export default function (pi: ExtensionAPI) {
             /* ENOENT: creating a new file — nothing to bind */
           }
           if (exists) {
+            // 2026-11-22 (harness-watch misfire): at warn the write RUNS and
+            // its result certifies spans 1–EOF, so the block-tier remedy
+            // ("read it before overwriting") prescribes a read R1 then
+            // refuses as a duplicate — a guard-vs-guard deadlock. Warn
+            // teaches post-hoc: name what happened, say the new content is
+            // in context, defer the read to the next overwrite.
             const r = enforce(
               "writeBindingGuard",
-              `Anchor Guard (Unread): '${shown}' exists but was never read this session — read it before overwriting.`,
+              ruleBlocks("writeBindingGuard")
+                ? `Anchor Guard (Unread): '${shown}' exists but was never read this session — read it before overwriting.`
+                : `Anchor Guard (Overwrite-unread): '${shown}' was overwritten without a read this session — unseen content was replaced; the new content is in context, so do not re-read; read before the next overwrite.`,
               event.toolCallId,
             );
             if (r) return r;
