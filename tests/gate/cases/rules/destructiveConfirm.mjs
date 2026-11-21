@@ -288,6 +288,31 @@ export const cases = [
     "pass",
     async (pi) => bash(pi, 'for s in a b; do echo "$s"; done'),
   ],
+  // ---- 2026-11-22 harness-watch misfire: read-only jq blocked as mutating ----
+  // jq programs are single-quoted literal data; ($x|fn) grouping there is jq
+  // syntax, not a subshell running $x. The $VAR command-word judge must not
+  // see inside single quotes (command position never occurs there).
+  [
+    "non-destructive: jq def with ($x|fn) grouping passes",
+    "pass",
+    async (pi) =>
+      bash(pi, "jq -s 'def p50: sort as $s | ($s|length) as $n | 3' out.ndjson", denyUi()),
+  ],
+  [
+    "non-destructive: jq as-$t pipeline with ($t|match) passes",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        'jq -r \'select(.type=="message") | (.message.content|tostring) as $t | ($t|match("pane")) .ts\' log.jsonl',
+        denyUi(),
+      ),
+  ],
+  [
+    "H2: unquoted $VAR command word still fails closed",
+    "blocked",
+    async (pi) => bash(pi, "$CMD target", denyUi()),
+  ],
   [
     "non-destructive: bash -c echo passes",
     "pass",

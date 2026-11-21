@@ -157,13 +157,6 @@ const DESTRUCTIVE_CORE_NON_GIT_SRC = CONFIRM_SET_NON_GIT.length
   : "(?!)";
 
 const DESTRUCTIVE_BASH_SUFFIX =
-  // S4 fix 5 (2026-10-15, spec §6.5): a $VAR/${VAR} COMMAND WORD is
-  // unclassifiable — it confirms, never silently allows. Anchored like the
-  // core but NOT inside it: DESTRUCTIVE_ANYWHERE would then fire on every
-  // $arg expansion (sed … $f, awk '{print $1}')
-  String.raw`|` +
-  CMD_POS_SRC +
-  String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)` +
   // S4 fix 6 (§6.6): pipe-to-interpreter — unanchored on purpose (matches
   // anywhere in the segment, incl. inside sh -c "…" payloads); `bash
   // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed.
@@ -380,10 +373,29 @@ const structuralDestructive = (s: string): boolean =>
   EVAL_ENCODED.test(s) ||
   (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s));
 
+/** S4 fix 5 (2026-10-15, spec §6.5): a $VAR/${VAR} COMMAND WORD is
+ * unclassifiable — it confirms, never silently allows. Anchored like the
+ * core but NOT inside DESTRUCTIVE_BASH: DESTRUCTIVE_ANYWHERE would then
+ * fire on every $arg expansion (sed … $f, awk '{print $1}').
+ * 2026-11-22 (harness-watch misfire): judged on single-quote-stripped text —
+ * command position never occurs inside single quotes, so a $VAR seen only
+ * there is jq/awk program data ("($s|length)" grouping read as a subshell
+ * running $s and blocked read-only analysis pipelines). An unpaired quote
+ * strips nothing, so prose apostrophes stay fail-closed. */
+const VAR_CMD_WORD = new RegExp(
+  CMD_POS_SRC + String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)`,
+  "i",
+);
+const stripSingleQuoted = (s: string): string => s.replace(/'[^']*'/g, "''");
+
 export const segmentDestructive = (seg: string): boolean => {
   // S4 fix 9 (2026-10-18): NFKC fold first — homoglyph command words (ｒｍ) match
   const s = seg.normalize("NFKC");
-  return DESTRUCTIVE_BASH.test(s) || structuralDestructive(s);
+  return (
+    DESTRUCTIVE_BASH.test(s) ||
+    VAR_CMD_WORD.test(stripSingleQuoted(s)) ||
+    structuralDestructive(s)
+  );
 };
 
 /** /yolo judge (user direction 2026-11-12): identical to
@@ -393,7 +405,11 @@ export const segmentDestructive = (seg: string): boolean => {
  * still confirms: only git-only segments pass. */
 export const segmentDestructiveExceptGit = (seg: string): boolean => {
   const s = seg.normalize("NFKC");
-  return DESTRUCTIVE_BASH_NON_GIT.test(s) || structuralDestructive(s);
+  return (
+    DESTRUCTIVE_BASH_NON_GIT.test(s) ||
+    VAR_CMD_WORD.test(stripSingleQuoted(s)) ||
+    structuralDestructive(s)
+  );
 };
 export const APPROVED_WINDOW_MS = 2 * 60_000;
 
