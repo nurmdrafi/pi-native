@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSession, parseSuiteLog, classify, updateTasks, summarize, healthFrom, foldTasks, evalSpawn } from "../../scripts/harness-watch.mjs";
+import { parseSession, parseSuiteLog, classify, updateTasks, summarize, healthFrom, foldTasks, evalSpawn, listSessionFiles } from "../../scripts/harness-watch.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -33,6 +33,17 @@ const SESSION = [
   call("c6", "ls nope"),
   result("c6", "ls: nope: No such file or directory", true),
 ].join("\n");
+
+test("listSessionFiles: skips synthetic benchmark-fixture session dirs", () => {
+  const root = mkdtempSync(join(tmpdir(), "hw-list-"));
+  mkdirSync(join(root, "--home-user-repo--"), { recursive: true });
+  mkdirSync(join(root, "--home-user-repo-benchmark-fixtures-none-pi-bench-fixture--"), { recursive: true });
+  writeFileSync(join(root, "--home-user-repo--", "a.jsonl"), "{}\n");
+  writeFileSync(join(root, "--home-user-repo-benchmark-fixtures-none-pi-bench-fixture--", "b.jsonl"), "{}\n");
+  const files = listSessionFiles(root);
+  assert.equal(files.length, 1);
+  assert.ok(files[0].endsWith("a.jsonl"));
+});
 
 test("parseSession: gate events with ids/kinds/recovery, tool fails separate, non-errors ignored", () => {
   const { gate, fails } = parseSession(SESSION, "s.jsonl", "2026-11-19T00:00:00Z");

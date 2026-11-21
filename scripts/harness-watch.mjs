@@ -105,6 +105,26 @@ const RETIRED_TOOLS = new Set(["codemode"]);
  * A gate block is an isError result led by a gate label; a warn is a
  * non-error result led by one (the note rides normal output); everything
  * else that errors is a tool failure for the recurrence classifier. */
+/** Session .jsonl discovery. Synthetic workload trees are skipped: a session
+ * whose encoded cwd sits under benchmark/fixtures (the pi bench fixtures)
+ * replays canned tool calls — its failures are not model evidence and mint
+ * phantom tasks (harness-watch 2026-11-22: 11 identical `npm test -- phone`
+ * fails in one fixture session became a top-count task). */
+export function listSessionFiles(root) {
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name.includes("benchmark-fixtures")) continue;
+        walk(p);
+      } else if (e.name.endsWith(".jsonl")) files.push(p);
+    }
+  };
+  walk(root);
+  return files;
+}
+
 export function parseSession(text, session, fileTs) {
   const calls = new Map();
   const results = [];
@@ -289,16 +309,9 @@ async function main(passed = process.argv.slice(2)) {
   const priorTasks = readNdjson(tasksFile);
 
   // -- sessions: gate + tool-fail collectors
-  const files = [];
-  const walk = (dir) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith(".jsonl")) files.push(p);
-    }
-  };
+  let files = [];
+  try { files = listSessionFiles(sessionsDir); } catch { console.error(`no sessions dir: ${sessionsDir}`); process.exit(1); }
   const newEvents = [];
-  try { walk(sessionsDir); } catch { console.error(`no sessions dir: ${sessionsDir}`); process.exit(1); }
   for (const f of files) {
     const mtimeMs = statSync(f).mtimeMs;
     const name = f.slice(sessionsDir.length + 1);
