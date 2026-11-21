@@ -46,6 +46,7 @@ const FLAG_WAIVERS: &[&str] = &[
     "git --oneline",
     "git --stat",
     "git --untracked-files",
+    "git stash --staged",
     "git merge-tree --write-tree",
     "gh release --pattern",
     "curl --proto",
@@ -1241,6 +1242,7 @@ mod tests {
             "git --oneline",
             "git --stat",
             "git --untracked-files",
+            "git stash --staged",
             "git merge-tree --write-tree",
             "gh release --pattern",
         ] {

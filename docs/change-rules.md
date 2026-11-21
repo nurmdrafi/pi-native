@@ -1,19 +1,16 @@
-# Change and release discipline
+# Change Discipline
 
-## Implementation
-- Understand the defect and its callers before changing code.
-- Prefer deletion or reuse when it solves the requirement without reducing correctness.
-- Fix root causes, not symptoms. Add a regression test for behavioral defects.
-- Consider deployment constraints when a change touches environment variables, networking, TLS, proxies, authentication, or startup.
-- Never expand beyond the approved file and behavior scope.
+- Simplest thing that works — ponytail ladder, tried in arrow order, stop at the first that suffices: YAGNI (don't build it) → reuse this codebase → language stdlib → platform/OS → already-installed dep → one-line fix → new code. Understand the problem first.
+- Bug fix = root cause; `rg` the callers first.
+- Deployment constraints first: fix touches env vars, network/TLS, proxy, auth or startup → ask once, batched, about deployment realities (servers, env never set, proxies). A correct fix that breaks a standing deployment is a regression.
+- Addition and deletion both solve the task → prefer deletion.
+- Never delete beyond approved scope.
 
-## Commit history
-- Do not rewrite published history.
-- Rewrite only local commits that are confirmed not to exist on a remote.
-- Before rewriting local history, record the pre-rewrite commit SHA and state the recovery command.
-- Stage and commit by explicit path scope. Avoid staging unrelated user changes.
-- Commit messages must follow the repository's Conventional Commit configuration and current commitlint rules. Do not duplicate validator constraints here; inspect the configuration when changing the policy.
+## Commit shape
 
-## Release
-- Versioning and changelog policy are defined by the release workflow and CI configuration.
-- A successful test suite does not itself authorize publishing. Follow the authorization rule in `AGENTS.md` and the explicit conditions in `prompts/ship.md`.
+Local, unpushed history is editable; published history is not. Rewrite only commits no remote has.
+
+- Record the pre-rewrite SHA in the reply before touching anything. Recovery is `git reset --hard <sha>`; the reflog holds it only until gc.
+- Regroup with `git reset <base>` (mixed): history moves, files stay, nothing is lost. `--soft` is only needed when the index state itself matters.
+- Commit per scope by pathspec, one call each: `git commit` after staging one group. Partial staging (`add -p`) splits a hunk that usually belongs together and cannot be reviewed later.
+- Message states why the group is one change, not what the diff shows. Squashing a revert pair leaves the subject describing the net effect, never the detour.

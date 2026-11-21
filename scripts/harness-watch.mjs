@@ -82,7 +82,7 @@ const BENIGN_HEADS = {
 
 /** Docs corpus the contradiction check scans — every surface the model
  * reads before acting must agree with the gate (AGENTS.md invariant). */
-const DOC_FILES = ["AGENTS.md", "agents/scout.md"];
+const DOC_FILES = ["AGENTS.md", "docs/tool-use.md", "agents/scout.md"];
 
 /** Prohibition markers — a docs line naming a shape inside a prohibition
  * ("never open files", "only trim output") is the docs and the gate

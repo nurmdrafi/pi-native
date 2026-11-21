@@ -18,7 +18,7 @@ Evidence-first: never fix from memory. Every change traces to an events record i
 
 Loop, each run:
 1. `npm run harness:status` — snapshot; open tasks from `.cache/harness-watch/tasks.ndjson` (latest per key), highest count first.
-2. Per task class: misfire → offline repro + failing regression test + judge fix; contradiction → carve gate or fix doc + canary, never both unchanged; rule-gap → invariant line (condition, action, why) in SYSTEM.md/AGENTS.md tool rules; lesson → retire it as a fix, doc line, or test; test-fail → green, or fix the flake (never delete).
+2. Per task class: misfire → offline repro + failing regression test + judge fix; contradiction → carve gate or fix doc + canary, never both unchanged; rule-gap → invariant line (condition, action, why) in AGENTS.md / docs/tool-use.md tool rules; lesson → retire it as a fix, doc line, or test; test-fail → green, or fix the flake (never delete).
 3. Scoped suite, then full suite green, then commit, then append `{...task, status:"fixed", commit:"<sha>"}` to the tasks ledger. One task per commit.
 4. Monitor: tasks fixed >7 days ago — diff `metrics.ndjson` for that source:id across the fix date. No drop → `git revert <sha>`, reopen the task, note why in chat.
 

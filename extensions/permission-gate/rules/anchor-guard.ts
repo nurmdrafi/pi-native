@@ -393,7 +393,7 @@ export async function validateEditAnchors(
       // C2: when a target sits in a recorded compaction gap, say so — the
       // remedy read is sanctioned (R1 blocks only fully covered windows), so
       // the gap marker must not read as a "never re-read" instruction
-      // (SYSTEM.md Re-reads). Collect EVERY uncovered region first: a batch
+      // (AGENTS.md gate contract / tool-use.md Re-reads). Collect EVERY uncovered region first: a batch
       // with N uncertified regions must cost one retry, not N — read them
       // all, then resend the batch once.
       const inGap = (s: { start: number; end: number }) =>

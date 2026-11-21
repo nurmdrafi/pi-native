@@ -1,38 +1,71 @@
 # Design rules and context policy
 
-This document defines how pi-native distributes instructions and enforces behavior.
+Reference for how the harness spends context and which design invariants hold.
 
-## Instruction layers
+## Context layers
 
-| Layer | Responsibility | Loading |
-|---|---|---|
-| Pi system prompt and tool schemas | Core agent identity and available tool contracts | Every turn; Pi-managed |
-| `AGENTS.md` | Small set of cross-project behavioral defaults plus conditional pi-native pointers | Every turn |
-| `docs/*.md` | Repository-specific procedures, architecture, and operational constraints | Read when the task enters that area |
-| Skill descriptions | Discoverable capability summaries | Depends on Pi skill configuration |
-| Skill bodies | Detailed, specialized workflows | On invocation or matching behavior supported by the installed Pi version |
-| Prompt templates | Repeatable user-invoked workflows | On command invocation |
-| Extensions and native tools | Deterministic controls, tool behavior, and runtime enforcement | Runtime |
+| Layer              | What                    | When in context           | Stability rule            |
+| ------------------ | ----------------------- | ------------------------- | ------------------------- |
+| System + tools     | pi built-in             | every turn                | pi-managed                |
+| **AGENTS.md**      | global behavioral rules | every turn                | **must stay byte-stable** |
+| Scoped rule docs   | `docs/*.md` rule sets   | task touches the area     | read on demand            |
+| Skill descriptions | frontmatter only        | every turn                | **must stay byte-stable** |
+| Skill bodies       | SKILL.md full text      | on match or `/skill:name` | load on demand            |
+| Project AGENTS.md  | repo rules              | when present              | overlays global           |
 
-`SYSTEM.md` is intentionally absent. In Pi, it replaces the default system prompt; this repository does not need to own that prompt. Do not add a global or project `SYSTEM.md` unless a measured requirement justifies replacing Pi's built-in prompt.
+Skill discovery order: project `.pi/skills/` / `.agents/skills/` (if trusted) → `~/.pi/agent/skills/` (**canonical**) → `~/.agents/skills/` (neutralize manually so it does not leak).
 
-`APPEND_SYSTEM.md` is also not part of the default architecture. Add it only for a concise instruction that must be present in every turn and cannot live in `AGENTS.md` without harming clarity. Avoid duplicating tool schemas or extension-enforced rules.
+## Always-on token budget
 
-## Context budget
-- Keep `AGENTS.md` small, stable, and behavioral.
-- Keep detailed inventories, rationale, command recipes, machine setup, and incident history out of the always-loaded layer.
-- Prefer conditional pointers to scoped docs over copying their contents into global instructions.
-- Do not claim that skill descriptions cost zero tokens unless the active Pi configuration actually disables or hides the skill catalogue. Measure the real prompt.
-- Re-measure model-visible prompt size after changing global instructions, skill discovery, packages, or extensions.
+The permanent prefix is `AGENTS.md` alone — the only always-on artifact. Scoped rules live in `docs/` and load on demand; all skills are manual, so no skill descriptions sit in the model-visible catalog.
 
-## Ownership
-- Behavioral defaults belong in `AGENTS.md`.
-- Tool-use conventions for maintaining this repository belong in `docs/tool-use.md`.
-- Architecture belongs in the relevant architecture document.
-- Subagent orchestration belongs in `docs/subagent-orchestration.md`; child conduct belongs in `docs/subagents.md`.
-- Commit and release procedures belong in `prompts/ship.md` and `docs/change-rules.md`.
-- Deterministic policy belongs in extensions/tests, not merely in prose.
-- Each rule has one authoritative home. Other files link to it rather than paraphrasing it.
+| Component           | Target                                      | Notes                                  |
+| ------------------- | ------------------------------------------- | -------------------------------------- |
+| AGENTS.md           | as small as possible (behavioral core only) | no stack essays, no skill lists        |
+| Skill descriptions  | short; delete dead skills                   | all manual — zero per-session cost     |
+| **Total always-on** | AGENTS.md only                               | no auto-skill catalog, no package tool defs |
+
+Thinking defaults to `high` in `settings.json`; drop it per-task with `--thinking off` when tokens matter more than depth.
 
 ## Portability
-The supported target is macOS and Linux. Apply `docs/portability.md` to scripts, paths, fixtures, generated artifacts, and recorded benchmark output.
+
+Goal: one self-contained config that works on any macOS or Linux machine by replacing `~/.pi/agent/`. No env vars required for setup, no absolute user paths.
+
+### Portability rules (enforced)
+
+- No `/Users/...` or `/home/...` literals in any shipped file (only `~` / `$HOME`).
+- Shell helpers are POSIX (`#!/usr/bin/env sh`) or bash-portable.
+- No unguarded OS-only commands (`/proc` reads fall back to `ps`; server script picks `xdg-open` on Linux vs `open` on macOS).
+- No pi env vars required for setup — config relies on the default `~/.pi/agent`.
+
+## Design rules
+
+1. **Minimal core** — prefer deletion over addition. Never bloat the permanent prefix.
+2. **Progressive disclosure** — skill bodies and long refs load only when needed.
+3. **Cache is sacred** — AGENTS.md and skill descriptions stay byte-stable within a session; prefer a fresh session after prefix changes.
+4. **rg first** — code navigation via `rg`; bash only for real side-effects.
+5. **Portability** — no absolute user paths; no unguarded OS-only commands.
+6. **Primitives over features** — plan/debug/subagent via packages when needed; never re-implement as always-on skills.
+7. **Never move permanent behavioral rules** out of AGENTS.md into skills.
+
+**Known constraints.** Core behavioral rules live in AGENTS.md (intentional) — edit rarely, each edit changes every session's prefix. Skills are real files, not a plugin cache, so upstream updates do not auto-propagate.
+
+## Scoped rule sets
+
+**Always-on content test.** A line belongs in the always-on pair only if it changes
+behaviour on the next action: a rule, an obligation, or a tool-calling instruction.
+Inventories, pointers ("lives in X"), purpose statements, rationale and cross-
+references do not qualify; they live in a scoped doc and are read on demand. A
+conditional load instruction ("before X, apply Y") does qualify: it changes the
+next action, and its doc path is the trigger. `AGENTS.md`'s Doc index qualifies
+the same way: each entry pairs a trigger topic with its doc path, so a scoped
+doc is read only when its topic comes up.
+
+Loaded on demand, never always-on (the links used to sit in AGENTS.md, where they
+cost every project's prefix for rules only this harness needs):
+
+- `docs/change-rules.md` — change ladder, root cause, deployment.
+- `docs/portability.md` — macOS+Linux shell subset, dynamic paths.
+- `docs/rust-tools-optimization.md` — safe path for optimizing a native tool: model
+the cost, freeze the old binary, pin the seam, swap, verification ladder, honest
+measurement.
