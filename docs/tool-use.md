@@ -11,7 +11,7 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
 - One edit call per file: all regions together, bottom-up; blocked edit → resend only that region.
 - Continue a stopped read at its named offset, never a printed range.
 - Don't widen: locate the next symbol; probe size first (line count, counting search) when unsure.
-- A span already read this session stays cited, not re-read — a re-send re-pays its tokens.
+- A span already read this session stays cited, not re-read — a re-send re-pays its tokens. Spans are valid for the whole session; only a file changed on disk invalidates them — a duplicate-read block is that stat-match proof itself, not an obstacle.
 
 ## File lookup
 - Resolve unknown paths before reading them; do not guess filenames.
