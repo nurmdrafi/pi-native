@@ -3,7 +3,7 @@ name: reviewer
 description: Pre-commit reviewer — reviews the diff for correctness and races before commit+push; structure goes to architect-reviewer, trust boundaries and guard logic to security-reviewer
 tools: ls, piread, pibash
 skills: code-reviewer
-thinking: max
+thinking: high
 system-prompt: append
 auto-exit: true
 budget: none

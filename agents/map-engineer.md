@@ -3,7 +3,7 @@ name: map-engineer
 description: Map rendering implementer — deck.gl/MapLibre overlays, composite-layer performance, real-time plotting, camera and viewport work, map data flow (Redux-fed layers); use instead of frontend-engineer when the task touches map layers, map state, or map rendering
 tools: piwrite, piread, piedit, pibash
 skills: map-integration
-thinking: high
+thinking: medium
 system-prompt: append
 auto-exit: true
 budget: none

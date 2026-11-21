@@ -2,7 +2,7 @@
 name: verifier
 description: Acceptance-criteria verifier — runs the change/probe and reports per-criterion PASS/FAIL; verifies behavior, never fixes
 tools: ls, piread, pibash
-thinking: high
+thinking: medium
 system-prompt: append
 auto-exit: true
 budget: none
