@@ -21,19 +21,18 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-/** Files are arguments so the same heuristics judge every rule file; default
- * stays the always-on pair (AGENTS.md + SYSTEM.md) so the split is linted as one. Two or more files pool
- * their bullets, which is the only way to catch a rule restated across the
- * always-on pair. Numbered items count too: the read ladder is `1.`/`2.`/`3.`,
- * not `-`, and a bullet-only regex reported "no duplicates" over the densest
- * rules in the file. */
+/** Files are arguments so the same heuristics judge every rule file. The
+ * default is the sole always-on repository instruction file, AGENTS.md. Two or
+ * more explicit files pool their bullets to catch cross-file restatements.
+ * Numbered items count too: the read ladder is `1.`/`2.`/`3.`, not `-`, and a
+ * bullet-only regex reported "no duplicates" over the densest rules. */
 const files = [];
 let min = 0.55;
 for (const a of process.argv.slice(2)) {
   if (a === '--min') min = Number(process.argv[process.argv.indexOf(a) + 1]);
   else if (!a.startsWith('--') && Number.isNaN(Number(a))) files.push(a);
 }
-if (!files.length) files.push('AGENTS.md', 'SYSTEM.md');
+if (!files.length) files.push('AGENTS.md');
 const SOURCES = files.map((f) => ({ file: f, md: readFileSync(join(ROOT, f), 'utf8') }));
 const bullets = [];
 const sectioned = [];
@@ -123,15 +122,15 @@ for (const { file, md: text } of SOURCES) {
   }
 }
 
-// Scope leak (2026-11-01): the always-on pair loads for EVERY project, so a line
-// naming this repo's scripts or paths teaches a wrong assumption everywhere else.
+// Scope leak (2026-11-01): always-on instructions load for EVERY project, so a
+// line naming this repo's scripts or paths teaches a wrong assumption elsewhere.
 // A line may mention repo artifacts only when it also marks the scope (harness,
 // this repo, current project); otherwise it belongs in a scoped doc.
 const SCOPED = /\b(harness|this repo|current project|project's own)\b/i;
 const REPO_ONLY = /(^|[\s`([\[])(?:npm run [a-z]|extensions\/|rust-tools\/|skills\/|docs\/|package\.json)/;
 const scope_leaks = [];
 for (const { file, md: text } of SOURCES) {
-  if (!/(?:^|\/)(?:AGENTS|SYSTEM)\.md$/.test(file)) continue;
+  if (!/(?:^|\/)AGENTS\.md$/.test(file)) continue;
   for (const [i, line] of text.split('\n').entries())
     if (REPO_ONLY.test(line) && !SCOPED.test(line))
       scope_leaks.push({ file, line: i + 1, text: line.trim().slice(0, 90) });
@@ -145,7 +144,7 @@ for (const { file, md: text } of SOURCES) {
 const DEFAULT_CONTROL = /\b(?:is|are|will|would)\s+(?:silently\s+)?refused\b|refuses?\s+(?:to|the)\b|\b(?:read[- ]?gate|destructive[- ]?gate|ask[- ]?before[- ]?install|reader[- ]?bypass)\b/i;
 const default_restatements = [];
 for (const { file, md: text } of SOURCES) {
-  if (!/(?:^|\/)(?:AGENTS|SYSTEM)\.md$/.test(file)) continue;
+  if (!/(?:^|\/)AGENTS\.md$/.test(file)) continue;
   for (const [i, line] of text.split('\n').entries())
     if (DEFAULT_CONTROL.test(line))
       default_restatements.push({ file, line: i + 1, text: line.trim().slice(0, 90) });
