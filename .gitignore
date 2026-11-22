@@ -24,6 +24,9 @@ tmp/
 # Logs
 *.log
 
+# Reports
+reports/
+
 # macOS cruft
 ._*
 .DS_Store
