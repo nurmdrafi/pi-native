@@ -17,23 +17,19 @@ is installed for it. Skill usage lives in the `skillevaluator` skill body
 
 ## LLM tiers (provider)
 
-The GLM key is read from the `zai` entry in `~/.pi/agent/auth.json` and exported
-per command into the environment only — it never enters a file, a report, or a
-commit. Model and provider come from the live session (`PI_MODEL` /
-`PI_PROVIDER` env) — the defining source; the base URL is looked up from the
-catalog (`models-store.json`) for that provider+model. Switching model or
-subscription needs no edit here:
+Provider credentials live in `~/.pi/agent/.secrets/skillevaluator.env`
+(agent home, gitignored, 0600 — the sentry `.secrets` pattern) and are loaded per
+command; the file's values are never printed. It pins provider
+`openai-compatible`, the coding-gateway base URL (`models-store.json` for
+zai/glm-5.3), `glm-5.3` for evaluator, judge, and SkillSpector
+(`glm-5.3-flash` does not work on this gateway — user confirmed 2025-11-22),
+and both keys (`SKILL_EVAL_LLM_API_KEY`, plus the `OPENAI_API_KEY`
+SkillSpector bridge; concurrency is re-injected by the `~/.local/bin/skillspector`
+shim). Changing model or gateway means editing that file, which needs user
+permission. File or key missing → stop and tell the user what to write.
 
 ```bash
-export SKILL_EVAL_LLM_PROVIDER=openai-compatible
-export SKILL_EVAL_LLM_MODEL="$PI_MODEL"   # e.g. glm-5.3; never a catalog default
-export SKILL_EVAL_LLM_BASE_URL="$(jq -r --arg p "$PI_PROVIDER" --arg m "$SKILL_EVAL_LLM_MODEL" \
-  '.[$p].models[] | select(.id==$m) | .baseUrl' ~/.pi/agent/models-store.json)"
-export SKILL_EVAL_LLM_API_KEY="$(jq -r .zai.key ~/.pi/agent/auth.json)"
-# SkillSpector semantic-security leg needs its own bridge (model may be the
-# fast variant; concurrency is re-injected by the ~/.local/bin/skillspector shim):
-export SKILLSPECTOR_PROVIDER=openai SKILLSPECTOR_MODEL="$SKILL_EVAL_LLM_MODEL"
-export OPENAI_BASE_URL="$SKILL_EVAL_LLM_BASE_URL" OPENAI_API_KEY="$SKILL_EVAL_LLM_API_KEY"
+set -a; . ~/.pi/agent/.secrets/skillevaluator.env; set +a
 ```
 
 Scope: Tier 1 rubric and LLM security review work. Tier 2 needs an embeddings
@@ -61,6 +57,19 @@ Skills whose purpose is editing skill files trip SkillSpector's RA1
 "Self-Modification" on their own description. Suppress rule-based (never
 fingerprint — any edit re-arms it) via
 `--skillspector-baseline ~/.pi/agent/reports/skillevaluator/<skill>/skillspector-baseline.yaml`.
+
+## Scanner quirks (measured 2025-11-22)
+
+- Bounded static parser cannot resolve `${...}` template literals in code
+  samples → `static_parse_limit` → HIGH AE1 "analysis-evasion" on the SKILL.md
+  line that links the file. Write string concatenation (`'...' + var`) in
+  TypeScript samples instead; verified: all-`${}` file fails, all-concat file
+  scans 100%.
+- On the zai gateway the LLM security leg can end `incomplete`
+(`skillspector-llm` in `incomplete_scans`) when analyzers exhaust 429 retries
+even with the concurrency shim — rerun, or accept and rely on the keyless
+  static findings; exit 1 with `overall_status: incomplete` is that case, not
+  a content finding.
 
 ## Reports
 

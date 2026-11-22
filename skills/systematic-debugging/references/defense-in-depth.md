@@ -27,10 +27,10 @@ function createProject(name: string, workingDirectory: string) {
     throw new Error('workingDirectory cannot be empty');
   }
   if (!existsSync(workingDirectory)) {
-    throw new Error(`workingDirectory does not exist: ${workingDirectory}`);
+    throw new Error('workingDirectory does not exist: ' + workingDirectory);
   }
   if (!statSync(workingDirectory).isDirectory()) {
-    throw new Error(`workingDirectory is not a directory: ${workingDirectory}`);
+    throw new Error('workingDirectory is not a directory: ' + workingDirectory);
   }
   // ... proceed
 }
@@ -57,16 +57,14 @@ async function gitInit(directory: string) {
     const tmpDir = normalize(resolve(tmpdir()));
 
     if (!normalized.startsWith(tmpDir)) {
-      throw new Error(
-        `Refusing git init outside temp dir during tests: ${directory}`
-      );
+      throw new Error('Refusing git init outside temp dir during tests: ' + directory);
     }
   }
   // ... proceed
 }
 ```
 
-### Layer 4: Debug Instrumentation — capture context for forensics
+### Layer 4: Debug Logging — record the call site before the risky operation
 
 ```typescript
 async function gitInit(directory: string) {
