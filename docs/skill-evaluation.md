@@ -42,11 +42,12 @@ needs a Docker daemon, an agent CLI, and user-supplied `evals/evals.json` cases.
 
 ## Speed (measured 2026-11-22, glm-5.3 on the zai coding gateway)
 
-- Keyless `tier1 --no-llm`: ~15 s. `rubric-eval`: ~30 s. Fast path for iteration:
-  run those two; skip the semantic-security leg.
-- Full `tier1` (LLM): ~4 min, dominated by SkillSpector's semantic analyzers
-  (~200 s; flash or full model makes no measurable difference — per-request
-  latency on the coding gateway is the floor, not model speed).
+- Default: full `tier1` with LLM (~4 min) — the preferred gate; findings are a
+  strict superset of keyless (semantic analyzers + rubric + verification).
+- Keyless `tier1 --no-llm` (~10 s) + `rubric-eval` (~30 s): inner-loop
+  iteration only, never the final gate.
+- The 4 min is SkillSpector's semantic analyzers (~200 s; per-request latency
+  on the coding gateway is the floor — flash vs full model makes no difference).
 - The gateway 429s parallel analyzer calls: the `~/.local/bin/skillspector`
   shim re-injects `SKILLSPECTOR_MAX_LLM_CONCURRENCY` (skillevaluator's env
   whitelist strips it); without the throttle the scan exits 2 after retry

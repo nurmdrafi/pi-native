@@ -45,12 +45,11 @@ Ship skills that pass the [Agent Skills spec](https://agentskills.io/specificati
    cd ~/.pi/agent && npm run doc:check                                          # if commands/paths changed
    ```
    Fix + re-run until exit 0 — "should be fine" ≠ validation. Validator encodes Agent Skills spec checks + layout, XML-tag, reserved-word, vagueness rules; doc-check verifies every command declared in skill markdown resolves (binaries, flags, script paths).
-7. **Evaluation gate — keyless, after validation passes:**
+7. **Evaluation gate — with LLM (default), after validation passes:**
    ```bash
-   ~/.local/bin/skillevaluator quality-check <skill-dir>    # fast: score + findings
-   ~/.local/bin/skillevaluator tier1 <skill-dir> --no-llm   # new skills, major rewrites
+   skillevaluator tier1 <skill-dir>   # ~4 min: semantic + rubric + verification
    ```
-   Fix every CRITICAL/HIGH finding before finishing; report score + top findings. Reports land under `~/.pi/agent/reports/skillevaluator/<skill>/`. Fast path: keyless tier1 (~15 s) + `rubric-eval` (~30 s); full tier1 LLM ≈ 4 min (semantic security dominates) — timings and provider wiring in `docs/skill-evaluation.md` (pi agent home). A false-positive HIGH on a skill whose purpose is editing skill files ("Rogue Agent" self-modification) is suppressed via `--skillspector-baseline ~/.pi/agent/reports/skillevaluator/<skill>/skillspector-baseline.yaml` (rule-based, never fingerprint). LLM tiers (rubric, dedup, live Tier 3 A/B) cost model spend and judges vary between runs — run only on request, per the `skillevaluator` skill (`~/.pi/agent/skills/skillevaluator/`).
+   Keyless (`--no-llm`, ~10 s) is for inner-loop iteration only, never the final gate. Fix every CRITICAL/HIGH finding before finishing; report score + top findings. Reports land under `~/.pi/agent/reports/skillevaluator/<skill>/`. Timings and provider wiring in `docs/skill-evaluation.md` (pi agent home). A false-positive HIGH on a skill whose purpose is editing skill files ("Rogue Agent" self-modification) is suppressed via `--skillspector-baseline ~/.pi/agent/reports/skillevaluator/<skill>/skillspector-baseline.yaml` (rule-based, never fingerprint). Tier 2/3 cost additional model spend — per the `skillevaluator` skill (`~/.pi/agent/skills/skillevaluator/`).
 8. Pi picks up new/changed skills at startup or `/reload` — confirm skill loads: invoke `/skill:name`, or after a session that used it run `bash ~/.pi/agent/skills/session-audit/scripts/skillcheck.sh <name>`. Skill missing from system prompt after reload = frontmatter failed to parse.
 
 ## Examples
