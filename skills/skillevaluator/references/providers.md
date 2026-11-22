@@ -28,3 +28,18 @@ Rules:
 - `skillevaluator models` and `doctor --verify-models` check catalog
   reachability; a public catalog does not prove the inference key works.
 - Judge failures make a result unscored (`NO SCORE`), not `0.0`.
+
+## Z.ai (GLM)
+
+Wire as `openai-compatible`: `SKILL_EVAL_LLM_BASE_URL=https://api.z.ai/api/paas/v4`,
+`SKILL_EVAL_LLM_MODEL=glm-5.3` (catalog: glm-4.5 to glm-5.3 plus -flash variants;
+`SKILLSPECTOR_MODEL=glm-5.3-flash` serves the scanner). Known limits:
+
+- No embedding models on api.z.ai (`embedding-2`/`embedding-3` fail with error
+  1211), so Tier 2 has no embeddings source on this provider.
+- Low rate limits: SkillSpector's LLM analyzers exhaust retries on HTTP 429 even
+  at `SKILLSPECTOR_MAX_LLM_CONCURRENCY=1`, leaving the Security check
+  `incomplete`. Keyless runs are `incomplete` by design (LLM analyzers skipped).
+- `tier1 --skillspector-baseline FILE` suppresses only audited findings;
+  generate with `skillspector baseline <dir> --no-llm -o FILE`, keep reviewed
+  fingerprints with real reasons, and rerun the gate with the file.

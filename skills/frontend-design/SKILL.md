@@ -1,9 +1,13 @@
 ---
 name: frontend-design
-description: "Build NEW web components/pages/apps from scratch. Detects UI stack (Ant Design, shadcn/Tailwind, vanilla), audits sibling components + tokens, extends established idioms. NOT editing/fixing/polishing existing UI (→ refactoring-ui) or logic-only changes with no new markup."
+description: "Build new web UI (components/pages/apps) in the detected stack (Ant Design, shadcn/Tailwind, vanilla), extending established idioms. Use when creating new UI; NOT editing existing UI (refactoring-ui)."
 license: Complete terms in LICENSE.txt
+metadata:
+  tags: [frontend, ui, design, react, tailwind, antd]
 disable-model-invocation: true
 ---
+
+# Frontend Design
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/frontend-design`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
 
@@ -12,6 +16,14 @@ Build distinctive, production-grade frontend interfaces; avoid generic "AI slop"
 Input: frontend requirements — component/page/app/interface; maybe purpose, audience, constraints.
 
 Scope steering: `/skill:frontend-design antd` / `shadcn` / `greenfield` — read only the matching reference.
+
+## Instructions
+
+1. Pattern Audit first — it decides extending vs greenfield and overrides every aesthetic directive.
+2. Read the matching stack reference (below) before writing component code.
+3. Apply the logic guards and runtime-robustness rules to any new UI; environment-access rules when reading config/env.
+4. Greenfield only: Design Thinking, then Aesthetics Guidelines.
+5. New framework: add a reference file under `references/` + one router row in Stack Adaptation.
 
 ## Pattern Audit (MANDATORY FIRST — overrides every aesthetic directive below)
 
@@ -36,7 +48,7 @@ Detect UI stack from `package.json` + existing components; express design throug
 - **shadcn/ui + Tailwind**: [references/shadcn-tailwind.md](references/shadcn-tailwind.md) — `components.json` detection, project context via CLI, Base UI vs Radix primitives, Tailwind v3/v4 token detection, composition rules.
 - **Vanilla/other**: no established idioms → full aesthetic freedom below.
 - Mixed stacks: read both references; check Tailwind reset against AntD styles before mixing.
-- Security headers (middleware CSP): [references/csp.md](references/csp.md) — goal: env-only CSP ops (restart, never rebuild); required `CSP_ORIGINS` allowlist, `CSP_MODE`/`SENTRY_CSP_REPORT_ENDPOINT` contract, runtime delivery + member-access rules, boot-dead validation, allowlist script-src (no nonce/strict-dynamic — next dev blocks), deck.gl eval caveat, report-only rollout; primer: <https://web.dev/articles/csp>.
+- Security headers (middleware CSP): [references/content-security-policy.md](references/content-security-policy.md) — goal: env-only CSP ops (restart, never rebuild); required `CSP_ORIGINS` allowlist, `CSP_MODE`/`SENTRY_CSP_REPORT_ENDPOINT` contract, runtime delivery + member-access rules, boot-dead validation, allowlist script-src (no nonce/strict-dynamic — next dev blocks), deck.gl eval caveat, report-only rollout; primer: <https://web.dev/articles/csp>.
 - Existing-UI polish/audit/critique (not new build) → impeccable skill: `/skill:impeccable <command>`; full source clone `git/impeccable`.
 
 Match existing patterns before introducing new ones. New framework = new file under `references/` + one router row here.
@@ -106,3 +118,9 @@ Interpret creatively, unexpected context-designed choices. No two designs same. 
 Match implementation complexity to vision: maximalist = elaborate code, extensive animations/effects; minimalist = restraint, precision, spacing/typography/subtle detail. Elegance = executing vision well.
 
 Don't hold back — commit fully to distinctive vision.
+
+## Examples
+
+- `/skill:frontend-design antd` — new admin table page in an Ant Design repo: Pattern Audit extends existing table/form idioms; `npx @ant-design/cli info Table --format json` before writing props.
+- `/skill:frontend-design shadcn` — new marketing section on shadcn/Tailwind: detect `components.json` + Tailwind version tokens, compose from installed primitives.
+- `/skill:frontend-design greenfield` — no existing UI: full design-language extraction, then Design Thinking + Aesthetics Guidelines.
