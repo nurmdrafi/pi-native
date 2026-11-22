@@ -12,6 +12,7 @@ These instructions are global: they apply in every project and every session. Re
 - `~/.pi/agent/docs/portability.md` — path and OS/device neutrality.
 - `~/.pi/agent/docs/change-rules.md`, `~/.pi/agent/docs/design-rules.md` — what may change, how designs are judged.
 - `~/.pi/agent/docs/development.md`, `~/.pi/agent/docs/skills.md` — build/test loops, skill authoring.
+- `~/.pi/agent/docs/skill-evaluation.md` — SkillEvaluator setup: tiers, provider wiring, reports.
 - `~/.pi/agent/docs/harness-watch.md` — turning gate blocks and failures into durable fixes.
 - `~/.pi/agent/docs/native-tools.md`, `~/.pi/agent/docs/rust-tools-architecture.md` — native and Rust tooling.
 - `~/.pi/agent/prompts/` — invocable prompts (ship, issue, ticket, standup, pr-merge-assist, optimize-docs); `~/.pi/agent/skills/` — invocable skills.
