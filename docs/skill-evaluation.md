@@ -19,12 +19,15 @@ is installed for it. Skill usage lives in the `skillevaluator` skill body
 
 The GLM key is read from the `zai` entry in `~/.pi/agent/auth.json` and exported
 per command into the environment only — it never enters a file, a report, or a
-commit:
+commit. Model and base URL are derived from the agent's own model config
+(`models.json` = active selection, `models-store.json` = full catalog), so
+switching model or subscription needs no edit here:
 
 ```bash
 export SKILL_EVAL_LLM_PROVIDER=openai-compatible
-export SKILL_EVAL_LLM_BASE_URL=https://api.z.ai/api/coding/paas/v4
-export SKILL_EVAL_LLM_MODEL=glm-5.3
+export SKILL_EVAL_LLM_MODEL="$(jq -r '.providers.zai.models[0].id' ~/.pi/agent/models.json)"
+export SKILL_EVAL_LLM_BASE_URL="$(jq -r --arg m "$SKILL_EVAL_LLM_MODEL" \
+  '.zai.models[] | select(.id==$m) | .baseUrl' ~/.pi/agent/models-store.json)"
 export SKILL_EVAL_LLM_API_KEY="$(jq -r .zai.key ~/.pi/agent/auth.json)"
 ```
 
