@@ -30,7 +30,13 @@ Read only the reference the current phase needs — not all three.
    cd ~/.pi/agent && npm run doc:check                                          # if commands/paths changed
    ```
    Fix + re-run until exit 0 — "should be fine" ≠ validation. Validator encodes Agent Skills spec checks + layout, XML-tag, reserved-word, vagueness rules; doc-check verifies every command declared in skill markdown resolves (binaries, flags, script paths).
-7. Pi picks up new/changed skills at startup or `/reload` — confirm skill loads: invoke `/skill:name`, or after a session that used it run `bash ~/.pi/agent/skills/session-audit/scripts/skillcheck.sh <name>`. Skill missing from system prompt after reload = frontmatter failed to parse.
+7. **Evaluation gate — keyless, after validation passes:**
+   ```bash
+   ~/.local/bin/skillevaluator quality-check <skill-dir>    # fast: score + findings
+   ~/.local/bin/skillevaluator tier1 <skill-dir> --no-llm   # new skills, major rewrites
+   ```
+   Fix every CRITICAL/HIGH finding before finishing; report score + top findings. Reports land under `~/.pi/agent/reports/skillevaluator/<skill>/`. LLM tiers (rubric, dedup, live Tier 3 A/B) cost model spend and judges vary between runs — run only on request, per [../skillevaluator/SKILL.md](../skillevaluator/SKILL.md); setup and provider wiring: [docs/skill-evaluation.md](../../docs/skill-evaluation.md).
+8. Pi picks up new/changed skills at startup or `/reload` — confirm skill loads: invoke `/skill:name`, or after a session that used it run `bash ~/.pi/agent/skills/session-audit/scripts/skillcheck.sh <name>`. Skill missing from system prompt after reload = frontmatter failed to parse.
 
 ## Checklist before finishing
 
@@ -38,4 +44,5 @@ Read only the reference the current phase needs — not all three.
 - [ ] Body tight; long material split to `references/` (or `scripts/`/`assets/` by content type), linked one level deep
 - [ ] Anti-pattern gate clean — [references/anti-patterns.md](references/anti-patterns.md): no rituals, boosters, stale examples, contradictions, dated configs
 - [ ] Validator exit 0 (re-run after every fix); doc-check clean if commands/paths changed
+- [ ] Evaluation gate run (keyless): score reported, no HIGH/CRITICAL findings; LLM tiers only on request
 - [ ] After `/reload`, skill loads (`/skill:name` responds or skillcheck.sh confirms a read)
