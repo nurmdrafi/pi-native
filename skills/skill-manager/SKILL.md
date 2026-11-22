@@ -1,13 +1,17 @@
 ---
 name: skill-manager
-description: "Create or modify SKILL.md files (agentskills.io spec + pi docs/skills.md); always runs the validator before finishing. Use for 'create a skill', 'new/fix/merge/rename/split skill', any SKILL.md or skill-directory change. NOT for ordinary project documentation."
+description: "Use when creating, fixing, merging, renaming, or splitting agent skills — writes the target's files, validates before finishing (agentskills.io + pi spec). Not for ordinary project docs."
 disable-model-invocation: true
+metadata:
+  author: "pi agent-home maintainers"
+  tags: [skill-authoring, agentskills, validation]
 ---
 
 # Skill Manager
 
-Creates skills passing [Agent Skills spec](https://agentskills.io/specification) + Pi loader.
-Read only the reference the current phase needs — not all three.
+## Purpose
+
+Ship skills that pass the [Agent Skills spec](https://agentskills.io/specification) and the pi loader on first load. Read only the reference the current phase needs — not all three.
 
 ## References
 
@@ -15,11 +19,22 @@ Read only the reference the current phase needs — not all three.
 - [references/writing-guide.md](references/writing-guide.md) — description formula, body structure, writing style, craft mistakes. Read while drafting SKILL.md content.
 - [references/anti-patterns.md](references/anti-patterns.md) — six prompt anti-patterns + security checklist, distilled from harness audit (harness-engineer). Read before validating; sweep every draft.
 
-## Workflow
+## Available Scripts
+
+| Script | Purpose | Arguments |
+| --- | --- | --- |
+| `scripts/validate-skill.mjs` | Spec + layout gate; loop until exit 0 | `<skill-dir>` |
+
+## Prerequisites
+
+- Node (runs `scripts/validate-skill.mjs`)
+- SkillEvaluator CLI for the evaluation gate — install via `~/.pi/agent/skills/skillevaluator/scripts/setup.sh`
+
+## Instructions
 
 1. Ask (once) for skill's purpose + trigger phrases if not obvious from request.
 2. `ls ~/.pi/agent/skills/` — reuse/extend existing skill instead of near-duplicate. Overlapping skills fragment triggering; prefer editing older skill.
-3. Creating: write `<skill-dir>/SKILL.md` per references; place bundled files per [references/skill-spec.md](references/skill-spec.md) layout — docs `references/`, executables `scripts/`, static data `assets/`.
+3. Creating: draft `<skill-dir>/SKILL.md` per references; place bundled files per [references/skill-spec.md](references/skill-spec.md) layout — docs `references/`, executables `scripts/`, static data `assets/`.
    Modifying: preserve original `name` + directory name — never version-suffix (`-v2`); keep description's trigger scope unless user asks; after moving/renaming any file, `rg` whole skill dir for references to it, not just SKILL.md.
    Formatting: hold every SKILL.md draft to the AGENTS.md docs style — concise, self-contained, no duplicated rules, tool names only where the rule is repo-scoped. Frontmatter always untouched.
 4. Anti-pattern gate: sweep draft per [references/anti-patterns.md](references/anti-patterns.md) — run rg signatures over skill dir, judge hits per its Calibration (presence alone ≠ finding).
@@ -35,8 +50,27 @@ Read only the reference the current phase needs — not all three.
    ~/.local/bin/skillevaluator quality-check <skill-dir>    # fast: score + findings
    ~/.local/bin/skillevaluator tier1 <skill-dir> --no-llm   # new skills, major rewrites
    ```
-   Fix every CRITICAL/HIGH finding before finishing; report score + top findings. Reports land under `~/.pi/agent/reports/skillevaluator/<skill>/`. LLM tiers (rubric, dedup, live Tier 3 A/B) cost model spend and judges vary between runs — run only on request, per [../skillevaluator/SKILL.md](../skillevaluator/SKILL.md); setup and provider wiring: [docs/skill-evaluation.md](../../docs/skill-evaluation.md).
+   Fix every CRITICAL/HIGH finding before finishing; report score + top findings. Reports land under `~/.pi/agent/reports/skillevaluator/<skill>/`. Fast path: keyless tier1 (~15 s) + `rubric-eval` (~30 s); full tier1 LLM ≈ 4 min (semantic security dominates) — timings and provider wiring in `docs/skill-evaluation.md` (pi agent home). A false-positive HIGH on a skill whose purpose is editing skill files ("Rogue Agent" self-modification) is suppressed via `--skillspector-baseline ~/.pi/agent/reports/skillevaluator/<skill>/skillspector-baseline.yaml` (rule-based, never fingerprint). LLM tiers (rubric, dedup, live Tier 3 A/B) cost model spend and judges vary between runs — run only on request, per the `skillevaluator` skill (`~/.pi/agent/skills/skillevaluator/`).
 8. Pi picks up new/changed skills at startup or `/reload` — confirm skill loads: invoke `/skill:name`, or after a session that used it run `bash ~/.pi/agent/skills/session-audit/scripts/skillcheck.sh <name>`. Skill missing from system prompt after reload = frontmatter failed to parse.
+
+## Examples
+
+- "Create a skill that formats Rust commit messages" — new skill dir: frontmatter + body + references per spec, both gates run.
+- "Fix the sentry skill's description — it fires on unrelated auth questions" — tighten trigger scope in description only, keep name, re-validate.
+- "Merge playwright-tester into browser-tools" — move content, update links, delete source dir, re-run both gates on the survivor.
+
+## Limitations
+
+- Static gates judge spec compliance; only a real task in a fresh session proves triggering
+- LLM tiers and Tier 3 cost model spend — opt-in per user request, never automatic
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Skill absent from system prompt after `/reload` | Frontmatter failed to parse — check YAML quoting, then `/skill:name` again |
+| Validator rejects a new file at skill root | Move it: docs → `references/`, executables → `scripts/`, data → `assets/` |
+| SkillEvaluator HIGH "Rogue Agent" on a skill-editing skill | Audited false positive — suppress rule-based (Instructions step 7) |
 
 ## Checklist before finishing
 

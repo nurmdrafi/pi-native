@@ -72,3 +72,4 @@ benchmark/observability/events/
 # LinkedIn personal data (skill workspace; voice, logs, snapshots)
 /linkedin/
 .secrets/
+!skills/skillevaluator/scripts/setup.sh
