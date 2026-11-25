@@ -10,6 +10,19 @@ is installed for it. Skill usage lives in the `skillevaluator` skill body
 - SkillSpector: the evaluator's pinned wheel, installed as its own uv tool → `~/.local/bin/skillspector`. Export `SKILLEVALUATOR_SKILLSPECTOR_PATH` pointing at it; running the wheel through homebrew `uv tool run --from <wheel>` fails ("Distribution not found") even when the checksum matches.
 - Gitleaks: already present from the system package manager. Semgrep: installed via Homebrew (optional leg of `security`).
 
+## Testing upstream SkillSpector
+
+Keep the evaluator's pinned scanner separate from upstream development tests.
+With install approval, run this from the upstream checkout:
+
+```bash
+export UV_PROJECT_ENVIRONMENT="$(mktemp -d "${TMPDIR:-/tmp}/skillspector-test.XXXXXX")"
+uv sync --locked --extra dev --python 3.13 --no-python-downloads
+```
+
+On macOS arm64, the SkillSpector 2.13.7 lock installed with Python 3.13;
+Python 3.14 tried to build `yara-python` 4.5.4 from source and failed.
+
 ## Keyless commands (no provider, no spend)
 
 `quality-check`, `tier1 <dir> --no-llm`, `security-scan`, `pii-scan`,

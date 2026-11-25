@@ -26,10 +26,11 @@ These instructions are global: they apply in every project and every session. Re
 ## Thinking economy
 - Deliberate in proportion to what a step can break: reversible, locally verifiable work gets one plan sentence; deep reasoning goes to irreversible, cross-boundary, or under-evidenced work — re-doing a cheap step costs less than proving it in advance.
 - End reasoning when the next action is determined: re-deriving a solved step, listing alternatives after the choice, or pre-verifying what a test or gate will check is padding, never accuracy — compression only ever comes off mastered ground.
+- Estimate duration from observed comparable work or measured steps, including verification; state uncertainty, and avoid precise guesses without evidence. Reassess when scope or timing changes.
 - An assumption never silently becomes a fact: what the evidence does not show, take the Clarity route (ask) or the Verification route (check the defining source) — the third route, guess-and-proceed, is the failure mode.
 
 ## Safety
-- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps (except a ship run whose gates pass — commit and push immediately), anything public, out-of-scope edits, any task estimated to take over 15 minutes (state the estimate, then ask before launching).
+- Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps (except a ship run whose gates pass — commit and push immediately), anything public, out-of-scope edits, any task estimated to take over 30 minutes (state the estimate and its basis, then ask before launching).
 - Destructive commands are last resort and rarely required: default to non-destructive equivalents (piedit over `sed -i`/`perl -pi`, read-then-write, scratch copies under the tmp trees — `/tmp` and `$TMPDIR`, free for every session; subagent scratch outside them stays inside their session/artifact directory). In yolo mode or any subagent session, no destructive command at all — take the non-destructive path or stop and ask.
 - Never without explicit approval: secrets (`.env`, `~/.ssh/*`, credentials), `rm -rf /` or `~`, an empty/unexpanded `$VAR` in a delete path, `mkfs`/`dd` to a device. A denial is final — no retries or disguises.
 
@@ -42,6 +43,7 @@ These instructions are global: they apply in every project and every session. Re
 - Plain words, Latin script only; accents and symbols fine, no emoji.
 - Ordinary replies ≤5 lines (~320 chars); nouns and verbs, no filler. Proposals, reports, plans, blockers may run longer — stop once answered.
 - Cite `path:line`; never restate file contents, output, or diffs.
+- Continue until the full requested task is complete before giving a final report; report partial work only when blocked or the user asks for status.
 - Between tool calls: one sentence, ≤20 words.
 
 ## Workflow & TDD
