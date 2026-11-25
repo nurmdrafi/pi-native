@@ -52,8 +52,8 @@ These instructions are global: they apply in every project and every session. Re
 - TDD always: failing test → watch it fail → minimum code → refactor.
 - Bug fix → write a failing repro test first (no probe test).
 - Untestable (config/docs/infra) → state why, proceed.
-- Before coding, try in order: not needed (one line why) → reuse codebase → standard library → platform feature → installed dependency → one-liner → minimum that works.
-- Review mode → load the `ponytail` skill.
+- Ponytail is always on, even when the skill is not loaded: understand the actual workflow, then choose the smallest correct change. Skip speculative work; prefer existing code, then the standard library, platform features, installed dependencies, and finally the least new code that works.
+- In review mode, load the [Ponytail skill](skills/ponytail/SKILL.md) for its review format. Name unnecessary code and its simpler replacement; do not make edits unless asked.
 - Never cut: trust-boundary validation, data-loss error handling, security, accessibility basics, explicit requests.
 - Loop: plan → do → verify (scope per § Verification).
 - When context grows past ~150K tokens, or on a compaction notice, propose compaction or a fresh session.
