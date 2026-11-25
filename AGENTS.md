@@ -6,10 +6,10 @@
 - Do not restate controls that tools, extensions, or the pi system enforce by default (gating, out-of-scope write refusal, install prompts, tool flags). State the agent's response to them, never the mechanism.
 - One rule, one home; cross-reference instead of restating.
 
-## Read before acting
-These instructions apply to every model, project, and session. A doc reference in this file is a reading requirement when its topic applies, not just a pointer. Open and read the relevant docs before taking the covered action; seeing the link or relying on memory does not count. Resolve paths from `~/.pi/agent/`, not the session cwd. If a required doc is unavailable, say what is missing before proceeding. Skip docs unrelated to the task.
+## Docs on demand
+Do not preload linked docs at session start. Use the table to find guidance for the current step. Read only the sections needed to resolve a question or check a requirement not already covered by the current context. Reuse sections already read in this session unless the file changed. Resolve links from `~/.pi/agent/`, not the session cwd. If needed guidance is unavailable, say what is missing before proceeding.
 
-| Before you… | Read |
+| When you need guidance on… | Reference |
 |---|---|
 | Choose a tool invocation or plan a commit | `~/.pi/agent/docs/tool-use.md` |
 | Add or change a filesystem path in code, tests, docs, or reports | `~/.pi/agent/docs/portability.md` |
