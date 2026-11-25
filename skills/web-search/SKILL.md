@@ -15,13 +15,7 @@ Two verbs, one CLI: **search** = no URL yet, **extract** = have URL.
 
 ## Before running
 
-`tvly` not on PATH → ask before install (unpinned `curl | bash`):
-
-```bash
-curl -fsSL https://cli.tavily.com/install.sh | bash && tvly login
-```
-
-On approval: install + `tvly login`. Declined/failed → stop, report; no retry loops.
+`tvly` not on PATH → ask before installing. Review the official installation instructions and installer before proposing an installation command; do not pipe a downloaded script directly into a shell. On approval, install and run `tvly login`. Declined/failed → stop, report; no retry loops.
 
 ## Search
 

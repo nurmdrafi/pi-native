@@ -44,7 +44,7 @@ Before any UI: **extending** existing design system or **creating from scratch**
 
 Detect UI stack from `package.json` + existing components; express design through that stack's idioms — never impose foreign style system. Read the matching reference BEFORE writing component code:
 
-- **Ant Design**: [references/ant-design.md](references/ant-design.md) — version matrix (v4/v5/v6), CLI-first API lookup (`npx @ant-design/cli info`), theming ladder, form/table logic guards, v6 renames.
+- **Ant Design**: [references/ant-design.md](references/ant-design.md) — version matrix (v4/v5/v6), API lookup via the installed CLI, theming ladder, form/table logic guards, v6 renames.
 - **shadcn/ui + Tailwind**: [references/shadcn-tailwind.md](references/shadcn-tailwind.md) — `components.json` detection, project context via CLI, Base UI vs Radix primitives, Tailwind v3/v4 token detection, composition rules.
 - **Vanilla/other**: no established idioms → full aesthetic freedom below.
 - Mixed stacks: read both references; check Tailwind reset against AntD styles before mixing.
@@ -121,6 +121,6 @@ Don't hold back — commit fully to distinctive vision.
 
 ## Examples
 
-- `/skill:frontend-design antd` — new admin table page in an Ant Design repo: Pattern Audit extends existing table/form idioms; `npx @ant-design/cli info Table --format json` before writing props.
+- `/skill:frontend-design antd` — new admin table page in an Ant Design repo: Pattern Audit extends existing table/form idioms; verify Table props against the installed Ant Design version before writing code.
 - `/skill:frontend-design shadcn` — new marketing section on shadcn/Tailwind: detect `components.json` + Tailwind version tokens, compose from installed primitives.
 - `/skill:frontend-design greenfield` — no existing UI: full design-language extraction, then Design Thinking + Aesthetics Guidelines.

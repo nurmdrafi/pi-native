@@ -11,15 +11,7 @@ Match the installed major — check `package.json` before writing.
 
 ## API lookup before writing (official rule)
 
-Do not rely on memory for component props — query first, offline, via `@ant-design/cli`:
-
-```bash
-npx @ant-design/cli info <Component> --format json   # props/API, always --format json
-npx @ant-design/cli demo <Component>                  # working baseline
-npx @ant-design/cli token                             # theming token lookup
-npx @ant-design/cli semantic                          # semantic styling hooks
-npx @ant-design/cli doctor                            # project checks; also lint, migrate
-```
+Do not rely on memory for component props — query first, offline, via the project's installed `@ant-design/cli`. Resolve its executable from the installed package's `bin` field; do not fetch an unpinned CLI implicitly. Use `info <Component> --format json` for props, `demo <Component>` for a baseline, `token` for theming, `semantic` for styling hooks, and `doctor` for project checks.
 
 Version-sensitive: `--version <x.y.z>` or auto-detect from local `node_modules`. CLI absent → official docs (antd documents every component); never undocumented APIs or internal `.ant-*` class coupling.
 

@@ -55,7 +55,7 @@ node <skill-dir>/scripts/audit.mjs run            # full directory
 node <skill-dir>/scripts/audit.mjs run --max 50   # quick pass, newest 50 sessions
 ```
 
-Writes to `$AUDIT_WORKDIR`: `manifest.json` (thresholds + `pricing`: per-model input rates derived from logged `usage.cost`, unpriced models, priced waste share), `l1_findings.json` (rule findings: `{rule, severity, sessionId, turnPointers, evidenceStats, estWasteTokens, project}`), `overview.json` (aggregates: `projects`, `tools`, `models`, `gapBuckets`, `dates`, `skills`, `sessions` by waste). Per-session/per-project rollups carry `wasteUsd` + `wasteTokens`, `models`, `usdPerMTok`, `pricedShare`, `compactions`.
+The digest generates these files under `$AUDIT_WORKDIR`; they are outputs, not files bundled with the skill: `manifest.json` (thresholds + `pricing`: per-model input rates derived from logged `usage.cost`, unpriced models, priced waste share), `l1_findings.json` (rule findings: `{rule, severity, sessionId, turnPointers, evidenceStats, estWasteTokens, project}`), `overview.json` (aggregates: `projects`, `tools`, `models`, `gapBuckets`, `dates`, `skills`, `sessions` by waste). Per-session/per-project rollups carry `wasteUsd` + `wasteTokens`, `models`, `usdPerMTok`, `pricedShare`, `compactions`.
 
 Rules: `CACHE_TTL_EXPIRY`, `DUP_TOOL_CALL`, `BIG_TOOL_OUTPUT`, `RETRY_STORM`, `CACHE_MISS_RATE`, `CONTEXT_GROWTH`.
 
