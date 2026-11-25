@@ -3,7 +3,7 @@ name: product-manager
 description: Product manager — turns a rough idea or feature request into a structured brief (problem, users, scope, numbered acceptance criteria); use before implementation waves when scope is unsettled
 tools: piwrite, piread, pibash
 skills: brainstorming
-thinking: high
+thinking: medium
 system-prompt: append
 auto-exit: true
 budget: none

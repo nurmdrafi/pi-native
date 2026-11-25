@@ -6,9 +6,10 @@
  * It catches the realistic unsanctioned shapes at command positions; a
  * determined rewrite escapes it. AGENTS.md discipline and the user's eyes are
  * the actual boundary. */
-import { homedir } from "os";
-import { join } from "path";
+import { homedir, tmpdir } from "os";
+import { join, dirname, basename, resolve } from "path";
 import { realpathSync } from "fs";
+import { fileURLToPath } from "url";
 import { config } from "../loader.ts";
 
 
@@ -156,13 +157,6 @@ const DESTRUCTIVE_CORE_NON_GIT_SRC = CONFIRM_SET_NON_GIT.length
   : "(?!)";
 
 const DESTRUCTIVE_BASH_SUFFIX =
-  // S4 fix 5 (2026-10-15, spec §6.5): a $VAR/${VAR} COMMAND WORD is
-  // unclassifiable — it confirms, never silently allows. Anchored like the
-  // core but NOT inside it: DESTRUCTIVE_ANYWHERE would then fire on every
-  // $arg expansion (sed … $f, awk '{print $1}')
-  String.raw`|` +
-  CMD_POS_SRC +
-  String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)` +
   // S4 fix 6 (§6.6): pipe-to-interpreter — unanchored on purpose (matches
   // anywhere in the segment, incl. inside sh -c "…" payloads); `bash
   // build.sh` (no pipe) and `| shasum` (no \b after sh) stay allowed.
@@ -172,7 +166,10 @@ const DESTRUCTIVE_BASH_SUFFIX =
   // new words require whitespace BEFORE the bar: real shell pipes leave
   // one, while a quoted pattern's alternation inside a word
   // (`rg "node -e|python3 -c"`, 16.3 pin) does not.
-  String.raw`|\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
+  // 2026-11-19: the sh alternative gets the same `(?<=\s)` — a quoted
+  // alternation like `rg '...(Destructive|Bash ...'` has no space before
+  // the bar but matched `\|\s*(?:ba)?sh` and blocked a read-only search.
+  String.raw`|(?<=\s)\|\s*(?:ba|z|da|k)?sh\b(?![\w-])` +
   String.raw`|(?<=\s)\|\s*(?:node(?:js)?|python3?|perl|ruby|php|deno|bun)\b(?![\w-])` +
   String.raw`|\b(?:DROP\s+(?:TABLE|DATABASE)|DELETE\s+FROM)\b|\bfind\b[^|;&]*\s-[a-zA-Z]*delete\b`;
 
@@ -196,12 +193,14 @@ const DESTRUCTIVE_ANYWHERE = new RegExp(DESTRUCTIVE_CORE_SRC, "i");
  * position — segment start (after env assignments and known wrappers) or right
  * after a command-substitution opener. Unanchored matching confirmed a quoted
  * mention (`rg -n "node -e" docs`) as destructive although nothing ran, which
- * blocked read-only review children probing their own docs. */
+ * blocked read-only review children probing their own docs.
+ * Phase 2 (audit A13, 2026-11-18): osascript -e joins the list — an inline
+ * AppleScript payload is the same unscannable-exec lane. */
 const INTERP_INLINE = new RegExp(
   "(?:^|`|\\$\\(\\s*)" +
     "(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*" +
     "(?:(?:sudo|env|command|nohup|time|nice|xargs)\\s+(?:-\\S+\\s+)*)*" +
-    "(?:\\b(?:perl|ruby|php|node|deno|bun)\\b[^|;&]*\\s(?:-e|--eval)\\b" +
+    "(?:\\b(?:perl|ruby|php|node|deno|bun|osascript)\\b[^|;&]*\\s(?:-e|--eval)\\b" +
     "|\\bpython3?\\b[^|;&]*\\s-[cm]\\b" +
     "|\\bawk\\b[^|;&]*\\bsystem\\s*\\()",
   "i",
@@ -217,6 +216,40 @@ const EVAL_ENCODED = /\beval\b[^|;&]*(?:\$\(|`)/;
  * ~/.gnupg/, ~/.config/systemd/. */
 let ppHome = "";
 let ppRe: RegExp | undefined;
+/** A2 (2026-11-18): the gate's own tree is protected control plane — writes,
+ * edits, and bash redirects into extensions/permission-gate confirm like any
+ * protected path, closing the self-modify seam where a config.json edit
+ * armed on the next process. The write/edit lanes additionally require the
+ * chat phrase "gate maintenance" (index.ts) — the redirect lane asks through
+ * the ordinary H2 ladder. */
+const GATE_DIR = (() => {
+  try {
+    return realpathSync(join(dirname(fileURLToPath(import.meta.url)), ".."));
+  } catch {
+    return "";
+  }
+})();
+/** Single source of the home-tree protection suffix (rc files, .ssh,
+ * .gnupg, systemd) — consumed by the ppRe builder below and by the
+ * tmp-allowance ranking (home protection outranks scratch: credentials
+ * stay protected even when a sandbox parks HOME under a tmp root). */
+const PROTECTED_HOME_SUFFIX_SRC =
+  String.raw`/\.(?:bashrc|zshrc|profile|bash_profile|bash_aliases|bash_login|tmux\.conf|gitconfig)(?:/|$)` +
+  String.raw`|` +
+  String.raw`/\.(?:ssh|gnupg)/` +
+  String.raw`|` +
+  String.raw`/\.config/systemd/`;
+const HOME_PROTECTED = new RegExp(PROTECTED_HOME_SUFFIX_SRC);
+
+/** Tmp allowance as a JUDGMENT (not a location): scratch under a tmp root
+ * is free EXCEPT credentials/rc files and the gate's own tree — those keep
+ * their protected confirm wherever they live. Used wherever the allowance
+ * could cancel a protected verdict (write/edit lane, redirect/tee judges). */
+export const tmpAllowed = (real: string): boolean =>
+  isTmpAllowPath(real) &&
+  !HOME_PROTECTED.test(real) &&
+  !(GATE_DIR !== "" && (real === GATE_DIR || real.startsWith(GATE_DIR + "/")));
+
 export const PROTECTED_PREFIX_RE = {
   test(p: string): boolean {
     // Compare in realpath space. Callers pass an already-realpathed target, so
@@ -234,15 +267,11 @@ export const PROTECTED_PREFIX_RE = {
       // Homes are tried in both spellings so callers that hand over a raw
       // (non-realpathed) path — e.g. bash redirect targets — still match.
       const homes = [resolved, raw].filter((v, i, a) => a.indexOf(v) === i).map(esc);
-      const suffix =
-        String.raw`/\.(?:bashrc|zshrc|profile|bash_profile|bash_aliases|bash_login|tmux\.conf|gitconfig)(?:/|$)` +
-        String.raw`|` +
-        String.raw`/\.(?:ssh|gnupg)/` +
-        String.raw`|` +
-        String.raw`/\.config/systemd/`;
+      const suffix = PROTECTED_HOME_SUFFIX_SRC;
       ppRe = new RegExp(
         String.raw`^(?:/etc|/usr|/var|/boot|/root)(?:/|$)` +
-          homes.map((h) => String.raw`|^` + h + suffix).join(""),
+          homes.map((h) => String.raw`|^` + h + suffix).join("") +
+          (GATE_DIR ? String.raw`|^` + GATE_DIR.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`) + String.raw`(?:/|$)` : ""),
       );
     }
     return ppRe.test(p);
@@ -256,36 +285,74 @@ const expandWrittenTarget = (t: string) =>
 const REDIRECT_TARGET = /(?<![=>!\-\d])(?:>>?)\s+([^\s&>]+)/g;
 const TEE_TARGET = /\btee(?:\s+-[a-zA-Z][a-zA-Z0-9]*)*\s+([^\s|;&)]+)/g;
 
-/**
- * 2026-11-02: scratch writes — an inline-interpreter payload whose every
- * redirect/tee target lands under the agent home's `.cache/` (absolute, or a
- * repo-relative `.cache/...`) writes throwaway data only. Log forensics and
- * replay dumps run there, and the interpreter tripwire used to confirm every
- * one of them. At least one target is required: a payload with no redirect can
- * still mutate the tree, so it keeps the confirm.
- */
-const scratchWriteOnly = (seg: string): boolean => {
-  const targets = [
-    ...[...seg.matchAll(REDIRECT_TARGET)].map((m) => m[1]),
-    ...[...seg.matchAll(TEE_TARGET)].map((m) => m[1]),
-  ].map(expandWrittenTarget);
-  if (targets.length === 0) return false;
-  const agentCache = join(homedir(), ".pi", "agent", ".cache");
-  return targets.every(
-    (t) =>
-      t.startsWith(agentCache + "/") ||
-      t.startsWith(join(homedir(), ".cache") + "/") ||
-      /^\.{0,2}\/?\.cache\//.test(t),
-  );
+/** System trees in RESOLVED space — darwin resolves /etc|/usr|/var to
+ * /private/*, so a realpathed target needs its own list. Kept separate
+ * from PROTECTED_PREFIX_RE (raw space, homes-aware): the write/edit lane
+ * tests only the resolved path and predates this list — extending the
+ * shared regex there would protect every darwin $TMPDIR sandbox; the bash
+ * lane below judges both spellings. */
+const PROTECTED_RESOLVED =
+  /^(?:\/etc|\/usr|\/var|\/boot|\/root|\/private\/etc|\/private\/usr|\/private\/var)(?:\/|$)/;
+
+/** Redirect/tee target judgment (2026-11-19): resolve the written target
+ * first — the raw text and the realpath can differ on both sides. Tmp
+ * allowance wins in resolved space (macOS $TMPDIR sits under protected
+ * /var; the allowance names the sanctioned per-user scratch); otherwise
+ * the target confirms when EITHER spelling hits a protected prefix, so a
+ * symlinked final hop into a system tree cannot launder the write. */
+const protectedWrittenTarget = (raw: string): boolean => {
+  const t = expandWrittenTarget(raw);
+  const real = realpathish(t);
+  if (tmpAllowed(real)) return false;
+  return PROTECTED_PREFIX_RE.test(t) || PROTECTED_RESOLVED.test(real);
 };
 
-/** 2026-11-07 HIGH fix: the scratch exemption above is only for payloads
- * that merely WRITE throwaway data. An inline-interpreter body that itself
- * deletes (node fs rmSync, python shutil.rmtree/os.remove, an embedded
- * `rm -r…`) is destructive no matter where stdout lands — the destination
- * of the print never sanitizes the code that runs. */
+/** Phase 2 (audit A6, 2026-11-18): an inline-interpreter payload confirms on
+ * its BODY's deletion/unlink vocabulary — never on where its stdout lands
+ * (the `node -e` arithmetic false positive confirmed on a /tmp redirect and
+ * rerouted writers into scratch files; 2026-11-02's .cache destination
+ * exemption is subsumed — destinations no longer matter to this judge).
+ * Vocabulary stays deletion-only — rm/rmdir/unlink semantics plus
+ * AppleScript deletion (A13); moves and writes are not destructive confirms.
+ * 2026-11-18 code review (finding 4): argument-or-call shapes, not bare
+ * words — a dotted member (fs.rm, os.unlink), a call paren, or an argument
+ * token after rm/unlink. A word with NO argument (`console.log("rm")`,
+ * "the rm case") is prose and must not confirm; `rm <arg>` keeps confirming
+ * (an embedded-shell `system("rm canary")` is the same shape as prose —
+ * accepted confirm-only FP, deletion asymmetry wins). */
 const INTERP_BODY_DESTRUCTIVE =
-  /\b(?:rmSync|rmdirSync|unlinkSync|shutil\.rmtree|os\.remove)\b|\brm\s+-[a-zA-Z]*[rRf]/;
+  /\b(?:shutil\.rmtree|os\.(?:remove|unlink|rmdir)|fs\.(?:rm|rmdir)|promises\.(?:rm|rmdir))\b|\.(?:rm|unlink|rmdir)(?:Sync)?\b|\b(?:rm|unlink|rmdir)(?:Sync)?\s*\(|\b(?:rm|unlink)\s+\S|\brm\s+-[a-zA-Z]*[rRf]|\btell\s+application\b[^\n]*\b(?:delete|empty\s+trash)\b/;
+
+/** Realpath with the write-lane fallback: an unresolvable tail still
+ * judges against its realpathed parent, so a not-yet-created target keeps
+ * its tree. Exported — index.ts judges confinement in the same space. */
+export const realpathish = (abs: string): string => {
+  try {
+    return realpathSync(abs);
+  } catch {
+    try {
+      return join(realpathSync(dirname(abs)), basename(abs));
+    } catch {
+      return abs; // unresolvable — judge the path as written
+    }
+  }
+};
+
+/** Tmp allowance (user direction 2026-11-19): /tmp and the OS tmp dir are
+ * agent scratch — never protected, never write-confined, parents and
+ * subagents alike (scout durability files, spill slices). macOS parks
+ * $TMPDIR under /var, a protected system tree, so the prefix test alone
+ * would confirm every scratch redirect. PGATE_TMP_ROOTS (colon-separated)
+ * replaces the default pair — test sandboxes pin it to stay confinable;
+ * read per call so a process can retarget mid-run. Write-then-execute from
+ * a tmp tree still confirms (index.ts): scratch is not execution. */
+export const tmpAllowRoots = (): string[] => {
+  const raw = process.env.PGATE_TMP_ROOTS;
+  const roots = raw ? raw.split(":").filter(Boolean) : ["/tmp", tmpdir()];
+  return [...new Set(roots.map(realpathish))];
+};
+export const isTmpAllowPath = (p: string): boolean =>
+  tmpAllowRoots().some((r) => p === r || p.startsWith(r.endsWith("/") ? r : r + "/"));
 
 /** Structural destructive signals shared by both judges: protected
  * redirect/tee targets, wrapped payloads, interpreter escapes, encoded
@@ -294,26 +361,41 @@ const structuralDestructive = (s: string): boolean =>
   // S4 fix 7 (§6.7): persistence redirect/tee targets — same protected-prefix
   // source as the write/edit realpath check (replaces the old /etc-only
   // redirect alternative)
-  [...s.matchAll(REDIRECT_TARGET)].some((m) =>
-    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-  ) ||
-  [...s.matchAll(TEE_TARGET)].some((m) =>
-    PROTECTED_PREFIX_RE.test(expandWrittenTarget(m[1])),
-  ) ||
+  [...s.matchAll(REDIRECT_TARGET)].some((m) => protectedWrittenTarget(m[1] ?? "")) ||
+  [...s.matchAll(TEE_TARGET)].some((m) => protectedWrittenTarget(m[1] ?? "")) ||
   (SHELL_WRAPPED.test(s) && DESTRUCTIVE_ANYWHERE.test(s)) ||
   // S4 fix 9 (2026-10-18): interpreter escapes, encoded eval, alias indirection
-  // 2026-11-07 HIGH fix: scratch destinations exempt only benign bodies —
-  // a destructive interpreter payload confirms regardless of where its
-  // redirects or tees land.
-  (INTERP_INLINE.test(s) &&
-    (!scratchWriteOnly(s) || INTERP_BODY_DESTRUCTIVE.test(s))) ||
+  // 2026-11-18 (audit A6): the inline-interpreter tripwire judges the BODY's
+  // own vocabulary only — never where a benign payload's stdout lands (the
+  // `node -e` arithmetic false positive); protected redirects confirm above,
+  // and the planted-file follow-up is index.ts's write-then-execute signal.
+  (INTERP_INLINE.test(s) && INTERP_BODY_DESTRUCTIVE.test(s)) ||
   EVAL_ENCODED.test(s) ||
   (/\balias\b/.test(s) && DESTRUCTIVE_ANYWHERE.test(s));
+
+/** S4 fix 5 (2026-10-15, spec §6.5): a $VAR/${VAR} COMMAND WORD is
+ * unclassifiable — it confirms, never silently allows. Anchored like the
+ * core but NOT inside DESTRUCTIVE_BASH: DESTRUCTIVE_ANYWHERE would then
+ * fire on every $arg expansion (sed … $f, awk '{print $1}').
+ * 2026-11-22 (harness-watch misfire): judged on single-quote-stripped text —
+ * command position never occurs inside single quotes, so a $VAR seen only
+ * there is jq/awk program data ("($s|length)" grouping read as a subshell
+ * running $s and blocked read-only analysis pipelines). An unpaired quote
+ * strips nothing, so prose apostrophes stay fail-closed. */
+const VAR_CMD_WORD = new RegExp(
+  CMD_POS_SRC + String.raw`\$\{?[A-Za-z_]\w*\}?(?=[\s;|&)]|$)`,
+  "i",
+);
+const stripSingleQuoted = (s: string): string => s.replace(/'[^']*'/g, "''");
 
 export const segmentDestructive = (seg: string): boolean => {
   // S4 fix 9 (2026-10-18): NFKC fold first — homoglyph command words (ｒｍ) match
   const s = seg.normalize("NFKC");
-  return DESTRUCTIVE_BASH.test(s) || structuralDestructive(s);
+  return (
+    DESTRUCTIVE_BASH.test(s) ||
+    VAR_CMD_WORD.test(stripSingleQuoted(s)) ||
+    structuralDestructive(s)
+  );
 };
 
 /** /yolo judge (user direction 2026-11-12): identical to
@@ -323,7 +405,11 @@ export const segmentDestructive = (seg: string): boolean => {
  * still confirms: only git-only segments pass. */
 export const segmentDestructiveExceptGit = (seg: string): boolean => {
   const s = seg.normalize("NFKC");
-  return DESTRUCTIVE_BASH_NON_GIT.test(s) || structuralDestructive(s);
+  return (
+    DESTRUCTIVE_BASH_NON_GIT.test(s) ||
+    VAR_CMD_WORD.test(stripSingleQuoted(s)) ||
+    structuralDestructive(s)
+  );
 };
 export const APPROVED_WINDOW_MS = 2 * 60_000;
 
@@ -342,11 +428,24 @@ export const isMutatingCommand = (cmd: string): boolean =>
  * last tag — earlier bodies are swallowed by its body, still never scanned. */
 const HEREDOC_OPENER =
   /(?<!<)<<(?!<)(-?)\s*(?:"([^"\s]+)"|'([^'\s]+)'|([^\s'";&|<>]+))\s*$/;
+/** Phase 2 (audit A7, 2026-11-18): heredoc openers that feed an interpreter
+ * run their body as code. Two families: shell words (re-emitted body lines
+ * judge as plain shell segments) and inline-code interpreters (destructive
+ * body lines re-emit as the equivalent inline call). Non-interpreter openers
+ * (cat, wc, psql…) keep the 16.1 rule — body lines are data. */
+const INTERP_OPENER_WORD =
+  /\b(?:python3?|node|deno|bun|perl|ruby|php|osascript|(?:ba|z|da|k)?sh)\b/i;
+const INLINE_CODE_WORD = /\b(?:python3?|node|deno|bun|perl|ruby|php|osascript)\b/;
 const heredocOf = (seg: string) => {
   const m = HEREDOC_OPENER.exec(seg);
   if (!m) return undefined;
   const tag = m[2] ?? m[3] ?? m[4];
-  return tag ? { tag, stripTabs: m[1] === "-" } : undefined;
+  if (!tag) return undefined;
+  // 2026-11-18 code review (finding 6): the interpreter word must sit in the
+  // COMMAND position before `<<` — a delimiter named like an interpreter
+  // (`cat <<node`) feeds cat, and its body stays data.
+  const word = INTERP_OPENER_WORD.exec(seg.slice(0, m.index))?.[0]?.toLowerCase();
+  return { tag, stripTabs: m[1] === "-", word };
 };
 
 /** 2026-11-07 HIGH fix: a heredoc feeding a shell runs its body —
@@ -367,8 +466,8 @@ export function splitSegments(cmd: string): string[] {
   // blocked three review children on /tmp durability writes); only the opener
   // segment is emitted and scanned. Delimiter match: raw body line, leading
   // tabs stripped first for `<<-`, exact equality with the (unquoted) tag.
-  let armed: { tag: string; stripTabs: boolean } | undefined;
-  let heredoc: { tag: string; stripTabs: boolean } | undefined;
+  let armed: { tag: string; stripTabs: boolean; word?: string } | undefined;
+  let heredoc: { tag: string; stripTabs: boolean; word?: string } | undefined;
   let line = "";
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i];
@@ -386,7 +485,19 @@ export function splitSegments(cmd: string): string[] {
         // 2026-11-07 HIGH fix: a destructive body line is re-emitted as its
         // own segment — heredoc-fed shells must not launder `rm -rf` past
         // the confirm. Prose mid-line mentions stay dropped (16.1 pins).
+        // 2026-11-18 (audit A7): an opener that names an interpreter feeds a
+        // PROGRAM — its body is additionally judged on interpreter-destructive
+        // words mid-line. sh-family openers re-emit the line raw (plain shell
+        // judging covers command words and substitutions); inline-code openers
+        // re-emit the equivalent inline call so the interp judge sees the body.
         else if (HEREDOC_BODY_CMD.test(raw)) out.push(raw);
+        else if (heredoc.word && INTERP_BODY_DESTRUCTIVE.test(raw)) {
+          out.push(
+            INLINE_CODE_WORD.test(heredoc.word)
+              ? `${heredoc.word} ${/^python/.test(heredoc.word) ? "-c" : "-e"} ${raw}`
+              : raw,
+          );
+        }
         line = "";
       } else {
         line += ch;
@@ -475,3 +586,172 @@ export const normalizeSegment = (seg: string) => {
  * approval in the invoking message counts — incl. /ship, /issue, /update-changelog) */
 export const APPROVAL_RE =
   /\b(?:yes|y|approve[ds]?|go[ -]ahead|run it|do it|proceed|ship it)\b|^\/(?:ship|issue|update-changelog)\b/im;
+
+/** Phase 6 (audit A12): negation-hardened approval. An affirmative riding a
+ * negation is a refusal — "don't proceed", "no, do not run it", "not
+ * approved" previously armed the destructive bypass. The pre-scan voids
+ * any match whose clause (text since the last sentence boundary) contains
+ * a negation word before the affirmative; clean matches in other
+ * sentences still count. Slash-command invocations are explicit commands,
+ * not prose — they always count. */
+const NEGATION_WORD =
+  /\b(?:no|not|never|don'?t|dont|do\s+not|stop|can(?:not|'t)|won'?t|will\s+not|neither|nor)\b/i;
+const CLAUSE_BOUNDARY = /[.!?\n]/;
+/** matchAll needs the global flag; a g-clone of the immutable APPROVAL_RE
+ * (matchAll clones again per call, so lastIndex state never leaks) */
+const APPROVAL_GLOBAL = new RegExp(APPROVAL_RE.source, APPROVAL_RE.flags + "g");
+export const approvalIn = (text: string): boolean => {
+  for (const m of text.matchAll(APPROVAL_GLOBAL)) {
+    if (m[0].startsWith("/")) return true; // slash-command invocation
+    const before = text.slice(0, m.index ?? 0);
+    let start = 0;
+    for (let i = before.length - 1; i >= 0; i--)
+      if (CLAUSE_BOUNDARY.test(before[i])) {
+        start = i + 1;
+        break;
+      }
+    if (!NEGATION_WORD.test(before.slice(start))) return true;
+  }
+  return false;
+};
+
+/** Phase 2 (audit A6, 2026-11-18): write-then-execute — the lane the A6
+ * body-judging relaxation opens (a benign inline body planting a scratch
+ * file, then running it). index.ts records every /tmp redirect/tee target
+ * per session (as written, plus realpath so symlink spellings match);
+ * a later command in the SAME session executing one of those paths — at
+ * command position or as an operand of a shell/script interpreter — is the
+ * planted-payload shape and confirms through the ordinary ladder. The pure
+ * halves live here so segment logic keeps one home; session state resets on
+ * session_start. Benign re-reads (cat/grep/wc) never match: only execution
+ * positions do. */
+const TMP_WRITE_PREFIX = /^\/(?:private\/)?tmp\//;
+/** ALL written targets (redirect + tee, expanded) of one segment — raw
+ * material for the /tmp recording below and the protected-lane checks. */
+export const writtenTargetsOf = (seg: string): string[] =>
+  [
+    ...[...seg.matchAll(REDIRECT_TARGET)].map((m) => m[1]),
+    ...[...seg.matchAll(TEE_TARGET)].map((m) => m[1]),
+  ].map(expandWrittenTarget);
+
+/** /tmp write targets of one segment, as written (realpath appended when it
+ * resolves — macOS /tmp is /private/tmp; a not-yet-written target still
+ * matches by its written spelling). */
+export const tmpWriteTargetsOf = (seg: string): string[] => {
+  const out: string[] = [];
+  for (const t of writtenTargetsOf(seg)) {
+    // 2026-11-19: every tmp-allow root records planted files, not just
+    // literal /tmp spellings — the seam follows the allowance wherever it
+    // points (darwin $TMPDIR sits outside /tmp).
+    if (!TMP_WRITE_PREFIX.test(t) && !isTmpAllowPath(realpathish(t))) continue;
+    out.push(t);
+    try {
+      const rp = realpathSync(t);
+      if (rp !== t) out.push(rp);
+    } catch {
+      /* not on disk yet — the written spelling still matches */
+    }
+  }
+  return out;
+};
+/** interpreters whose file operand EXECUTES that file (osascript included,
+ * A13). A bare word before the interpreter must be a pipe or a transparent
+ * wrapper — `grep bash <file>` is a pattern, not an execution. */
+const TMP_EXEC_INTERP =
+  /^(?:python3?|node|deno|bun|osascript|(?:ba|z|da|k)?sh)$/;
+const TMP_EXEC_WRAPPER = /^(?:sudo|env|command|exec|nohup|nice|xargs)$/;
+const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/** the recorded path this command executes (command position or interpreter
+ * operand), or undefined when it only reads/mentions recorded paths */
+export const executesRecordedTmpTarget = (
+  segs: string[],
+  recorded: Set<string>,
+): string | undefined => {
+  for (const seg of segs) {
+    // the segment's OWN redirect/tee targets are destinations, not operands
+    // — `node -e '1+1' > /tmp/fp.js` writes the file, it does not run it
+    const own = new Set(tmpWriteTargetsOf(seg));
+    const toks = seg
+      .split(/\s+/)
+      .map((t) => t.replace(/^["']+|["']+$/, ""));
+    // 2026-11-18 code review (finding 3): env assignments and transparent
+    // wrappers may precede the command word — FOO=1 /tmp/fp.js and
+    // sudo /tmp/fp.js execute the planted file just the same.
+    let start = 0;
+    while (
+      start < toks.length &&
+      (ENV_ASSIGN.test(toks[start]) || TMP_EXEC_WRAPPER.test(toks[start]))
+    )
+      start++;
+    if (start < toks.length && recorded.has(toks[start]) && !own.has(toks[start]))
+      return toks[start];
+    for (let i = 0; i < toks.length; i++) {
+      if (!TMP_EXEC_INTERP.test(toks[i])) continue;
+      if (
+        i > 0 &&
+        toks[i - 1] !== "|" &&
+        !TMP_EXEC_WRAPPER.test(toks[i - 1])
+      )
+        continue;
+      for (let j = i + 1; j < toks.length; j++)
+        if (recorded.has(toks[j]) && !own.has(toks[j])) return toks[j];
+    }
+  }
+  return undefined;
+};
+
+/** 2026-11-18 code review (findings 1-2): resolve a written/copied target the
+ * way the shell would — cwd-relative when not absolute — then compare in
+ * realpath space. Returns the resolved target when it lands in a protected
+ * tree (the gate's own tree included since A2), else undefined. */
+const protectedTarget = (t: string, cwd?: string): string | undefined => {
+  const abs = t.startsWith("/") ? t : cwd ? resolve(cwd, t) : t;
+  // 2026-11-19: resolve nonexistent tails through their parent so a raw
+  // /var spelling of a darwin $TMPDIR target lands in realpath space; the
+  // tmp allowance is judged there BEFORE the protected test — scratch wins
+  // over the system-tree prefix it happens to sit under.
+  const real = realpathish(abs);
+  if (tmpAllowed(real)) return undefined;
+  return PROTECTED_PREFIX_RE.test(real) || PROTECTED_RESOLVED.test(real)
+    ? real
+    : undefined;
+};
+
+/** Finding 1: a relative redirect/tee target into a protected tree. The
+ * structural judge sees absolute spellings only; from the agent-home cwd
+ * the relative form is the common one. */
+export const protectedWrittenTargetOf = (
+  seg: string,
+  cwd?: string,
+): string | undefined => {
+  for (const t of writtenTargetsOf(seg)) {
+    const hit = protectedTarget(t, cwd);
+    if (hit) return hit;
+  }
+  return undefined;
+};
+
+/** Finding 2: cp/mv/install/rsync place files without a redirect — the
+ * final operand is the destination. Flag tokens are skipped; fewer than two
+ * operands is not a copy. copyTargetOf returns the raw destination (A12b
+ * approval stat key, A9 write binding); protectedCopyTargetOf judges it
+ * against the protected prefixes as before. */
+const COPY_CMD = /^(?:sudo\s+|env\s+\S*\s+|command\s+)?(?:cp|mv|install|rsync)\b/;
+export const copyTargetOf = (seg: string): string | undefined => {
+  const head = COPY_CMD.exec(seg)?.[0] ?? "";
+  if (!head) return undefined;
+  const operands = seg
+    .slice(head.length)
+    .split(/\s+/)
+    .map((t) => t.replace(/^["']+|["']+$/, ""))
+    .filter((t) => t && !t.startsWith("-"));
+  if (operands.length < 2) return undefined;
+  return operands[operands.length - 1];
+};
+export const protectedCopyTargetOf = (
+  seg: string,
+  cwd?: string,
+): string | undefined => {
+  const dest = copyTargetOf(seg);
+  return dest === undefined ? undefined : protectedTarget(dest, cwd);
+};

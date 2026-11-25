@@ -40,8 +40,15 @@ const KNOWN: &[&str] = &[
 const FLAG_WAIVERS: &[&str] = &[
     "git --hard",
     "git reset --hard",
-    // subcommand flags the base `git --help` never lists
+    // Subcommand flags unavailable from the base command's help, or from the
+    // installed Git version's help output.
     "git --porcelain",
+    "git --oneline",
+    "git --stat",
+    "git --untracked-files",
+    "git stash --staged",
+    "git merge-tree --write-tree",
+    "gh release --pattern",
     "curl --proto",
     "curl --tlsv1",
 ];
@@ -532,7 +539,10 @@ fn is_handoff_or_ignored(rel_md: &str) -> bool {
             }
         }
     }
-    rel_md.starts_with("handoff/") || rel_md.starts_with("audit-reports/") || rel_md.starts_with("sessions/")
+    rel_md.starts_with("handoff/")
+        || rel_md.starts_with("audit-reports/")
+        || rel_md.starts_with("logs/")
+        || rel_md.starts_with("sessions/")
 }
 
 fn truncate_chars(s: &str, n: usize) -> &str {
@@ -1183,6 +1193,7 @@ mod tests {
         assert!(!is_handoff_or_ignored("HANDOFF-x/y.md"));
         assert!(is_handoff_or_ignored("handoff/a.md"));
         assert!(is_handoff_or_ignored("audit-reports/b.md"));
+        assert!(is_handoff_or_ignored("logs/captured-readme.md"));
         assert!(is_handoff_or_ignored("sessions/a/doc-consistency-2026-11-12T08-22-23.md"));
         assert!(!is_handoff_or_ignored("docs/sessions.md"));
         assert!(!is_handoff_or_ignored("docs/handoff.md"));
@@ -1210,7 +1221,7 @@ mod tests {
     fn command_scan_skips_historical_markdown_in_every_pass() {
         let root = std::env::temp_dir().join(format!("docheck-history-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        for dir in ["sessions", "handoff", "audit-reports"] {
+        for dir in ["sessions", "handoff", "audit-reports", "logs"] {
             let path = root.join(dir);
             std::fs::create_dir_all(&path).unwrap();
             std::fs::write(
@@ -1223,6 +1234,20 @@ mod tests {
         let result = check_md_commands(&root);
         assert!(result.findings.is_empty(), "{:?}", result.findings);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn flag_waivers_cover_valid_subcommand_flags() {
+        for waiver in [
+            "git --oneline",
+            "git --stat",
+            "git --untracked-files",
+            "git stash --staged",
+            "git merge-tree --write-tree",
+            "gh release --pattern",
+        ] {
+            assert!(FLAG_WAIVERS.contains(&waiver), "missing waiver: {waiver}");
+        }
     }
 
     #[test]

@@ -1,21 +1,31 @@
 ---
 name: ponytail
-description: "Ponytail: ship the minimal correct solution, and review diffs for over-engineering. Intensity modes (lite/full/ultra) on top of the always-on AGENTS.md ladder. Use when the user says 'ponytail', 'be lazy', 'simplest', 'yagni', 'ultra', complains of over-engineering, or the task/diff shows speculative generality, dead code still shipped, duplicated logic where one path would do, or new deps for solved problems. Review mode for 'review for over-engineering', 'what can we delete': one line per finding — location, cut, replacement. NOT correctness review or fixes."
-argument-hint: "[lite|full|ultra]"
+description: "Ship the minimal correct solution; review diffs for over-engineering. Triggers: 'ponytail', 'be lazy', 'yagni', 'ultra', or speculative, dead, duplicated code in the diff. Not correctness review."
 license: MIT
 disable-model-invocation: true
+metadata:
+  author: nur
+  tags: [minimalism, code-review, yagni]
 ---
 
 # Ponytail
 
 Senior engineer shipping minimal correct solution. Minimal = less code, never less care. Best code = code never written.
 
+## Purpose
+
+Cut over-engineering at build time and review time: build the smallest correct solution, or review a diff and name every cut. Two modes: build (default) and review (references/review-format.md).
+
+## Instructions
+
+Build mode: understand the task and touched code first, climb the Ladder, obey Rules, keep the Output contract, apply Intensity. Review mode: one line per finding — location, cut, replacement.
+
 ## Ladder
 
 Stop at first rung that holds:
 
 1. Need to exist at all? Speculative need → skip, one-line say-so. (YAGNI)
-2. Already in codebase? Helper/util/type/pattern lives here → reuse. Look before writing; re-implementing what's a few files over = most common slop.
+2. Already in codebase? Helper/util/type/pattern lives here → reuse. Look before writing; re-implementing what's a few files over = most common waste.
 3. Stdlib does it? Use it.
 4. Native platform feature? `<input type="date">` over picker lib, CSS over JS, DB constraint over app code.
 5. Installed dep / native feature / available plugin solves it? Use it. Never add package (or browser-driver lib like playwright/puppeteer) for what installed dep/platform/running server already does.
@@ -53,10 +63,12 @@ Pattern: `[code] → skipped: [X], add when [Y].`
 
 Default: full. Per invocation: `/skill:ponytail lite` / `full` / `ultra`.
 
+## Examples
+
 Example: "Add a cache for these API responses."
 - lite: "Done, cache added. FYI: `functools.lru_cache` covers this in one line if you'd rather not own a cache class."
 - full: "`@lru_cache(maxsize=1000)` on the fetch function. Skipped custom cache class, add when lru_cache measurably falls short."
-- ultra: "No cache until a profiler says so. When it does: `@lru_cache`. Hand-rolled TTL cache class = bug farm with a hit rate."
+- ultra: "No cache until a profiler says so. When it does: `@lru_cache`. Hand-rolled TTL cache class = extra failure modes, zero extra value."
 
 ## Never cut
 
@@ -69,3 +81,19 @@ Example: "Add a cache for these API responses."
 User insists full version → build it, no re-arguing.
 
 Never minimize understanding. Ladder shortens solution, never reading. Trace whole thing first — every touched file, actual flow — before picking rung. Skipping comprehension to ship small diff = dangerous shortcut: dresses as efficiency, ships confident wrong fix. Read fully, then minimize.
+
+## Prerequisites
+
+None. No scripts, dependencies, or API keys. Builds on the always-on AGENTS.md ladder; works in any repo.
+
+## Limitations
+
+- Judgment skill, not a linter: rungs need real codebase context.
+- Review mode names cuts, never applies them; it is not correctness review.
+- ultra challenges requirements — the final call stays with the user.
+
+## Troubleshooting
+
+- Skill does not fire → invoke `/skill:ponytail` directly; `disable-model-invocation` hides it from auto-selection.
+- Review finds nothing → "Lean already. Ship." is the correct result, not a failure.
+- User insists on the full version → build it, no re-arguing.

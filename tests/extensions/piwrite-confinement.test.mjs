@@ -60,6 +60,11 @@ if (process.argv[2] === "--child=gate") {
 
 async function runGateChild(wbOff) {
   delete process.env.PI_SUBAGENT_NAME; // scrub a host subagent marker: confirms must not go fail-closed
+  // Tmp allowance (user direction 2026-11-19): pin PGATE_TMP_ROOTS to a
+  // dedicated dir so the tmpdir()-based sandbox trees stay confinable — the
+  // shipped default (/tmp + os tmpdir) would allow every fixture target.
+  const allow = mkdtempSync(join(tmpdir(), "wc-tmp-ok-"));
+  process.env.PGATE_TMP_ROOTS = allow;
   process.env.HOME = mkdtempSync(join(tmpdir(), "wc-home-")); // decision log off the real home
   const gate = await import("../../extensions/permission-gate/index.ts");
 
@@ -222,16 +227,15 @@ async function runGateChild(wbOff) {
     );
   }
 
-  // g5 — ~/.pi/efforts lost its allowlist (user direction 2026-11-12): it
-  // sits outside the session cwd, so it confirms like any other out-of-cwd
-  // target — in every mode, yolo included (out-of-cwd is yolo floor)
+  // g5 — ~/.pi/efforts is allowlisted again (user direction 2026-11-17,
+  // reinstating the 2026-11-12 removal): effort ledgers live there and
+  // every ledger write confirms — so the tree is exempt from out-of-cwd
+  // AND overwrite confirms, in every mode
   {
-    const r = await write("piwrite", join(efforts, "task.md"), "ledger", inCwd);
-    check(
-      "g5 piwrite ~/.pi/efforts target now confirms (out-of-cwd)",
-      r.startsWith("BLOCKED: Permission Gate (Destructive): piwrite") && r.includes("outside the session directory"),
-      r,
-    );
+    const r = await write("piwrite", join(efforts, "task.md"), "ledger", inCwd, true);
+    check("g5 piwrite ~/.pi/efforts target passes (allowlisted)", r === "write ok", r);
+    const r2 = await write("piwrite", join(efforts, "task.md"), "ledger2", inCwd, true);
+    check("g5b piwrite ~/.pi/efforts overwrite passes (allowlisted)", r2 === "write ok", r2);
   }
 
   // g6 — parity with the stubbed harnesses: no ctx.cwd → nothing to confine against
@@ -298,9 +302,10 @@ async function runGateChild(wbOff) {
     }
   }
 
-  // g11 — yolo auto-approves the git-family confirm entries (user
-  // direction 2026-11-12) while the non-git destructive floor and the
-  // normal-mode confirm stay armed
+  // g11 — yolo silences every non-floor rule (2026-11-17: destructiveConfirm
+  // left YOLO_FLOOR by user direction, global allow-all): the fixture keeps
+  // H2 at error for this suite, so normal mode still confirms; under yolo
+  // the whole H2 family silences — git-family and non-git alike
   {
     const loader = await import("../../extensions/permission-gate/loader.ts");
     const git = "git reset --hard HEAD~1";
@@ -312,10 +317,55 @@ async function runGateChild(wbOff) {
       const g = await bash(git, inCwd);
       check("g11 yolo: git-family ask is auto-approved", g === "bash ok", g);
       const d = await bash(rmf, inCwd);
-      check("g11 yolo: non-git destructive still confirms", d.startsWith("BLOCKED: Permission Gate (Destructive)"), d);
+      check(
+        "g11 yolo: non-git destructive still confirms (boundary re-armed 2026-11-18)",
+        d.startsWith("BLOCKED: Permission Gate (Destructive)"),
+        d,
+      );
     } finally {
       loader.setYolo(false);
     }
+  }
+
+  // g12 — tmp allowance (user direction 2026-11-19): the PGATE_TMP_ROOTS
+  // trees carry no write permission — new writes, overwrites, edits, and
+  // subagent redirects all pass; the write-then-execute seam still confirms
+  {
+    const r = await write("piwrite", join(allow, "a.md"), "alpha", inCwd, true);
+    check("g12 piwrite tmp-root target passes (allowlisted)", r === "write ok", r);
+    const r2 = await write("piwrite", join(allow, "a.md"), "beta", inCwd, true);
+    check("g12b piwrite tmp-root overwrite passes (allowlisted)", r2 === "write ok", r2);
+    const p = join(allow, "e.md");
+    writeFileSync(p, "alpha\nbeta\n");
+    const re = await read("piread", p, inCwd);
+    const r3 = re === "read ok" ? await edit("piedit", p, [{ oldText: "beta", newText: "gamma" }], inCwd) : re;
+    check("g12c piedit tmp-root target passes (allowlisted)", r3 === "edit ok", r3);
+
+    const hadMarker = "PI_SUBAGENT_NAME" in process.env;
+    const prevMarker = process.env.PI_SUBAGENT_NAME;
+    process.env.PI_SUBAGENT_NAME = "scout";
+    try {
+      const rb = await bash(`printf hi > ${join(allow, "sub.txt")}`, inCwd);
+      check("g12d subagent bash redirect into tmp root passes", rb === "bash ok", rb);
+      const rc = await bash(`printf hi > ${join(tmpdir(), "wc-escape-d.txt")}`, inCwd);
+      check(
+        "g12d2 subagent bash redirect outside session/tmp allowance still blocks",
+        rc.startsWith("BLOCKED: Permission Gate (Destructive)") &&
+          (rc.includes("outside the session directory") || rc.includes("not permitted for subagents")),
+        rc,
+      );
+    } finally {
+      if (hadMarker) process.env.PI_SUBAGENT_NAME = prevMarker;
+      else delete process.env.PI_SUBAGENT_NAME;
+    }
+
+    const rw = await bash(`printf 'echo ok' > ${join(allow, "s.sh")}`, inCwd);
+    const rx = rw === "bash ok" ? await bash(`bash ${join(allow, "s.sh")}`, inCwd) : rw;
+    check(
+      "g12e write-then-execute from tmp root still confirms (planted-payload seam kept)",
+      rx.startsWith("BLOCKED: Permission Gate (Destructive)") && rx.includes("write-then-execute"),
+      rx,
+    );
   }
 
   console.log(failed === 0 ? `${ran}/${ran} gate checks PASS` : `${ran - failed}/${ran} gate checks PASS`);

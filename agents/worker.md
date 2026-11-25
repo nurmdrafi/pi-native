@@ -4,7 +4,7 @@ description: General-purpose worker — reads, writes, and edits code; fallback 
 tools: piwrite, piread, piedit, pibash
 skills: systematic-debugging, ponytail
 subagent_agents: scout, researcher
-thinking: high
+thinking: medium
 system-prompt: append
 auto-exit: true
 budget: none

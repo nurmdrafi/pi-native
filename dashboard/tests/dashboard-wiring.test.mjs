@@ -367,7 +367,7 @@ describe("SubagentsTab outcome helpers", () => {
 });
 
 describe("snapshot cache", () => {
-  it("second GET within the poll window is served from the cycle cache", async () => {
+  it("GET inside a fresh poll window is served from the cycle cache", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dash-cache-"));
     const server = join(here, "..", "scripts", "dashboard.mjs");
     const child = spawn(process.execPath, [server], {
@@ -389,16 +389,32 @@ describe("snapshot cache", () => {
       child.on("exit", () => rejectPromise(new Error("server exited early")));
     });
     try {
-      const first = await fetch(`${url}/api/sessions`);
-      const second = await fetch(`${url}/api/sessions`);
-      assert.equal(first.headers.get("x-snapshot-cache"), "miss");
-      assert.equal(second.headers.get("x-snapshot-cache"), "hit");
-      const a = await first.json();
-      const b = await second.json();
-      assert.equal(Array.isArray(a.sessions), true);
-      // A concurrent boot cycle may rebuild between the two GETs; the cache
-      // contract is freshness (same poll window), not byte identity.
-      assert.ok(Math.abs(Date.parse(b.generatedAt) - Date.parse(a.generatedAt)) < 5_000);
+      // The server only promises a hit while the poll window is fresh
+      // (POLL_MS); under suite load more than POLL_MS can pass between two
+      // GETs — or the boot cycle can land first — and the next GET then
+      // legitimately rebuilds. Every miss refreshes the window, so a working
+      // cache must serve a hit on one of a few back-to-back GETs; a cache
+      // that never hits exhausts the budget and fails.
+      const POLL_MS = 5_000;
+      const ATTEMPTS = 6;
+      let prev = null;
+      let sawHit = false;
+      for (let i = 0; i < ATTEMPTS && !sawHit; i++) {
+        const res = await fetch(`${url}/api/sessions`);
+        const body = await res.json();
+        assert.equal(Array.isArray(body.sessions), true);
+        if (prev) {
+          // A concurrent cycle may rebuild between GETs; the cache contract
+          // is freshness (same poll window), not byte identity.
+          assert.ok(
+            Math.abs(Date.parse(body.generatedAt) - Date.parse(prev.generatedAt)) < POLL_MS,
+            "consecutive GETs must agree within one poll window",
+          );
+        }
+        prev = body;
+        sawHit = res.headers.get("x-snapshot-cache") === "hit";
+      }
+      assert.ok(sawHit, `no cache hit in ${ATTEMPTS} back-to-back GETs`);
     } finally {
       child.kill();
       rmSync(dir, { recursive: true, force: true });

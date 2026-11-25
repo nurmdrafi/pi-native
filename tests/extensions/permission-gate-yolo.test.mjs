@@ -12,36 +12,34 @@ import {
 } from "../../extensions/permission-gate/loader.ts";
 
 /** /yolo (session-scoped permission bypass): every gate decision flows
- * through ruleEnabled/ruleSeverity/ruleBlocks. Industry floor (Claude Code
- * bypassPermissions keeps protected-path write confirms + deny rules even in
- * bypass mode; Gemini/Codex full-auto only inside a sandbox): the bypass
- * silences preference/hygiene rules and per-action asks, but the
- * destructiveConfirm ladder — catastrophic commands, protected trees
- * (/etc /usr /var /boot /root, ~/.ssh, ~/.gnupg, rc files), out-of-cwd
- * write confinement — must keep blocking while yolo is on. */
+ * through ruleEnabled/ruleSeverity/ruleBlocks. destructiveConfirm re-armed
+ * 2026-11-18 by owner direction (audit A1): H2 ships "error" in config.json,
+ * sits in HARD_RULES (unlowerable) and in YOLO_FLOOR — the bypass cannot
+ * silence it. commitMessageLint keeps the same floor. */
 
 test("yolo is off by default and the safety floor blocks", () => {
   assert.equal(yoloActive(), false);
-  assert.equal(ruleBlocks("destructiveConfirm"), true);
+  assert.equal(ruleBlocks("commitMessageLint"), true);
   assert.equal(ruleEnabled("commitMessageLint"), true);
 });
 
 test("yolo floor is a subset of HARD_RULES and names the kept gates", () => {
-  assert.deepEqual([...YOLO_FLOOR], ["destructiveConfirm", "commitMessageLint"]);
+  assert.deepEqual([...YOLO_FLOOR], ["commitMessageLint", "destructiveConfirm"]);
   for (const key of YOLO_FLOOR) assert.ok(HARD_RULES.has(key), `${key} must be a HARD_RULE`);
+  // destructiveConfirm re-entered both floors 2026-11-18 (audit A1):
+  // unlowerable below error, and yolo cannot silence it
+  assert.equal(HARD_RULES.has("destructiveConfirm"), true);
 });
 
 test("setYolo(true) silences every non-floor rule; floor still blocks", () => {
   const before = { ...config.severity };
   assert.equal(setYolo(true), true);
   assert.equal(yoloActive(), true);
-  // floor: destructive confirm keeps its bite in yolo, except its
-  // git-family entries (auto-approve under the bypass); the commit
-  // message gate stays enforced too (user direction 2026-11-12)
-  assert.equal(ruleBlocks("destructiveConfirm"), true);
-  assert.equal(ruleEnabled("destructiveConfirm"), true);
-  assert.equal(ruleSeverity("destructiveConfirm"), "error");
+  // floor: the commit message gate stays enforced under yolo
   assert.equal(ruleBlocks("commitMessageLint"), true);
+  // floor: destructiveConfirm (re-armed 2026-11-18, audit A1) stays armed
+  // under yolo — shipped "error" in config.json and floored
+  assert.equal(ruleBlocks("destructiveConfirm"), true);
   // everything else reads off: preference rules, hygiene
   assert.equal(ruleBlocks("reReadGuard"), false);
   assert.equal(ruleSeverity("editAnchorGuard"), "off");
@@ -53,7 +51,6 @@ test("setYolo(false) restores full behavior exactly", () => {
   setYolo(true);
   assert.equal(setYolo(false), false);
   assert.equal(yoloActive(), false);
-  assert.equal(ruleBlocks("destructiveConfirm"), true);
-  assert.equal(ruleEnabled("commitMessageLint"), true);
+  assert.equal(ruleBlocks("commitMessageLint"), true);
   assert.equal(ruleSeverity("editAnchorGuard"), config.severity.editAnchorGuard);
 });

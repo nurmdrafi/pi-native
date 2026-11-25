@@ -18,17 +18,17 @@ Run once → evidence shows WHERE it breaks
 Example (multi-layer):
 ```bash
 # Layer 1: Workflow
-echo "=== Secrets available in workflow: ==="
+# Identity defined where it should be? (presence only, never the value)
 echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
 
 # Layer 2: Build script
-echo "=== Env vars in build script: ==="
-env | grep IDENTITY || echo "IDENTITY not in environment"
+# Did it survive export into the build step? (presence only, never the value)
+if [ -n "${IDENTITY:-}" ]; then echo "IDENTITY: SET"; else echo "IDENTITY: UNSET"; fi
 
 # Layer 3: Signing script
-echo "=== Keychain state: ==="
-security list-keychains
-security find-identity -v
+# Credential store reachable and holding a signing identity? Count only,
+# never print identities or store listings:
+security find-identity -v -p codesigning 2>/dev/null | grep -c . || echo "0 valid signing identities"
 
 # Layer 4: Actual signing
 codesign --sign "$IDENTITY" --verbose=4 "$APP"

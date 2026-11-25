@@ -7,6 +7,23 @@ dated entries above it.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.79.0] - 18-11-2026
+
+### Changed
+
+- **Tier 1 skill review.** Use the installed Ant Design CLI, validate post-login redirect paths, scope Playwright locators, document credential sources, link the test scaffold, distinguish generated audit outputs, and remove an unreviewed remote installer pipe. The frontend and Playwright gates still fail on partial scanner coverage; session audit remains incomplete.
+- **Evaluation workflow.** Document isolated SkillSpector setup with Python 3.13; estimate long work from observed steps and report partial work only when blocked or asked.
+- **Harness and PDF verification.** Show the thinking block and compare assembled Puppeteer PDFs against the original output before claiming parity.
+
+- **Permission-gate hardening, Phases 0–7 (audit A1–A15).** Re-armed the destructive confirm (H2 error, HARD_RULES + YOLO_FLOOR); body-judged inline interpreters and interpreter heredocs; osascript + write-then-execute /tmp signal; composition recipes in SE2/SS2/SS3 messages with 3-strike warn→block escalation; control-plane guard over the gate tree (write/edit/redirect/copy, session-start hash drift, gateless-spawn refusal); subagent gate briefs; deny-by-default tool loadouts with `tools: all` as the only unrestricted route.
+- **Phase 6: bash write-binding parity + approval hardening (A9/A12).** REDIRECT/TEE and copy destinations that are VCS-tracked or session-covered bind like write-tool targets (stat/hash drift blocks Stale; never-read tracked files block Unread); remembered approvals key on command + affected-path stats; APPROVAL_RE is negation-safe ("don't proceed" no longer approves); confirmed writes re-realpath at landing and error on symlink swap.
+- **Code-review fixes on the same range.** Relative redirects and cp/mv/install/rsync into protected trees now confirm (cwd-resolved); env/wrapper-prefixed execution of session-planted /tmp files hits the write-then-execute confirm; inline-body deletion vocabulary requires argument/call shapes (word-only prose no longer confirms); heredoc delimiters named like interpreters stay data; jq size bound resolves against the bash cwd; TS2532 fix in the jq bound check.
+
+### Added
+
+- **Standing rules for the top recurring gate families.** SYSTEM.md now carries condition+action+invariant rules for Anchor Guard (633 history blocks), re-reads (225), vendored-tree searches, reader discipline, bounded windows, and identical re-sends; AGENTS.md gains the model-agnostic rule standard and scopes /tmp scratch to parent sessions (subagents write inside their session dir).
+- **Harness lessons.** A4 composition gap, A6 node -e false positive, A15 dash-path args, H2 subject misattribution, /tmp-vs-subagent-confinement conflict — all recorded in lessons/harness.ndjson.
+
 ## [1.78.0] - 17-11-2026
 
 ### Changed

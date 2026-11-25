@@ -8,6 +8,9 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { textBlocks, lineText, read, edit, editApplied, editsApplied, bash, pibash, write, denyUi, tmp, nextId } from "../../harness/helpers.mjs";
+// yolo seam (Phase 0 re-arm, audit A1): the floor lives in loader.ts; a case
+// that toggles it MUST restore it — the runner runs every case in one process.
+import { setYolo } from "../../../../extensions/permission-gate/loader.ts";
 
 export const cases = [
   // ---- H2 (2026-10-08, suite t08/t09 evidence): destructive confirm ----
@@ -42,6 +45,51 @@ export const cases = [
         mode: "tui",
         ui: { confirm: async () => false },
       }),
+  ],
+  // ---- Phase 0 (2026-11-18, audit A1): H2 re-armed — explicit rm -rf payloads
+  [
+    "H2: rm -rf payload without UI fails closed",
+    "blocked",
+    async (pi) => bash(pi, "rm -rf /tmp/gate-h2-rearm", { hasUI: false, mode: "print" }),
+  ],
+  [
+    "H2: rm -rf with UI denial is blocked",
+    "blocked",
+    async (pi) =>
+      bash(pi, "rm -rf /tmp/gate-h2-rearm", {
+        hasUI: true,
+        mode: "tui",
+        ui: { confirm: async () => false },
+      }),
+  ],
+  // ---- Phase 0 (audit A1): yolo cannot silence the floored confirm ----
+  [
+    "H2/yolo: yolo ON cannot silence the destructive confirm",
+    "blocked",
+    async (pi) => {
+      setYolo(true);
+      try {
+        return await bash(pi, "rm -rf /tmp/gate-h2-rearm", { hasUI: false, mode: "print" });
+      } finally {
+        setYolo(false); // module-global: restore or every later case runs yolo
+      }
+    },
+  ],
+  [
+    "H2/yolo: commitlint stays floored while yolo is on",
+    "blocked",
+    async (pi) => {
+      setYolo(true);
+      try {
+        const r = await bash(pi, 'git commit -m "bad message"', {
+          hasUI: false,
+          mode: "print",
+        });
+        return r.blocked && r.reason.startsWith("Commitlint") ? r : { blocked: false };
+      } finally {
+        setYolo(false);
+      }
+    },
   ],
   [
     "H2: approved destructive re-send skips re-confirm (2 min window)",
@@ -239,6 +287,31 @@ export const cases = [
     "non-destructive: plain loop body passes",
     "pass",
     async (pi) => bash(pi, 'for s in a b; do echo "$s"; done'),
+  ],
+  // ---- 2026-11-22 harness-watch misfire: read-only jq blocked as mutating ----
+  // jq programs are single-quoted literal data; ($x|fn) grouping there is jq
+  // syntax, not a subshell running $x. The $VAR command-word judge must not
+  // see inside single quotes (command position never occurs there).
+  [
+    "non-destructive: jq def with ($x|fn) grouping passes",
+    "pass",
+    async (pi) =>
+      bash(pi, "jq -s 'def p50: sort as $s | ($s|length) as $n | 3' out.ndjson", denyUi()),
+  ],
+  [
+    "non-destructive: jq as-$t pipeline with ($t|match) passes",
+    "pass",
+    async (pi) =>
+      bash(
+        pi,
+        'jq -r \'select(.type=="message") | (.message.content|tostring) as $t | ($t|match("pane")) .ts\' log.jsonl',
+        denyUi(),
+      ),
+  ],
+  [
+    "H2: unquoted $VAR command word still fails closed",
+    "blocked",
+    async (pi) => bash(pi, "$CMD target", denyUi()),
   ],
   [
     "non-destructive: bash -c echo passes",
@@ -820,34 +893,56 @@ export const cases = [
       bash(pi, "git log --grep python3 -c", { hasUI: false, mode: "print" }),
   ],
   [
+    "H2/R7: confirm subject names the offending segment, not the command head",
+    "blocked",
+    async (pi) => {
+      const r = await bash(pi, "ls; git reset --hard canary-doc", {
+        hasUI: false,
+        mode: "print",
+      });
+      return r.blocked && r.reason.includes("'git reset --hard")
+        ? r
+        : { blocked: false, reason: `subject misattributed: ${(r.reason || "").slice(0, 120)}` };
+    },
+  ],
+  // ---- Phase 2 (2026-11-18 audit, A6): the interp tripwire judges the
+  // BODY — the position pins below carry destructive bodies so they still
+  // pin command-position anchoring; benign bodies now pass wherever their
+  // stdout lands (write-then-execute covers the planted-file follow-up) ----
+  [
     "16.3 interp inline: node -e at segment start confirms",
     "blocked",
-    async (pi) => bash(pi, 'node -e "console.log(1)"', denyUi()),
+    async (pi) => bash(pi, 'node -e "rmSync(\'x\')"', denyUi()),
   ],
   [
     "16.3 interp inline: after a separator confirms",
     "blocked",
-    async (pi) => bash(pi, "ls; node -e x", denyUi()),
+    async (pi) => bash(pi, 'ls; node -e \'rmSync("x")\'', denyUi()),
   ],
   [
     "16.3 interp inline: inside a command substitution confirms",
     "blocked",
-    async (pi) => bash(pi, "echo $(node -e x)", denyUi()),
+    async (pi) => bash(pi, "echo $(node -e 'rmSync(\"x\")')", denyUi()),
   ],
   [
     "16.3 interp inline: backtick substitution confirms",
     "blocked",
-    async (pi) => bash(pi, "echo `perl -e x`", denyUi()),
+    async (pi) => bash(pi, "echo `perl -e 'system(\"rm -rf /tmp/x\")'`", denyUi()),
   ],
   [
     "16.3 interp inline: env-prefixed python -c confirms",
     "blocked",
-    async (pi) => bash(pi, "FOO=1 python3 -c 'print(1)'", denyUi()),
+    async (pi) => bash(pi, 'FOO=1 python3 -c \'import os; os.remove("x")\'', denyUi()),
   ],
   [
     "16.3 interp inline: sudo-wrapped node -e confirms",
     "blocked",
-    async (pi) => bash(pi, "sudo node -e x", denyUi()),
+    async (pi) => bash(pi, 'sudo node -e \'rmSync("x")\'', denyUi()),
+  ],
+  [
+    "16.4 interp body: benign node -e arithmetic to /tmp passes",
+    "pass",
+    async (pi) => bash(pi, "node -e '1+1' > /tmp/fp.js", { hasUI: false, mode: "print" }),
   ],
   [
     "interp scratch: node -e writing under .cache is allowed",
@@ -855,8 +950,95 @@ export const cases = [
     async (pi) => bash(pi, "node -e 'x' > .cache/out.jsonl", denyUi()),
   ],
   [
-    "interp scratch: node -e writing into the tree still confirms",
-    "blocked",
+    "16.4 interp body: benign body writing into the tree passes (A6)",
+    "pass",
     async (pi) => bash(pi, "node -e 'x' > src/generated.ts", denyUi()),
+  ],
+  // ---- Phase 2 (audit A7): interpreter heredocs — the body is code ----
+  [
+    "P2 heredoc: python heredoc body with shutil.rmtree confirms",
+    "blocked",
+    async (pi) =>
+      bash(
+        pi,
+        "python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/tmp/victim')\nEOF",
+        denyUi(),
+      ),
+  ],
+  [
+    "P2 heredoc: benign python heredoc body passes",
+    "pass",
+    async (pi) =>
+      bash(pi, "python3 - <<'EOF'\nprint(sum(range(10)))\nEOF", {
+        hasUI: false,
+        mode: "print",
+      }),
+  ],
+  // ---- Phase 2 (audit A13 partial): osascript -e joins the tripwire ----
+  [
+    "P2 osascript: -e Finder delete confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, 'osascript -e \'tell application "Finder" to empty trash\'', denyUi()),
+  ],
+  // ---- Phase 2 (audit A6): write-then-execute session signal ----
+  [
+    "P2 write-then-execute: running a session-written /tmp script confirms",
+    "blocked",
+    async (pi) => {
+      const w = await bash(pi, "printf 'rm -rf /tmp/x' > /tmp/fp-p2.js", {
+        hasUI: false,
+        mode: "print",
+      });
+      if (w.blocked) return { blocked: false, reason: `write step blocked: ${w.reason}` };
+      return bash(pi, "bash /tmp/fp-p2.js", denyUi());
+    },
+  ],
+  [
+    "P2 write-then-execute: re-reading a session-written /tmp file passes",
+    "pass",
+    async (pi) => {
+      const w = await bash(pi, "printf 'rm -rf /tmp/x' > /tmp/fp-p2b.js", {
+        hasUI: false,
+        mode: "print",
+      });
+      if (w.blocked) return w;
+      return bash(pi, "cat /tmp/fp-p2b.js", { hasUI: false, mode: "print" });
+    },
+  ],
+  // ---- 2026-11-18 code review (findings 1-3): control-plane relative/copy
+  // lanes and prefixed execution. Shapes chosen so an UNGUARDED regression
+  // run fails harmlessly (absent parent dir / absent source / benign payload) ----
+  [
+    "P4/R1: relative redirect into the gate tree confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, "echo x > extensions/permission-gate/no-such-dir/canary", {
+        hasUI: false,
+        mode: "print",
+        cwd: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."),
+      }),
+  ],
+  [
+    "P4/R2: cp into the gate tree confirms",
+    "blocked",
+    async (pi) =>
+      bash(pi, "cp /no-such-src extensions/permission-gate/config.json", {
+        hasUI: false,
+        mode: "print",
+        cwd: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."),
+      }),
+  ],
+  [
+    "W2E/R3: env-prefixed run of a session-planted /tmp script confirms",
+    "blocked",
+    async (pi) => {
+      const w = await bash(pi, "printf 'echo hi' > /tmp/fp-r3.js", {
+        hasUI: false,
+        mode: "print",
+      });
+      if (w.blocked) return { blocked: false, reason: `write step blocked: ${w.reason}` };
+      return bash(pi, "FOO=1 /tmp/fp-r3.js", denyUi());
+    },
   ],
 ];

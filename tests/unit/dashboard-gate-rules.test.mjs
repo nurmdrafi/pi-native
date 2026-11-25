@@ -76,7 +76,7 @@ test("every configured rule has a human name, its id and a group", () => {
   // config.json lists rules by ID ("AG2") since 2d20d22; meta and RULE_IDS
   // key on the canonical names, so normalize before checking.
   const keys = Object.keys(gateConfig.rules).map(canonicalRuleKey);
-  assert.equal(keys.length, 31, "the gate ships 31 rules");
+  assert.equal(keys.length, 32, "the gate ships 32 rules");
   const missing = keys.filter((k) => !GATE_RULE_META[k]);
   assert.deepEqual(missing, [], `no dashboard meta for: ${missing.join(", ")}`);
   const drifted = keys.filter((k) => GATE_RULE_META[k].code !== RULE_IDS[k]);

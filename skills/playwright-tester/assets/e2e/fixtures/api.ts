@@ -40,7 +40,7 @@ export async function getToken(page: Page): Promise<string> {
 
 export async function refreshAuth(page: Page): Promise<void> {
   // ADAPT: the app's login endpoint + credentials source.
-  // Credentials from E2E_EMAIL / E2E_PASSWORD env or .env.local — never hardcode.
+  // Credentials must be supplied in E2E_EMAIL / E2E_PASSWORD — never hardcode.
   const { email, password } = getCredentials()
   await page.evaluate(
     async ({ email, password }) => {
@@ -61,7 +61,7 @@ function getCredentials(): { email: string; password: string } {
   const email = process.env.E2E_EMAIL
   const password = process.env.E2E_PASSWORD
   if (email && password) return { email, password }
-  throw new Error("E2E_EMAIL / E2E_PASSWORD not set (env or .env.local)")
+  throw new Error("E2E_EMAIL / E2E_PASSWORD not set in environment")
 }
 
 // Lesson: APIs sometimes serialize nested objects as JSON strings (string

@@ -3,7 +3,7 @@ name: sentry-triage
 description: Sentry issue triager — pulls unresolved issues from the self-hosted Sentry (org from SENTRY_ORG in the secrets env), maps stacktraces to repo code, ships failing-test-first fixes, resolves when the token allows (read-only token → fixed-not-resolved + manual-resolve URL), appends NDJSON audit; use for any Sentry issue task instead of worker
 tools: piwrite, piread, piedit, pibash
 skills: sentry
-thinking: max
+thinking: high
 system-prompt: append
 auto-exit: true
 budget: none

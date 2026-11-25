@@ -172,8 +172,10 @@ function render(runs) {
     lines.push(`| ${v} | ${fmt(med[v])} | ${d >= 0 ? "+" : ""}${fmt(d)} (${d >= 0 ? "+" : ""}${pct}%) |`);
   }
   lines.push("");
-  lines.push(`- **H1 (codemode overhead):** codemode median ${med.codemode} vs direct ${db} = +${fmt(med.codemode - db)} tokens (${(((med.codemode - db) / db) * 100).toFixed(1)}%). Bulk tool output *does* stay out of conversation context, but the codemode schema/prompt fixed cost is real and net-positive at this task size.`);
-  lines.push(`- **H2 (direct re-entry):** direct spends its tokens on tool results re-entering context; its totals are the *lowest* here, so pure direct-call re-entry is cheaper than codemode orchestration for a small multi-step task. H2's premise (direct is costlier) is *not* supported at this scale.`);
+  if (med.codemode != null) {
+    lines.push(`- **H1 (codemode overhead):** codemode median ${med.codemode} vs direct ${db} = +${fmt(med.codemode - db)} tokens (${(((med.codemode - db) / db) * 100).toFixed(1)}%). Bulk tool output *does* stay out of conversation context, but the codemode schema/prompt fixed cost is real and net-positive at this task size.`);
+    lines.push(`- **H2 (direct re-entry):** direct spends its tokens on tool results re-entering context; its totals are the *lowest* here, so pure direct-call re-entry is cheaper than codemode orchestration for a small multi-step task. H2's premise (direct is costlier) is *not* supported at this scale.`);
+  }
   lines.push(`- **H3 (gate retry loops):** gate-block median ${med["gate-block"]} shows the commitlint hook fired and forced one re-plan (observed in session: blocked -> re-wrap -> re-commit). gate-on's mean is inflated by an r2 loop (33 turns); its median ${med["gate-on"]} is the fairer 'gate present, compliant' baseline.`);
   lines.push("");
   return lines.join("\n");

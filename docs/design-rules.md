@@ -57,7 +57,9 @@ behaviour on the next action: a rule, an obligation, or a tool-calling instructi
 Inventories, pointers ("lives in X"), purpose statements, rationale and cross-
 references do not qualify; they live in a scoped doc and are read on demand. A
 conditional load instruction ("before X, apply Y") does qualify: it changes the
-next action, and its doc path is the trigger.
+next action, and its doc path is the trigger. `AGENTS.md`'s Doc index qualifies
+the same way: each entry pairs a trigger topic with its doc path, so a scoped
+doc is read only when its topic comes up.
 
 Loaded on demand, never always-on (the links used to sit in AGENTS.md, where they
 cost every project's prefix for rules only this harness needs):

@@ -28,6 +28,8 @@ const readers = [
   ["cat", `cat ${FILE}`],
   ["head", `head -n 2 ${FILE}`],
   ["tail", `tail -n 2 ${FILE}`],
+  ["tail wide bytes", `tail -c 400 ${FILE}`],
+  ["head one byte", `head -c 1 ${FILE}`],
   ["sed -n", `sed -n '1,2p' ${FILE}`],
 ];
 
@@ -52,6 +54,8 @@ const allowed = [
   ["a concatenation write", `cat ${FILE} ${FILE} > ${FILE}.out`],
   ["an append write", `cat ${FILE} >> ${FILE}.out`],
   ["a sed extract write", `sed -n '1,2p' ${FILE} > ${FILE}.out`],
+  ["the one-byte newline probe", `tail -c 1 ${FILE}`],
+  ["the append-guard composite", `printf 'x' >> ${FILE}.out; tail -c 1 ${FILE}.out`],
 ];
 
 for (const [shape, command] of allowed) {

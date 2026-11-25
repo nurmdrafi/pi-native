@@ -22,7 +22,7 @@ base=$(git rev-parse --verify --quiet @{push})  # empty = branch not on remote y
 
 Skip, same as CI: tag push, head commit message contains `[skip review]`, empty diff.
 
-Then freeze the scope: `git diff "$base"...HEAD > /tmp/code-review.diff` (uncommitted: `git diff HEAD > /tmp/code-review.diff`), print `wc -c` and the file count, and review only from that file.
+Then freeze the scope in a private temp file — the diff can carry secrets, so never a fixed `/tmp` name: `diff_file=$(mktemp "${TMPDIR:-/tmp}/code-review.XXXXXX")`, then `git diff "$base"...HEAD > "$diff_file"` (uncommitted: `git diff HEAD > "$diff_file"`); mktemp's 0600 mode and unguessable name defeat world-readable leaks and pre-planted symlink clobbers. Print `wc -c` and the file count, review only from that file, and `rm -f "$diff_file"` when the review ends.
 
 ## 2. Scope
 
@@ -34,7 +34,7 @@ Apply [review-prompt.md](references/review-prompt.md) verbatim as the rubric.
 
 Mechanics — a truncated or skimmed diff is the main way this review silently misses bugs:
 
-- Read the diff file end-to-end in windows until EOF; never judge from a single console `git diff`, which truncates.
+- Read the diff file end-to-end in windows until EOF; a single console `git diff` truncates — review only from the full file.
 - Review one file chunk at a time; record each finding immediately in the exact six-field shape below.
 - `line` comes from the `@@` header's new-side start plus offset — arithmetic, not eyeball.
 - When a hunk swaps one call form for another (wrapper adoption, migration, rename sweep), compare the removed call's arguments/config against the replacement field-by-field — dropped headers, params, and error handling live only in the `-` lines and look fine in the `+` lines.
@@ -49,7 +49,7 @@ Read the whole function around a hunk when the hunk alone doesn't decide a findi
 
 ## 4. Report and fix loop
 
-Report all findings, high first: `file:line`, title, detail, suggestion; end with the summary. Then STOP — show the findings and wait for explicit user approval; never start the fix loop unprompted. Once approved, fix every finding regardless of severity — including `low` — re-run this review on the same range, repeat until zero findings remain — then push.
+Report all findings, high first: `file:line`, title, detail, suggestion; end with the summary. Then STOP — show the findings and wait for explicit user approval; never start the fix loop unprompted. Once approved, fix every finding regardless of severity — including `low` — re-run this review on the same range, repeat until zero findings remain; the review ends there and the user pushes.
 
 Deleted-control finding (removed scan, gate, or workflow, e.g. gitleaks CI) where the removal is intentional: the fix is documenting the replacement control in the CHANGELOG/PR and sweeping stale claims that the old control still runs — the whole-workflow removal procedure lives in the github-actions skill — not silently restoring or silently dropping it.
 

@@ -1,9 +1,13 @@
 ---
 name: frontend-design
-description: "Build NEW web components/pages/apps from scratch. Detects UI stack (Ant Design, shadcn/Tailwind, vanilla), audits sibling components + tokens, extends established idioms. NOT editing/fixing/polishing existing UI (→ refactoring-ui) or logic-only changes with no new markup."
+description: "Build new web UI (components/pages/apps) in the detected stack (Ant Design, shadcn/Tailwind, vanilla), extending established idioms. Use when creating new UI; NOT editing existing UI (refactoring-ui)."
 license: Complete terms in LICENSE.txt
+metadata:
+  tags: [frontend, ui, design, react, tailwind, antd]
 disable-model-invocation: true
 ---
+
+# Frontend Design
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/frontend-design`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
 
@@ -12,6 +16,14 @@ Build distinctive, production-grade frontend interfaces; avoid generic "AI slop"
 Input: frontend requirements — component/page/app/interface; maybe purpose, audience, constraints.
 
 Scope steering: `/skill:frontend-design antd` / `shadcn` / `greenfield` — read only the matching reference.
+
+## Instructions
+
+1. Pattern Audit first — it decides extending vs greenfield and overrides every aesthetic directive.
+2. Read the matching stack reference (below) before writing component code.
+3. Apply the logic guards and runtime-robustness rules to any new UI; environment-access rules when reading config/env.
+4. Greenfield only: Design Thinking, then Aesthetics Guidelines.
+5. New framework: add a reference file under `references/` + one router row in Stack Adaptation.
 
 ## Pattern Audit (MANDATORY FIRST — overrides every aesthetic directive below)
 
@@ -32,11 +44,11 @@ Before any UI: **extending** existing design system or **creating from scratch**
 
 Detect UI stack from `package.json` + existing components; express design through that stack's idioms — never impose foreign style system. Read the matching reference BEFORE writing component code:
 
-- **Ant Design**: [references/ant-design.md](references/ant-design.md) — version matrix (v4/v5/v6), CLI-first API lookup (`npx @ant-design/cli info`), theming ladder, form/table logic guards, v6 renames.
+- **Ant Design**: [references/ant-design.md](references/ant-design.md) — version matrix (v4/v5/v6), API lookup via the installed CLI, theming ladder, form/table logic guards, v6 renames.
 - **shadcn/ui + Tailwind**: [references/shadcn-tailwind.md](references/shadcn-tailwind.md) — `components.json` detection, project context via CLI, Base UI vs Radix primitives, Tailwind v3/v4 token detection, composition rules.
 - **Vanilla/other**: no established idioms → full aesthetic freedom below.
 - Mixed stacks: read both references; check Tailwind reset against AntD styles before mixing.
-- Security headers (middleware CSP): [references/csp.md](references/csp.md) — goal: env-only CSP ops (restart, never rebuild); required `CSP_ORIGINS` allowlist, `CSP_MODE`/`SENTRY_CSP_REPORT_ENDPOINT` contract, runtime delivery + member-access rules, boot-dead validation, allowlist script-src (no nonce/strict-dynamic — next dev blocks), deck.gl eval caveat, report-only rollout; primer: <https://web.dev/articles/csp>.
+- Security headers (middleware CSP): [references/content-security-policy.md](references/content-security-policy.md) — goal: env-only CSP ops (restart, never rebuild); required `CSP_ORIGINS` allowlist, `CSP_MODE`/`SENTRY_CSP_REPORT_ENDPOINT` contract, runtime delivery + member-access rules, boot-dead validation, allowlist script-src (no nonce/strict-dynamic — next dev blocks), deck.gl eval caveat, report-only rollout; primer: <https://web.dev/articles/csp>.
 - Existing-UI polish/audit/critique (not new build) → impeccable skill: `/skill:impeccable <command>`; full source clone `git/impeccable`.
 
 Match existing patterns before introducing new ones. New framework = new file under `references/` + one router row here.
@@ -45,6 +57,7 @@ Match existing patterns before introducing new ones. New framework = new file un
 
 - Mutating routes/admin panels: permission gating from day one.
 - Fetch-on-selection effects: staleness guard + `.catch` + clear list while refetching (out-of-order responses never repaint old entity's data).
+- Dependent-select hierarchies (drill-down ladders like channel > business unit > category): ship them sequential — a child select stays disabled until the level above holds a real pick ('all' counts); clearing a level clears every pick below it and re-locks the children.
 - Bulk-edit forms: open empty or track touched fields — pre-filled field makes every `values.x ?? o.x` fallback dead code.
 - Conditional visibility: check polarity + DEFAULT state of every span/collapse condition before shipping.
 - Framework-specific guards (AntD forms/tabs/tables): [references/ant-design.md](references/ant-design.md).
@@ -105,3 +118,9 @@ Interpret creatively, unexpected context-designed choices. No two designs same. 
 Match implementation complexity to vision: maximalist = elaborate code, extensive animations/effects; minimalist = restraint, precision, spacing/typography/subtle detail. Elegance = executing vision well.
 
 Don't hold back — commit fully to distinctive vision.
+
+## Examples
+
+- `/skill:frontend-design antd` — new admin table page in an Ant Design repo: Pattern Audit extends existing table/form idioms; verify Table props against the installed Ant Design version before writing code.
+- `/skill:frontend-design shadcn` — new marketing section on shadcn/Tailwind: detect `components.json` + Tailwind version tokens, compose from installed primitives.
+- `/skill:frontend-design greenfield` — no existing UI: full design-language extraction, then Design Thinking + Aesthetics Guidelines.

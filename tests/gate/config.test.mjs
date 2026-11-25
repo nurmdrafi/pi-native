@@ -127,6 +127,7 @@ test("rule IDs are unique", () => {
 // Tracked-policy allowlist: rules the shipped config.json deliberately
 // turns off (user direction — teaching layers whose block tier the user
 // disabled, and locate-first certification disabled 2026-11-04 c4eaa82).
+// destructiveConfirm left this list 2026-11-18 (audit A1 re-arm): ships error.
 // Everything else ships warn/error; an off outside this list is
 // config drift the test below catches.
 const SHIPPED_OFF = ["editAnchorGuard", "editRegionGuard", "locateFirst"];
@@ -327,7 +328,7 @@ test("ruleEnabled/ruleBlocks expose the warn-vs-error distinction", () => {
     import { ruleEnabled, ruleBlocks } from ${JSON.stringify(LOADER)};
     process.stdout.write(JSON.stringify({
       warn: [ruleEnabled("rerunGuard"), ruleBlocks("rerunGuard")],
-      error: [ruleEnabled("destructiveConfirm"), ruleBlocks("destructiveConfirm")],
+      error: [ruleEnabled("commitMessageLint"), ruleBlocks("commitMessageLint")],
     }));
   `;
   const res = runLoader(script);
@@ -410,9 +411,14 @@ test("R1x error tier: PGATE_RE_READ_CONSUME=2 blocks a >=50% overlap re-read at 
 test("safety rules cannot be configured away", () => {
   // editAnchorGuard left HARD_RULES 2026-10-28: the edit pipeline enforces
   // oldText correctness, so AG is config-controlled teaching, not a clamp.
+  // destructiveConfirm re-entered HARD_RULES 2026-11-18 (audit A1, owner
+  // direction): unlowerable below error — the confirm boundary is back.
+  // commitMessageLint stays floored as before.
   const { config } = loadConfig({}, { editAnchorGuard: "off", destructiveConfirm: "off" });
   assert.equal(config.severity.editAnchorGuard, "off", "anchor guard is config-controlled (demoted from hard)");
   assert.equal(config.severity.destructiveConfirm, "error", "destructive confirm must not be disableable");
+  const floored = loadConfig({}, { commitMessageLint: "off" });
+  assert.equal(floored.config.severity.commitMessageLint, "error", "commit message lint must not be disableable");
 });
 
 test("rule IDs match the documented README rule table", () => {

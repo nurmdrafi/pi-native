@@ -76,7 +76,8 @@ export const RULE_IDS = {
    *  8KB truncate to head, full text spilled. */
   readOutputCap: "H1b",
   /** Bash (destructive confirm) — H2: sudo/rm/forced git/package installs/
-   *  DB drops need approval; safety floor — cannot configure below "error". */
+   *  DB drops need approval; config-controlled since 2026-11-17 (user
+   *  direction, global allow-all) — shipped "off". */
   destructiveConfirm: "H2",
   /** Git (commit lint) — R9: `git commit -m` checked against the commitlint
    *  pattern; safety floor — cannot configure below "error". */
@@ -111,6 +112,10 @@ export const RULE_IDS = {
   /** Hygiene (reader-bypass) — SE2: a read-position `cat`/`sed -n`/`head`/`tail`
    *  reading a file blocks; the reason names the piread call that replaces it. */
   readerBypass: "SE2",
+  /** Token Economy (batching) — TE1: 5 consecutive single-call assistant
+   *  turns ride a non-blocking batching-recipe note on the 5th turn's
+   *  tool_result; a batched turn resets the streak. Warn by contract. */
+  tokenEconomy: "TE1",
   /** Hygiene (view credit) — VC: printed lines of a mappable view command
    *  (head/tail/sed -n/cat) certify read spans; any non-"off" enables. */
   bashViewCredit: "VC",
@@ -158,10 +163,13 @@ export type Severity = "off" | "warn" | "error";
 /** Safety rules whose severity is never below `error`, whatever config says.
  * editAnchorGuard left this set 2026-10-28 by user direction: the edit
  * pipeline itself enforces oldText existence/uniqueness/overlap, so AG is
- * a teaching layer — warn notes carry the fix; content match decides. */
+ * a teaching layer — warn notes carry the fix; content match decides.
+ * destructiveConfirm re-entered this set 2026-11-18 by owner direction
+ * (audit A1): the approval boundary is re-armed — never below error,
+ * whatever config says, and yolo-proof via YOLO_FLOOR. */
 export const HARD_RULES: ReadonlySet<RuleKey> = new Set([
-  "destructiveConfirm",
   "commitMessageLint",
+  "destructiveConfirm",
 ] as RuleKey[]);
 
 
@@ -351,17 +359,17 @@ export const config: GateConfig = loadGateConfig();
  * stay on. */
 let yolo = false;
 
-/** Rules the /yolo bypass cannot silence: the destructiveConfirm ladder —
- * catastrophic commands (rm -rf /, mkfs, dd to a device), protected trees
- * (/etc /usr /var /boot /root, ~/.ssh, ~/.gnupg, shell rc files, systemd),
- * and out-of-cwd write confinement — plus the commit-message gate
- * (commitMessageLint). The git-family confirm entries are exempt from the
- * floor: they auto-approve under the bypass (segmentDestructiveExceptGit,
- * user direction 2026-11-12 — git commit itself keeps its gate here).
- * Same shape as HARD_RULES: a floor the mode cannot lower. */
+/** Rules the /yolo bypass cannot silence: the commit-message gate
+ * (commitMessageLint) and the destructive confirm (destructiveConfirm,
+ * re-floored 2026-11-18 by owner direction, audit A1 — yolo cannot silence
+ * the approval boundary). Under yolo the confirm ladder still runs with the
+ * except-git judge (segmentDestructiveExceptGit, user direction
+ * 2026-11-12): git-family asks auto-approve, every other destructive signal
+ * confirms as before. Same shape as HARD_RULES: a floor the mode cannot
+ * lower. */
 export const YOLO_FLOOR: ReadonlySet<RuleKey> = new Set([
-  "destructiveConfirm",
   "commitMessageLint",
+  "destructiveConfirm",
 ] as RuleKey[]);
 
 /** True while the `/yolo` bypass is active (this process, this session). */

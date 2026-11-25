@@ -6,9 +6,45 @@ import { execSync, spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { gate, textBlocks, read, edit, bash, runBash, runSearch, nestedBash, write, approveUi, denyUi, compact, tmp, fileA, fileInj, spanFile, hitRoot, hitApi, hugeFile, canary, stopCanary, canaryIntact, HARD_NET, gatedExec, canaryBlocked, nextId } from "../../harness/helpers.mjs";
 
 export const cases = [
+  // ---- P4 (2026-11-18, audit A2/A3): control-plane protection ----
+  [
+    "P4: piwrite into the gate tree is blocked without gate-maintenance approval",
+    "blocked",
+    async (pi) => {
+      const gateConfig = fileURLToPath(new URL("../../../../extensions/permission-gate/config.json", import.meta.url));
+      const r = await write(pi, gateConfig, "{\n}\n");
+      return r.blocked && /Control plane/.test(r.reason)
+        ? r
+        : { blocked: false, reason: `unexpected: ${r.blocked ? r.reason.slice(0, 80) : "passed"}` };
+    },
+  ],
+  [
+    "P4: chat affirmative naming gate maintenance approves the write",
+    "pass",
+    async (pi) => {
+      await pi.invoke("before_agent_start", { type: "before_agent_start", messageType: "user", prompt: "yes — approve gate maintenance for config.json" });
+      const gateConfig = fileURLToPath(new URL("../../../../extensions/permission-gate/config.json", import.meta.url));
+      await read(pi, gateConfig); // anchor guard: certify before overwrite
+      return write(pi, gateConfig, "{\n}\n"); // blocked here = test failure (apply:false — nothing lands)
+    },
+  ],
+  [
+    "P4: session_start hashes config+loader and persists the gate state",
+    "pass",
+    async () => {
+      const statePath = fileURLToPath(new URL("../../../../.cache/permission-gate-state.json", import.meta.url));
+      if (!existsSync(statePath)) return { blocked: true, reason: "state file missing" };
+      const st = JSON.parse(readFileSync(statePath, "utf8"));
+      const sha = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
+      const expect = sha(fileURLToPath(new URL("../../../../extensions/permission-gate/config.json", import.meta.url))) +
+        sha(fileURLToPath(new URL("../../../../extensions/permission-gate/loader.ts", import.meta.url)));
+      return st.gateFiles === expect && typeof st.ts === "number" ? { blocked: false } : { blocked: true, reason: `state mismatch: ${JSON.stringify(st).slice(0, 80)}` };
+    },
+  ],
   // ---- S4 (2026-10-15) live-shell canary suite (spec §5.3) — self-tests,
   // then every Step 2–4 destructive shape: gate-blocked, never executed,
   // canaries byte-identical throughout ----

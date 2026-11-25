@@ -534,6 +534,7 @@ export const GATE_RULE_META = {
   rerunGuard: { code: "R10", group: "tokens", label: "Identical re-run with no change since" },
   reblockEscalation: { code: "RB", group: "tokens", label: "Re-sending a blocked command escalates" },
   readerBypass: { code: "SE2", group: "tokens", label: "Read windows via piread, not cat/sed" },
+  tokenEconomy: { code: "TE1", group: "tokens", label: "Batch independent calls in one turn" },
   bashViewCredit: { code: "VC", group: "tokens", label: "View-command lines still credit read spans" },
   commitMessageLint: { code: "R9", group: "gate", label: "Commit message lint" },
   errorSwallow: { code: "SE1", group: "gate", label: "No '|| true' hiding a failure" },

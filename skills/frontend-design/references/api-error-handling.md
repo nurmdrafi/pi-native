@@ -350,6 +350,28 @@ const handleUnauthorized = (hadBearer: boolean) => {
 - Logout order: clear storage → clear cookies (awaited) → redirect last. Parallel 401s are safe only if the redirect is the final statement.
 - Route guards read cookies/storage at mount; a login path that writes the token without cookies will bounce navigation despite a valid token.
 
+### Validate the post-login destination
+
+Encoding `callbackUrl` does not validate it. In the login handler, pass the decoded query value, a trusted app origin (the browser's current origin or server configuration), and a predicate for allowed return routes. Navigate to the returned path after login; do not decode it again. This example drops the query and fragment and falls back to the home page.
+
+```ts
+function safeLoginCallback(
+  value: string | null,
+  appOrigin: string,
+  isAllowedPath: (path: string) => boolean,
+): string {
+  const fallback = '/'
+  if (!value) return fallback
+  const target = URL.parse(value, appOrigin)
+  if (!target || target.origin !== appOrigin) return fallback
+  const path = target.pathname
+  if (!path.startsWith('/') || path.startsWith('//')) return fallback
+  return isAllowedPath(path) ? path : fallback
+}
+```
+
+Use `URL.parse` where supported; on older runtimes use `new URL` and catch invalid input. Keep authentication pages out of the allowed routes to avoid login loops.
+
 ## 6. Last-resort nets
 
 ### Window-level hook

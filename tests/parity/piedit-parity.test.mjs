@@ -491,6 +491,10 @@ add("daemon: pre-aborted signal rejects like the one-shot path", async () => {
 // Same pin-at-module-top convention as tests/gate/region-warn.test.mjs.
 process.env.PGATE_EDIT_ANCHOR_GUARD = "warn";
 process.env.PGATE_EDIT_REGION_GUARD = "error";
+// H2 too: the shipped config turned destructiveConfirm off by user direction
+// (2026-11-17, global allow-all), which would leave the protected-path
+// block below vacuous — pin it at error for this contract like the anchors.
+process.env.PGATE_DESTRUCTIVE_CONFIRM = "error";
 const { freshGate } = await import("../gate/harness/stub.mjs");
 const GATE_CTX = { hasUI: true, mode: "tui", ui: { confirm: async () => true } };
 

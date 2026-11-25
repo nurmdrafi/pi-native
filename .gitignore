@@ -24,6 +24,9 @@ tmp/
 # Logs
 *.log
 
+# Reports
+reports/
+
 # macOS cruft
 ._*
 .DS_Store
@@ -69,3 +72,4 @@ benchmark/observability/events/
 # LinkedIn personal data (skill workspace; voice, logs, snapshots)
 /linkedin/
 .secrets/
+!skills/skillevaluator/scripts/setup.sh

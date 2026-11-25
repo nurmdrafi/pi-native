@@ -498,7 +498,7 @@ export function renderedCoverageFromBlocks(
 ): { spans: LineSpan[]; gaps: LineSpan[] } | undefined {
   const text = blocksToText(content);
   if (!text) return undefined;
-  const { lines } = stripTailNotice(text.split("\n"));
+  const { lines, truncated: hasTailNotice } = stripTailNotice(text.split("\n"));
   const omits: { at: number; lines: number }[] = [];
   const skip = new Set<number>();
   for (let i = 0; i < lines.length; i++) {
@@ -545,6 +545,19 @@ export function renderedCoverageFromBlocks(
   // final run onto winEnd and widens the gap before it. Widening only —
   // never certifies a line the walk had as covered; an over-run clamps.
   // Single-marker shapes only (the only cut compact() emits).
+  // AB-2 (2026-11-18 audit): widening is a compensation for join-dropped
+  // boundary blanks ONLY. A no-notice shortfall larger than that budget is
+  // window fiction — the requested window ran past EOF (winEnd = offset +
+  // limit - 1 names lines that do not exist), so folding it into the final
+  // gap marked rendered tail lines as elided and broke the structured fence
+  // below (walked.end was overwritten to winEnd+1), discarding the correct
+  // structured ranges on every EOF-overshooting compacted read (141/141
+  // corpus findings, rendered gap always wider than structured).
+  // The head-tail join can drop no more than the blank separators at the
+  // cut boundary (one per side); a notice proves the file continues past
+  // the rendered tail, so a notice-backed shortfall of any size stays a
+  // real anomaly and keeps widening (fail closed).
+  const JOIN_DROP_BUDGET = 2;
   const anchorEnd = (
     w: { spans: LineSpan[]; gaps: LineSpan[]; end: number },
   ): typeof w => {
@@ -555,7 +568,11 @@ export function renderedCoverageFromBlocks(
       w.end = winEnd + 1;
       return w;
     }
-    if (last.end < winEnd && w.gaps.length > 0) {
+    if (
+      last.end < winEnd &&
+      w.gaps.length > 0 &&
+      (hasTailNotice || winEnd - last.end <= JOIN_DROP_BUDGET)
+    ) {
       const delta = winEnd - last.end;
       const g = w.gaps[w.gaps.length - 1]!;
       const cut = g.end;

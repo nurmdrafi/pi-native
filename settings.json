@@ -1,16 +1,16 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
-  "lastChangelogVersion": "1.5.2",
+  "lastChangelogVersion": "1.6.0",
   "defaultProjectTrust": "always",
   "theme": "dark",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.3",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "modelThinkingLevels": {
     "deepseek/deepseek-flash": "off",
     "deepseek/deepseek-v4-pro": "off"
   },
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "defaultTools": [
     "-read",
     "-write",

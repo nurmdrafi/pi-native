@@ -67,7 +67,7 @@ Never claim success without asserting resulting page state — report actions, f
 Before writing selectors on dynamic app: wait for load, inspect rendered DOM (`page.content()`, `locator("button").all()`), screenshot. Selectors from rendered state, never source guesses.
 
 - Never assert an attribute component doesn't forward (`data-testid`, classes) — verify forwarding in live DOM first.
-- React StrictMode double-mounts duplicate ids → assert count-tolerantly (`>= n`) via `expect.poll`.
+- If a locator matches several elements, scope it to the intended region and verify the expected count. Do not relax a uniqueness check to work around duplicate controls; investigate duplicates that persist after rendering settles.
 - Visual identity in CSS (icons as `background-image`, glyphs): assert computed style, not child elements — host app must import every published stylesheet/entry point (a logo once "vanished" because test host never imported library's styles export).
 - Cap everything a recon/probe step returns before it lands in context: `JSON.stringify(x).slice(0, 500)` for `page.evaluate` dumps, `t=$(mktemp); <cmd> > "$t" 2>&1 || tail -20 "$t"` (tail only on failure — bare `| tail` masks exit code) on test-run output, `-o`/`| cut -c1-200` when grepping a library's `dist` — minified lines are megabytes; `head -N` bounds lines, not bytes.
 
@@ -79,7 +79,7 @@ Native canvas/gesture components (maps, drawings, editors) bind real container-l
 
 ## Scaffold
 
-Copy from `{baseDir}/assets/`: `playwright.config.ts`, `e2e/fixtures/*.ts` (`cdp`, `api`, `report`), `e2e/example.spec.ts`. E2e code lives in the target repo — inside its existing e2e directory when one exists (`e2e/`, `__tests__/e2e/`, `tests/e2e/`), else `e2e/` when scaffolding fresh. Chrome 155+: `connectOverCDP` must pass `{ noDefaults: true }` (default connect issues browser-level `Browser.setDownloadBehavior`, which Chrome 155+ rejects); the copied `cdp` fixture already does. Add `"e2e": "playwright test"` to package.json. Env: `E2E_APP_URL`, `E2E_AUTH_TOKEN_KEY`, `E2E_EMAIL`, `E2E_PASSWORD`, `E2E_ITERATIONS` — credentials never hardcoded. Adapt only `ADAPT` markers: selectors, endpoints, token key, server-managed fields.
+Copy the bundled [config](assets/playwright.config.ts), [CDP fixture](assets/e2e/fixtures/cdp.ts), [API fixture](assets/e2e/fixtures/api.ts), [report fixture](assets/e2e/fixtures/report.ts), and [example spec](assets/e2e/example.spec.ts), keeping their relative layout. E2e code lives in the target repo — inside its existing e2e directory when one exists (`e2e/`, `__tests__/e2e/`, `tests/e2e/`), else `e2e/` when scaffolding fresh. Chrome 155+: `connectOverCDP` must pass `{ noDefaults: true }` (default connect issues browser-level `Browser.setDownloadBehavior`, which Chrome 155+ rejects); the copied `cdp` fixture already does. Add `"e2e": "playwright test"` to package.json. Env: `E2E_APP_URL`, `E2E_AUTH_TOKEN_KEY`, `E2E_EMAIL`, `E2E_PASSWORD`, `E2E_ITERATIONS` — credentials never hardcoded. Adapt only `ADAPT` markers: selectors, endpoints, token key, server-managed fields.
 
 ## References
 

@@ -3,7 +3,7 @@ name: ui-verifier
 description: UI verification sweep — drives the running app via headless Chromium + CDP; verifies rendered behavior, never restarts the server or browser
 tools: ls, piread, pibash
 skills: browser-tools
-thinking: high
+thinking: medium
 system-prompt: append
 auto-exit: true
 budget: none
