@@ -86,9 +86,10 @@ even with the concurrency shim — rerun, or accept and rely on the keyless
 
 ## Reports
 
-`~/.pi/agent/reports/skillevaluator/<skill>/` — json and markdown per tier.
-Copy the current report to `baseline-*.json` before iterating on a skill so
-before/after scores stay comparable.
+Write all SkillEvaluator reports to `~/.pi/agent/reports/skillevaluator/<skill>/`.
+Pass `-o` with a fresh run subdirectory for each evaluation so prior reports
+remain available for comparison. Do not write reports beside the skill itself.
+Keep raw reports local; the `reports/` directory is gitignored.
 
 ## Uninstall
 

@@ -1,5 +1,8 @@
 # Portability
+
+- Across the codebase, write agent-home paths as `~/.pi/agent/...` in prose and recorded output. In executable code, resolve the home directory at runtime (for example, `"$HOME/.pi/agent/..."` in shell or `join(homedir(), '.pi', 'agent', ...)` in Node); a literal `~` is not expanded by filesystem APIs. Keep paths relative to their repository or skill when that root owns the file.
 - No absolute user/machine/device paths anywhere (code, tests, fixtures, docs, generated files, recorded artifacts such as benchmark summaries and workflow/diagram manifests). Derive at runtime (`import.meta.url`, `$HOME`/`env.HOME`, `os.homedir()`, `process.execPath`, argv, `command -v`); tracked files byte-identical on every machine, OS, and device; roots via argv/env, never baked. Recorded output stores repo-relative or `~`-relative paths — never the producing machine's home. Quoting a historical path in prose uses placeholders (`<home>`, `<user>`), never a real username.
+- Before committing path changes in the agent repo, run `git diff --cached --no-ext-diff --no-color | node scripts/check-portable-diff.mjs`. This pilot checks added lines for literal macOS and Linux user-home paths; it does not scan unchanged lines or block edits automatically.
 - Target: macOS+Linux — portable BSD/GNU subset only; where they differ, branch explicitly.
 - No single-quoted `python3 -c` with embedded quotes — use `rg` or a heredoc.
 - No hardcoded `/bin/sh`: probe (`process.platform !== 'win32' && existsSync('/bin/sh')`), fall back to `PATH` resolution (see `~/.pi/agent/skills/pidoc/scripts/pidoc.mjs`). Windows unsupported, but the health check and Node scripts degrade, never crash.

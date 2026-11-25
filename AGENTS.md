@@ -6,15 +6,21 @@
 - Do not restate controls that tools, extensions, or the pi system enforce by default (gating, out-of-scope write refusal, install prompts, tool flags). State the agent's response to them, never the mechanism.
 - One rule, one home; cross-reference instead of restating.
 
-## Doc index
-These instructions are global: they apply in every project and every session. Read a scoped doc only when its topic comes up, and name its `~/.pi/agent/` path when you look it up so the search lands in the agent home, never the session cwd.
-- `~/.pi/agent/docs/tool-use.md` — tool-call mechanics: call economy, file lookup, bash, recovery, commit shape.
-- `~/.pi/agent/docs/portability.md` — path and OS/device neutrality.
-- `~/.pi/agent/docs/change-rules.md`, `~/.pi/agent/docs/design-rules.md` — what may change, how designs are judged.
-- `~/.pi/agent/docs/development.md`, `~/.pi/agent/docs/skills.md` — build/test loops, skill authoring.
-- `~/.pi/agent/docs/skill-evaluation.md` — SkillEvaluator setup: tiers, provider wiring, reports.
-- `~/.pi/agent/docs/harness-watch.md` — turning gate blocks and failures into durable fixes.
-- `~/.pi/agent/docs/native-tools.md`, `~/.pi/agent/docs/rust-tools-architecture.md` — native and Rust tooling.
+## Read before acting
+These instructions apply to every model, project, and session. A doc reference in this file is a reading requirement when its topic applies, not just a pointer. Open and read the relevant docs before taking the covered action; seeing the link or relying on memory does not count. Resolve paths from `~/.pi/agent/`, not the session cwd. If a required doc is unavailable, say what is missing before proceeding. Skip docs unrelated to the task.
+
+| Before you… | Read |
+|---|---|
+| Choose a tool invocation or plan a commit | `~/.pi/agent/docs/tool-use.md` |
+| Add or change a filesystem path in code, tests, docs, or reports | `~/.pi/agent/docs/portability.md` |
+| Change behavior or evaluate a design | `~/.pi/agent/docs/change-rules.md`, `~/.pi/agent/docs/design-rules.md` |
+| Build or test agent code | `~/.pi/agent/docs/development.md` |
+| Write or edit a skill | `~/.pi/agent/docs/skills.md` |
+| Set up or run SkillEvaluator | `~/.pi/agent/docs/skill-evaluation.md` |
+| Investigate a harness gate block or failure | `~/.pi/agent/docs/harness-watch.md` |
+| Change native or Rust tools | `~/.pi/agent/docs/native-tools.md`, `~/.pi/agent/docs/rust-tools-architecture.md` |
+
+Other references:
 - `~/.pi/agent/prompts/` — invocable prompts (ship, issue, ticket, standup, pr-merge-assist, optimize-docs); `~/.pi/agent/skills/` — invocable skills.
 - Other scoped docs live in `~/.pi/agent/docs/` (TUI layout, zero-init, rust-tools performance, architecture reviews) — list that directory before assuming a topic is undocumented.
 
