@@ -10,7 +10,7 @@
     "deepseek/deepseek-flash": "off",
     "deepseek/deepseek-v4-pro": "off"
   },
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "defaultTools": [
     "-read",
     "-write",

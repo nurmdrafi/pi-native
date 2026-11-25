@@ -43,7 +43,7 @@ kept current for puppeteer >= 22 and called out where older guides are wrong:
 const puppeteer = require('puppeteer');
 
 (async () => {
-    const browser = await puppeteer.launch({ headless: 'new' });
+    const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
 
@@ -132,8 +132,14 @@ every glyph width shifts. Await `document.fonts.ready` before `page.pdf()`.
 - **Page size has one source.** `preferCSSPageSize: false` keeps `format` +
   `margin` authoritative, so a template `@page` rule cannot resize the sheet.
 
-Verify before claiming parity — vectors answer most questions, rasterizing does
-not:
+For migration parity, the reference is the final PDF from the original generator,
+not the HTML preview. Compare the same sanitized input snapshot, selected records,
+assets, locale and time. Before adjusting CSS, check each printed value against
+its expected record and section. Include repeated records with different answers
+and intentional blanks: an unavailable source is not evidence for a blank or a
+fallback value. Report a binding mismatch separately from a positioning mismatch.
+
+Inspect both **assembled PDFs**, including appended pages:
 
 ```bash
 pdfinfo out.pdf | grep Pages      # page count
@@ -142,8 +148,13 @@ pdftohtml -xml -stdout out.pdf    # per-string top/left/width for a diff
 pdftocairo -svg out.pdf out.svg   # border weights/colors as vector data
 ```
 
-Equal width for the same string across a whole document is what proves the font
-is really applied; a page count that misses is a layout bug, not rounding.
+Check page dimensions, count and order before comparing text bounds and embedded
+fonts. Rasterize both PDFs with the same rasterizer and resolution; overlay each
+page to catch shifted seals, clipped captions, missing glyphs and distorted
+attachment images. Neither matching text nor matching geometry proves data
+identity. Trace extra or missing pages to selection, assembly or pagination
+before changing margins. Record the fixture, render settings and result per
+format; no paired reference means unverified, even if a sibling format passes.
 
 ### Network Interception
 
