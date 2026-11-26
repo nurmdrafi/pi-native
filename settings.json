@@ -1,10 +1,10 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
-  "lastChangelogVersion": "1.6.0",
+  "lastChangelogVersion": "1.6.1",
   "defaultProjectTrust": "always",
   "theme": "dark",
   "defaultProvider": "zai",
-  "defaultModel": "glm-5.3",
+  "defaultModel": "glm-5.4",
   "defaultThinkingLevel": "medium",
   "modelThinkingLevels": {
     "deepseek/deepseek-flash": "off",
@@ -17,7 +17,9 @@
     "-edit",
     "-bash"
   ],
-  "packages": [],
+  "packages": [
+    "git:github.com/affaan-m/ECC"
+  ],
   "compaction": {
     "enabled": false,
     "modelOverrides": {
@@ -28,5 +30,8 @@
   },
   "extensions": [
     "-builtin:mcp"
-  ]
+  ],
+  "extensionChangelogVersions": {
+    "{\"source\":\"git:github.com/affaan-m/ECC\",\"scope\":\"user\"}": "2.2.3"
+  }
 }
