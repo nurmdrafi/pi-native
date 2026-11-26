@@ -7,7 +7,7 @@ description: >
   configs, secret hygiene). Use when: "audit harness", "anti-pattern audit",
   "audit my skills/prompts/extensions", "health score", "trim skills",
   "improve the harness", or the harness feels bloated.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/harness-engineer`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

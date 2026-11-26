@@ -4,7 +4,7 @@ description: "Build new web UI (components/pages/apps) in the detected stack (An
 license: Complete terms in LICENSE.txt
 metadata:
   tags: [frontend, ui, design, react, tailwind, antd]
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Frontend Design

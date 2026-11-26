@@ -1,7 +1,7 @@
 ---
 name: skillevaluator
 description: Run and interpret SkillEvaluator for agent skills. Use for any skill benchmark or eval - validating or scoring a SKILL.md, writing evals.json test cases or evals config, explaining benchmark reports, verdicts and exit codes, or gating skills in CI.
-disable-model-invocation: true
+disable-model-invocation: false
 license: Apache-2.0
 compatibility: Requires Python 3.12-3.14 and the skillevaluator CLI; live evaluation also needs Docker (or another backend) and an LLM provider key.
 metadata:

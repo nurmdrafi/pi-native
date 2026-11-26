@@ -1,7 +1,7 @@
 ---
 name: map-integration
 description: "ANY map work, Barikoi stack included: react-bkoi-gl / bkoi-gl (Barikoi's maplibre wrappers), maplibre-gl/mapbox-gl and react-map-gl-family wrappers, deck.gl overlays, turf geometry, draw polygons/polylines, camera flyTo/fitBounds, geolocation, MQTT real-time plotting, GPX routes, snap-to-road (OSRM), boundary layers, Barikoi map styles and barikoi.xyz APIs, map bugs (style-load, marker drift), map key leaks (api key in client bundle, hardcoded barikoi key, key shipped to browser). Detects stack from package.json; reuses existing idioms."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/map-integration`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

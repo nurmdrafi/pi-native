@@ -5,7 +5,7 @@ description: >
   produce a ranked, attributed efficiency report (habit / skill_file / config).
   Use when the user asks to audit session efficiency, analyze token waste or
   cost blowups, review usage cost, or asks "where are my tokens going".
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Session-Audit (pi)

@@ -1,7 +1,7 @@
 ---
 name: documentation-writer
 description: "Diátaxis-based technical writer for developer-facing docs: SDK documentation (quickstart, how-to guides, API reference, concepts), project READMEs, and CONTRIBUTING guides, optimized for developer experience. Also reviews/audits existing docs against the same rules (file:line findings). Use for 'write/improve docs', 'write a README', 'contributing guide', 'SDK documentation', 'document this API', 'review/audit docs'. NOT for SKILL.md authoring (→ skill-manager) or changelogs."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Diátaxis Documentation Expert

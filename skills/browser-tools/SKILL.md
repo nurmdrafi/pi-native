@@ -1,7 +1,7 @@
 ---
 name: browser-tools
 description: "Playwright/e2e testing ONLY via CDP :9222: verify UI fixes in the running app, live replay of failing specs, DOM inspection, screenshots, storageState for e2e work. NOT research/web content (→ web-search), NOT manual QA, NOT general debugging (→ systematic-debugging), NOT frontend design (→ refactoring-ui)."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/browser-tools`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

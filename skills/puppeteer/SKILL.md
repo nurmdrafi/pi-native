@@ -6,7 +6,7 @@ description: >
   Triggers on: "Puppeteer", "headless Chrome", "page.goto", "scrape",
   "render HTML to PDF", "print to PDF", "PDF parity", "extra blank page",
   "PDF fonts wrong", "table columns shift".
-disable-model-invocation: true
+disable-model-invocation: false
 languages:
   - JavaScript
   - TypeScript

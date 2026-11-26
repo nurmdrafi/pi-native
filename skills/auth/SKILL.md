@@ -1,7 +1,7 @@
 ---
 name: auth
 description: "Implements or migrates to NextAuth v4 credentials auth for Next.js App Router apps against an external REST IdP issuing bearer tokens: authorize() with server-side backend calls, session-token plumbing for RTK Query/fetch layers, middleware route guards, 401 retry and sign-out ladder, OTP registration and password-reset flows, social-login token exchange, deterministic post-login redirects. Use for 'nextauth', 'auth migration', 'login not redirecting', 'stuck on login page', 'refresh fixes login', 'protect routes', 'middleware auth', 'session token', 'signIn credentials', '401 handling', 'session outlives backend token', 'jwt sliding session', 'signOut on every 401', 'random sign-outs', 'signed out while browsing', 'sso account switch', 'third-party 401 logs the user out', 'blank protected page after refresh', 'otp login', 'social login', 'new auth integration'. NOT for OAuth-first setups, Auth.js v5, Firebase auth, or non-Next.js apps."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/auth`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

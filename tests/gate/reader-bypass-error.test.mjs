@@ -46,6 +46,26 @@ for (const [shape, command] of readers) {
   });
 }
 
+test("a standalone literal head or sed view gets exact piread arguments", async () => {
+  for (const [command, expected] of [
+    [`head -n 2 ${FILE}`, { path: FILE, offset: 1, limit: 2 }],
+    [`sed -n '2,3p' ${FILE}`, { path: FILE, offset: 2, limit: 2 }],
+    [`cat ${FILE}`, { path: FILE }],
+  ]) {
+    const r = await bash(freshGate(), command);
+    assert.equal(r.blocked, true);
+    assert.ok(r.reason.includes(`piread ${JSON.stringify(expected)}`), r.reason);
+  }
+});
+
+test("byte windows and pipelines keep generic guidance", async () => {
+  for (const command of [`tail -c 400 ${FILE}`, `head -n 2 ${FILE} | wc -l`]) {
+    const r = await bash(freshGate(), command);
+    assert.equal(r.blocked, true);
+    assert.doesNotMatch(r.reason, /piread \{/);
+  }
+});
+
 const allowed = [
   ["a piped view", `printf 'x\\n' | head -1`],
   ["a piped sed filter", `printf 'x\\n' | sed -n '1,1p'`],

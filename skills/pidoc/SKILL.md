@@ -8,7 +8,7 @@ description: >
   diagnose the harness, is my setup ok, after cloning the harness on a new
   machine, or when pidx/session-audit misbehaves. NOT for skill authoring
   (skill-manager) or session cost audits (session-audit).
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/pidoc`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

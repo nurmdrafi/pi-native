@@ -11,10 +11,18 @@ turns, tool calls with param hashes, tool results, compactions, skill loads.
 
 - Spec: none of its own — tracked under MASTER (S1 session-metrics / session-audit).
 - Extension: `extensions/pidx/index.ts`
-- Source: `src/main.rs` (single file, ~790 lines)
+- Source: `src/main.rs` (indexer), `src/audit.rs` (workflow report)
 
 Status: shipped, registers unconditionally, Rust is the only executor (no built-in
 route).
+
+## Recent-session workflow audit
+
+Run `bin/pidx --report audit --max 100` from the agent directory. The default is 100 newest inactive sessions; `--max` is a strict cap, and `--session` selects one exact session ID. Sessions modified within five minutes are excluded. The report uses a separate incremental cache by default; use `--state` to choose another location.
+
+Standard output is one aggregate JSON record: reported token usage, calls and result bytes per tool, result categories, gate families, recognizable warnings, and recovery by gate family. It does not include session IDs, paths, commands, prompts, or tool result bodies. Standard error holds cache and timing counts. Result bytes include an estimate for images; token counts come from provider-reported usage and cache reads count repeated prefixes.
+
+A warning must appear as an appended text block with a recognized prefix; UI-only warnings are not counted. No-match classification is conservative: simple literal `rg` commands ending with exit 1; other nonzero exits are reported separately. Native failures are recognizable terminal errors, not silent successful fallbacks. Recovery requires all results in the immediate next assistant tool batch to succeed before another user message; it does not prove the task was resolved.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: skill-manager
 description: "Use when creating, fixing, merging, renaming, or splitting agent skills — writes the target's files, validates before finishing (agentskills.io + pi spec). Not for ordinary project docs."
-disable-model-invocation: true
+disable-model-invocation: false
 metadata:
   author: "pi agent-home maintainers"
   tags: [skill-authoring, agentskills, validation]

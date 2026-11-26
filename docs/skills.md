@@ -1,6 +1,6 @@
 # Skills
 
-All skills are **manual** — invoke with `/skill:<name>`; none auto-load. Bodies never enter context until invoked, so the skill roster costs nothing per session.
+Pi advertises eligible skills by name, description, and path. The model loads a skill's body only when needed; use `/skill:<name>` to select it explicitly. Set `disable-model-invocation: true` for a manual-only skill.
 
 | Skill                | Purpose                                                            | Invocation                    |
 | -------------------- | ------------------------------------------------------------------ | ----------------------------- |

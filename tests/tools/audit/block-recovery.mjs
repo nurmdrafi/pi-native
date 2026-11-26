@@ -6,9 +6,9 @@
  *
  * For every isError toolResult whose text starts with a gate prefix it records:
  *   - family counts and message sizes (median / mean / p90 / max chars)
- *   - recovery: the next event after the block — an assistant toolCall
- *     (acted, one-shot recovery), another same-family block (weak thrash),
- *     or nothing (session end)
+ *   - recovery: all calls in the next assistant batch succeed before the next
+ *     user message; same-family blocks, other failures and missing results
+ *     do not count as recovery.
  *
  * Regression gate for the 2026-10-06 block-reason diet: exit 1 when one-shot
  * recovery < 85% on a sample of >= 10 blocks (small samples stay advisory).
@@ -35,7 +35,8 @@ try {
 
 const blocks = []; // { family, size, next: 'acted' | 'reblock' | 'end' }
 for (const file of files) {
-	const events = []; // ['call'] | ['block', family]
+	const events = [];
+	const results = new Map();
 	for (const line of readFileSync(file, 'utf8').split('\n')) {
 		if (!line.includes('"role"')) continue;
 		let msg;
@@ -44,21 +45,30 @@ for (const file of files) {
 		} catch {
 			continue;
 		}
-		if (msg?.role === 'assistant' && Array.isArray(msg.content)) {
-			if (msg.content.some((c) => c?.type === 'toolCall')) events.push(['call']);
+		if (msg?.role === 'user' || msg?.role === 'assistant') {
+			const calls = msg.role === 'assistant' && Array.isArray(msg.content)
+				? msg.content.filter((c) => c?.type === 'toolCall').map((c) => c.id)
+				: [];
+			events.push({ calls });
 		} else if (msg?.role === 'toolResult') {
 			const txt = (msg.content ?? []).filter((b) => b?.type === 'text').map((b) => b.text).join(' ');
-			if (msg.isError === true && isGateBlockText(txt)) events.push(['block', gateFamilyOf(txt), txt.length]);
+			const family = msg.isError === true ? gateFamilyOf(txt.trimStart()) : null;
+			if (typeof msg.toolCallId === 'string') results.set(msg.toolCallId, { isError: msg.isError, family });
+			if (family) events.push({ family, size: txt.length });
 		}
 	}
-	for (let i = 0; i < events.length; i++) {
-		if (events[i][0] !== 'block') continue;
-		const nxt = events[i + 1];
-		blocks.push({
-			family: events[i][1],
-			size: events[i][2],
-			next: !nxt ? 'end' : nxt[0] === 'call' ? 'acted' : nxt[1] === events[i][1] ? 'reblock' : 'other-block',
-		});
+	let nextBatch = [];
+	for (let i = events.length - 1; i >= 0; i--) {
+		const event = events[i];
+		if (event.calls) {
+			nextBatch = event.calls.map((id) => results.get(id));
+			continue;
+		}
+		const next = !nextBatch.length ? 'end'
+			: nextBatch.every((r) => r?.isError === false) ? 'acted'
+			: nextBatch.some((r) => r?.family === event.family) ? 'reblock'
+			: 'other-block';
+		blocks.push({ family: event.family, size: event.size, next });
 	}
 }
 

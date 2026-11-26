@@ -17,13 +17,12 @@ Skill discovery order: project `.pi/skills/` / `.agents/skills/` (if trusted) �
 
 ## Always-on token budget
 
-The permanent prefix is `AGENTS.md` alone — the only always-on artifact. Scoped rules live in `docs/` and load on demand; all skills are manual, so no skill descriptions sit in the model-visible catalog.
+Keep the always-on prefix small. Scoped rules and skill bodies load on demand; eligible skill metadata remains in the prompt.
 
 | Component           | Target                                      | Notes                                  |
 | ------------------- | ------------------------------------------- | -------------------------------------- |
 | AGENTS.md           | as small as possible (behavioral core only) | no stack essays, no skill lists        |
-| Skill descriptions  | short; delete dead skills                   | all manual — zero per-session cost     |
-| **Total always-on** | AGENTS.md only                               | no auto-skill catalog, no package tool defs |
+| Skill descriptions  | short, specific routing cues                | eligibility in [Skills](skills.md)     |
 
 Thinking defaults to `high` in `settings.json`; drop it per-task with `--thinking off` when tokens matter more than depth.
 
