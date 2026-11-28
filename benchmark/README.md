@@ -1,5 +1,7 @@
 # benchmark/
 
+See the [harness optimization checklist](HARNESS-CHECKLIST.md) for completed work, measured baselines, and next experiments.
+
 Suites live in per-arm directories; each arm owns its own `bench.mjs`, `results/` (raw NDJSON, one object per run) and a summary md per run tag.
 
 ## rss-arm — peak-RSS arm

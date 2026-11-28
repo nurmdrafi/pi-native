@@ -18,6 +18,8 @@
 //!    calls:[{id,name,ts,rid,ph,path,cmd}], results:[{id,ts,err,bytes,blk?}],
 //!    compactions, skills:{name:uses}}
 
+mod audit;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -213,57 +215,22 @@ fn content_bytes(v: &Value) -> u64 {
     }
 }
 
-/// Gate block family. The permission gate's synthesized block reasons always
-/// BEGIN with a stable family prefix; a session that merely reads the gate's
-/// own source must not look blocked, so the match is anchored at the start of
-/// the text rather than searching mid-stream.
-fn gate_family(content: &Value) -> Option<&'static str> {
-    const FAMILIES: [(&str, &str); 9] = [
-        ("Permission Gate", "gate"),
-        ("Anchor Guard", "anchor"),
-        ("Token Economy", "tokens"),
-        ("Loop Guard", "loop"),
-        ("Phase (PH1)", "phase"),
-        ("Commit Message", "commit"),
-        ("Toolchain", "toolchain"),
-        ("Search", "search"),
-        ("Destructive", "destructive"),
-    ];
-    let text = match content {
-        Value::String(s) => s.as_str(),
-        Value::Array(blocks) => blocks
-            .iter()
-            .find_map(|b| b.get("text").and_then(Value::as_str))?,
-        _ => return None,
-    };
-    let head = text.trim_start();
-    FAMILIES
-        .iter()
-        .find(|(prefix, _)| head.starts_with(prefix))
-        .map(|(_, tag)| *tag)
-}
-
 #[cfg(test)]
 mod gate_family_tests {
     use super::*;
 
     #[test]
     fn classifies_block_reasons() {
-        let c = json!([{"type":"text","text":"Anchor Guard (Unread): 'x' not read this session"}]);
-        assert_eq!(gate_family(&c), Some("anchor"));
-        let c = json!([{"type":"text","text":"Token Economy (Re-run): blocked"}]);
-        assert_eq!(gate_family(&c), Some("tokens"));
-        let c = json!([{"type":"text","text":"    Loop Guard (R11): stop retrying"}]);
-        assert_eq!(gate_family(&c), Some("loop"));
+        assert_eq!(audit::family("Anchor Guard (Unread): 'x' not read this session"), Some("anchor"));
+        assert_eq!(audit::family("Token Economy (Re-run): blocked"), Some("tokens"));
+        assert_eq!(audit::family("    Loop Guard (R11): stop retrying"), Some("loop"));
     }
 
     #[test]
     fn ignores_mid_stream_mentions_and_plain_output() {
-        let c = json!([{"type":"text","text":"index.ts:88: // Anchor Guard blocks this"}]);
-        assert_eq!(gate_family(&c), None);
-        let c = json!([{"type":"text","text":"ok\n"}]);
-        assert_eq!(gate_family(&c), None);
-        assert_eq!(gate_family(&Value::Null), None);
+        assert_eq!(audit::family("index.ts:88: // Anchor Guard blocks this"), None);
+        assert_eq!(audit::family("Search finished"), None);
+        assert_eq!(audit::family("ok\n"), None);
     }
 }
 
@@ -528,8 +495,8 @@ fn lifecycle_of(v: &Value) -> Lifecycle {
             if let Some(b) = r.get("bytes").and_then(Value::as_u64) {
                 *result_bytes.entry(id.to_string()).or_insert(0) += b;
             }
-            let blocked = r.get("blk").and_then(Value::as_bool).unwrap_or(false)
-                || r.get("err").map(|e| !e.is_null()).unwrap_or(false);
+            let blocked = r.get("err").and_then(Value::as_bool) == Some(true)
+                && r.get("blk").and_then(Value::as_str).is_some();
             result_blocked.insert(id.to_string(), blocked);
         }
     }
@@ -716,6 +683,7 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
     let mut call_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut results: Vec<Value> = Vec::new();
     let mut result_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut batch = 0u64;
     let mut compactions = 0u64;
     let mut skills: HashMap<String, u64> = HashMap::new();
     let mut uts: Vec<i64> = Vec::new(); // user-entry timestamps (ms) — classifyGap parity
@@ -762,6 +730,9 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
             None => continue,
         };
         let role = msg.get("role").and_then(Value::as_str);
+        if matches!(role, Some("assistant" | "user")) {
+            batch += 1;
+        }
         match role {
             Some("assistant") => {
                 let usage = msg.get("usage");
@@ -829,7 +800,7 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
                         let cmd = input.get("command").and_then(Value::as_str).map(String::from);
                         calls.push(json!({
                             "id": id, "name": name, "ts": ts, "rid": rid,
-                            "ph": ph, "path": path_, "cmd": cmd,
+                            "ph": ph, "path": path_, "cmd": cmd, "batch": batch,
                         }));
                     }
                 }
@@ -869,17 +840,15 @@ fn extract_file(path: &Path, project_fallback: &str) -> Value {
                     continue;
                 }
                 let content = msg.get("content").unwrap_or(&Value::Null);
-                let bytes = content_bytes(content);
+                let error = msg.get("isError") == Some(&Value::Bool(true));
                 let mut rec = json!({
                     "id": id,
                     "ts": iso_of(msg.get("timestamp").unwrap_or(&Value::Null)),
-                    "err": msg.get("isError") == Some(&Value::Bool(true)),
-                    "bytes": bytes,
+                    "err": error,
+                    "bytes": content_bytes(content),
+                    "batch": batch,
                 });
-                // a gate block is recognizable by its leading family prefix
-                if let Some(fam) = gate_family(content) {
-                    rec["blk"] = Value::String(fam.to_string());
-                }
+                audit::annotate(&mut rec, content, error);
                 results.push(rec);
             }
             _ => {}
@@ -987,7 +956,7 @@ struct Entry {
 // Header = {key: Entry}; data = concatenated compact extract JSON. A single
 // file keeps the header and its offsets atomic under one rename.
 const STORE_MAGIC: [u8; 8] = *b"PIDXST02";
-const STORE_VERSION: u32 = 4;
+const STORE_VERSION: u32 = 5;
 const STORE_PREFIX: usize = 16;
 
 struct Store {
@@ -1154,14 +1123,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--report" => report = Some(args.next().ok_err("--report needs a value")?),
             "--session" => session = Some(args.next().ok_err("--session needs a value")?),
             "--help" | "-h" => {
-                println!("usage: pidx [--sessions-dir DIR] [--state PATH] [--out PATH] [--max N] [--session ID] [--force] [--report usage|lifecycle]");
+                println!("usage: pidx [--sessions-dir DIR] [--state PATH] [--out PATH] [--max N] [--session ID] [--force] [--report usage|lifecycle|audit]");
                 return Ok(());
             }
             other => return Err(format!("unknown arg: {other}").into()),
         }
     }
+    let workflow_audit = report.as_deref() == Some("audit");
     let state_path = state_path.unwrap_or_else(|| {
-        dirs_state_default()
+        let path = dirs_state_default();
+        if workflow_audit { path.with_file_name("pidx-audit-state.bin") } else { path }
     });
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1171,8 +1142,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let store = load_store(&state_path);
 
-    let (found, excluded) = discover(&sessions_dir, now_ms);
-    let found: Vec<(PathBuf, String, u128)> = select_sessions(found, max, now_ms);
+    let (mut found, excluded) = discover(&sessions_dir, now_ms);
+    let found = if workflow_audit {
+        if let Some(id) = &session {
+            found.retain(|(path, _, _)| fallback_session_id(path) == *id);
+        }
+        const DEFAULT_AUDIT_SESSIONS: usize = 100;
+        found.truncate(if max == usize::MAX { DEFAULT_AUDIT_SESSIONS } else { max });
+        found
+    } else {
+        select_sessions(found, max, now_ms)
+    };
 
     // classify: reuse (fresh cache range) vs parse
     let mut to_parse: Vec<(String, PathBuf, String, FileId)> = Vec::new();
@@ -1200,7 +1180,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // parse changed files on N threads; without a report request the extract
     // is also serialized on the worker (parallel), so the main thread only
     // appends bytes and writes files
-    let want_values = report.is_some();
+    let want_values = report.is_some() && !workflow_audit;
     let chunks = split_chunks(to_parse, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
     let mut parsed: Vec<(String, FileId, Option<Value>, Vec<u8>)> = Vec::new();
     std::thread::scope(|scope| {
@@ -1244,7 +1224,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Analysis reports read the same extracts and print a summary instead of the
     // JSONL stream, so the skill scripts that used to re-walk every session file
     // become one call into this binary.
-    if let Some(which) = report {
+    if let Some(which) = report.filter(|_| !workflow_audit) {
         match which.as_str() {
             "usage" => report_usage(&found, &parsed_map, &store)?,
             "lifecycle" => report_lifecycle(&found, &parsed_map, &store, session.as_deref())?,
@@ -1270,7 +1250,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         (Some(p), Some(n)) => fs::metadata(p).map(|m| m.len() == n).unwrap_or(false),
         _ => false,
     };
-    let mut out_writer: Option<Box<dyn Write>> = if out_is_current {
+    let mut out_writer: Option<Box<dyn Write>> = if workflow_audit || out_is_current {
         None
     } else {
         Some(match &out_path {
@@ -1286,8 +1266,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let mut new_files: HashMap<String, Entry> = HashMap::with_capacity(found.len());
     let mut emitted = 0usize;
+    let mut audit = audit::Report::default();
     for (path, _, _) in &found {
         let key = path.to_string_lossy().to_string();
+        if workflow_audit {
+            let bytes = bytes_map.get(&key).map(|(_, bytes)| bytes.as_slice())
+                .or_else(|| store.files.get(&key).map(|entry| store.extract(entry)))
+                .ok_or("missing audit extract")?;
+            audit.observe(&serde_json::from_slice(bytes)?);
+        }
         if let Some((fid, bytes)) = bytes_map.get(&key) {
             // serialized once on the parse threads; same bytes go to output and store
             let off = new_data.len() as u64;
@@ -1317,6 +1304,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         save_store(&state_path, &new_files, &new_data)?;
     }
 
+    if workflow_audit {
+        println!("{}", serde_json::to_string(&audit)?);
+    }
     let summary = json!({
         "sessions": emitted,
         "parsed": emitted - reused,
@@ -1394,7 +1384,7 @@ mod lifecycle_tests {
             ],
             "results": [
                 {"id":"c1","bytes":500}, {"id":"c2","bytes":500},
-                {"id":"c3","bytes":80,"blk":true}, {"id":"c4","bytes":80}
+                {"id":"c3","bytes":80,"err":true,"blk":"anchor"}, {"id":"c4","bytes":80,"err":false}
             ]
         })
     }
@@ -1436,7 +1426,7 @@ mod lifecycle_tests {
                 {"id":"c1","name":"piedit","ts":"a","rid":"r1","ph":"h1","path":"a.ts","cmd":null},
                 {"id":"c2","name":"piedit","ts":"b","rid":"r1","ph":"h1","path":"a.ts","cmd":null}
             ],
-            "results": [{"id":"c1","bytes":10}]
+            "results": [{"id":"c1","bytes":10,"err":false}]
         });
         let lc = lifecycle_of(&v);
         assert_eq!(lc.dup_calls, 1);

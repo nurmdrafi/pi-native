@@ -1,7 +1,7 @@
 ---
 name: tmux-panes
 description: "Runs user-facing temporary tmux task panes in subagent-enabled sessions: session bootstrap, POSIX countdown self-close, handover quoting. Use only after `/subagents on`, when creating or handing over a task pane, writing its command string, or when a pane handover is refused by the destructive gate. NOT for harness-spawned panes or general tmux management."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Tmux temporary panes

@@ -41,7 +41,7 @@ import { readFile, lstat } from "fs/promises";
 import { basename, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
-import { BASH_CAP_BYTES, BASH_CAP_LINES } from "./bounds.gen.ts";
+import { BASH_CAP_BYTES, BASH_CAP_LINES, GATE_DIET_CHARS } from "./bounds.gen.ts";
 import { toLF, validateEditAnchors } from "./rules/anchor-guard.ts";
 import { blockFamilyOf, capBashOutput, capReadOutput, isRustCompressed, visibleLineCount } from "./rules/bash-cap.ts";
 import { scrubBashText } from "./rules/output-scrub.ts";
@@ -90,6 +90,26 @@ import type {
   ViewCommand,
 } from "./rules/read-coverage.ts";
 import { toolchainCheck } from "./rules/toolchain.ts";
+
+// Only suggest a replacement for literal, standalone commands. Shell expansion,
+// byte counts and tail windows that need a line count keep the generic recipe.
+const literalReadPath = String.raw`[\w./][\w./+-]*`;
+const literalReader = new RegExp(String.raw`^(?:cat|head(?:[ \t]+(?:-n[ \t]+\d+|-\d+))?|tail[ \t]+-n[ \t]+\+\d+|sed[ \t]+-n[ \t]+(?:\d+(?:,\d+)?p|'\d+(?:,\d+)?p'))[ \t]+(?:${literalReadPath}|'${literalReadPath}'|"${literalReadPath}")$`);
+
+function readerWindowHint(cmd: string, cwd: string | undefined): string | undefined {
+  if (!literalReader.test(cmd.trim())) return undefined;
+  const view = viewCommandOf(cmd, cwd, normPath, existsSync);
+  if (!view || !Number.isSafeInteger(view.from) || view.from < 1) return undefined;
+  const { path, from, to } = view;
+  if (to !== Infinity && (!Number.isSafeInteger(to) || to < from)) return undefined;
+  const input = {
+    path,
+    ...(from !== 1 || to !== Infinity ? { offset: from } : {}),
+    ...(to !== Infinity ? { limit: to - from + 1 } : {}),
+  };
+  const reason = `Hygiene (Reader-bypass): use piread (offset/limit, hits, outline --show). Try piread ${JSON.stringify(input)}.`;
+  return reason.length <= GATE_DIET_CHARS ? reason : undefined;
+}
 import { isVerifyCommand } from "./rules/phase.ts";
 import {
   FAILURE_LOOP_AT,
@@ -1344,7 +1364,8 @@ export default function (pi: ExtensionAPI) {
     }
     const rb = readerBypassCheck(cmd, ctx?.cwd);
     if (rb) {
-      const r = enforce("readerBypass", rb, event.toolCallId);
+      const hint = ruleBlocks("readerBypass") ? readerWindowHint(cmd, ctx?.cwd) : undefined;
+      const r = enforce("readerBypass", hint ?? rb, event.toolCallId);
       if (r) return r;
     }
 

@@ -258,16 +258,28 @@ impl<'a> FuzzyView<'a> {
     }
 }
 
-// ---- error builders (byte-identical to edit-diff.js) ----
+// ---- error builders (byte-identical to edit-diff.js, except the multi-edit
+// not-found message: it also states the atomic rollback and that oldText is
+// matched against the original file — the two facts a failed batch leaves
+// the caller guessing) ----
 
-fn not_found_error(path: &str, edit_index: usize, total: usize) -> ToolError {
+fn not_found_error(
+    path: &str,
+    edit_index: usize,
+    total: usize,
+    chained_from: Option<usize>,
+) -> ToolError {
     let message = if total == 1 {
         format!(
             "Could not find the exact text in {path}. The old text must match exactly including all whitespace and newlines."
         )
+    } else if let Some(earlier) = chained_from {
+        format!(
+            "Could not find edits[{edit_index}] in {path}. No edits were applied; the file is unchanged. edits[{edit_index}].oldText appears inside edits[{earlier}].newText, but oldText is matched against the original file, not the result of earlier edits. Merge these edits into one edit."
+        )
     } else {
         format!(
-            "Could not find edits[{edit_index}] in {path}. The oldText must match exactly including all whitespace and newlines."
+            "Could not find edits[{edit_index}] in {path}. No edits were applied; the file is unchanged. The oldText must match exactly including all whitespace and newlines, and is matched against the original file, not the result of other edits in this call. Merge dependent edits into one edit."
         )
     };
     ToolError { kind: ErrorKind::NotFound, message }
@@ -513,7 +525,12 @@ pub fn apply_edits(normalized_content: &str, edits: &[crate::envelope::Edit], pa
     for (i, (old_text, new_text)) in normalized.iter().enumerate() {
         let match_result = fuzzy.find(used_fuzzy_match, old_text);
         if !match_result.found {
-            return Err(not_found_error(path, i, normalized.len()));
+            // A failed oldText that lives inside an earlier edit's newText is
+            // the chained-edit mistake: dependent regions must be one edit.
+            let chained_from = normalized[..i]
+                .iter()
+                .position(|(_, earlier_new)| earlier_new.contains(old_text.as_str()));
+            return Err(not_found_error(path, i, normalized.len(), chained_from));
         }
         let occurrences = fuzzy.count(old_text);
         if occurrences > 1 {
@@ -798,8 +815,21 @@ mod tests {
         let err = apply("x\n", &[edit("x", "y"), edit("zzz", "w")]).unwrap_err();
         assert_eq!(
             err.message,
-            "Could not find edits[1] in /tmp/f. The oldText must match exactly including all whitespace and newlines."
+            "Could not find edits[1] in /tmp/f. No edits were applied; the file is unchanged. The oldText must match exactly including all whitespace and newlines, and is matched against the original file, not the result of other edits in this call. Merge dependent edits into one edit."
         );
+        assert_eq!(err.kind, ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn not_found_error_flags_chained_edits() {
+        // edits[1].oldText exists only inside edits[0].newText: the caller
+        // chained dependent edits instead of merging them into one.
+        let err = apply("x\n", &[edit("x", "y\nz"), edit("y\nz", "w")]).unwrap_err();
+        assert_eq!(
+            err.message,
+            "Could not find edits[1] in /tmp/f. No edits were applied; the file is unchanged. edits[1].oldText appears inside edits[0].newText, but oldText is matched against the original file, not the result of earlier edits. Merge these edits into one edit."
+        );
+        assert_eq!(err.kind, ErrorKind::NotFound);
     }
 
     #[test]

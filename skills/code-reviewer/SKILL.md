@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: "Runs the ollama-code-review push workflow's review locally, before the push that triggers it — same noise filtering, same reviewer prompt, same severity rules — and drives a fix loop until the CI review would find nothing to file. No argument: reviews all uncommitted changes; 'check last N commits': reviews exactly that range; 'pre-push check': reviews what the next push would send. Use for 'review my diff', 'check last 2 commits', before any non-trivial push. Not for style, formatting, or naming review."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/code-reviewer`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

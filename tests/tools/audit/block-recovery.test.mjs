@@ -15,17 +15,21 @@ it("counts current gate families and ignores non-error notes", () => {
     { role: "assistant", content: [{ type: "toolCall", id: "tc" }] },
     {
       role: "toolResult",
+      toolCallId: "tc",
       isError: true,
       content: [{ type: "text", text: "Toolchain (pnpm): use pnpm exec." }],
     },
     { role: "assistant", content: [{ type: "toolCall", id: "locate" }] },
     {
       role: "toolResult",
+      toolCallId: "locate",
       isError: true,
       content: [{ type: "text", text: "Locate-first: search before reading." }],
     },
+    { role: "assistant", content: [{ type: "toolCall", id: "recovered" }] },
     {
       role: "toolResult",
+      toolCallId: "recovered",
       isError: false,
       content: [{ type: "text", text: "Token Economy (Re-read): advisory note." }],
     },
@@ -40,6 +44,7 @@ it("counts current gate families and ignores non-error notes", () => {
   const result = spawnSync(process.execPath, [audit, root], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /blocks=2\b/);
+  assert.match(result.stdout, /one-shot-recovery=1 \(50%\)/);
   assert.match(result.stdout, /Toolchain=1/);
   assert.match(result.stdout, /Locate-first=1/);
   assert.doesNotMatch(result.stdout, /Token Economy/);

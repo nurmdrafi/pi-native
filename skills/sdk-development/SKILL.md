@@ -1,7 +1,7 @@
 ---
 name: sdk-development
 description: "Develop, test, publish installable packages — Go modules, npm SDKs/component libraries, plugins, CLIs: OpenAPI codegen, exports map, test pyramid, pack smoke, publish gate, semver upgrades, docs-as-contract. Use for SDK/library/publish/version-bump. NOT app e2e (→ playwright-tester), map work (→ map-integration), CI itself."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/sdk-development`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

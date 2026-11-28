@@ -1,7 +1,7 @@
 ---
 name: brainstorming
 description: "Use ONLY when intent is genuinely unclear — exploring a new feature DIRECTION or open-ended design. Asks one question at a time, then a design for approval. NOT for concrete bugs (→ systematic-debugging), well-specified changes, or migrations — just do those."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/brainstorming`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

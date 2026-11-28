@@ -1,7 +1,7 @@
 ---
 name: github-actions
 description: Authors and hardens GitHub Actions workflow files (.github/workflows) — pins actions to commit SHAs via gh api tag resolution, scopes secrets out of workflow-level env, applies least-privilege permissions via workflow/job-level only, validates with actionlint — and authors .github/dependabot.yml so every ecosystem the build consumes is covered without flooding pull requests. Use when creating, editing, or fixing CI workflows, when removing or restructuring jobs (auditing `needs:` and lost toolchain setup), when a release pipeline derives a version or tag from CHANGELOG.md, when a review or issue flags unpinned actions, secret exposure, over-broad permissions, missing build gates, or tag overwriting, or when dependency-update PRs are missing, too many, or aimed at the wrong branch. NOT for general pre-push diff review (use code-reviewer) or non-GitHub CI systems.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/github-actions`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

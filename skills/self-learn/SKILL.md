@@ -13,7 +13,7 @@ description: >
   Bare invocation (no window argument) audits the current session only.
   NOT for token/cost efficiency reports (session-audit) or authoring
   brand-new skills (skill-manager).
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/self-learn`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.

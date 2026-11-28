@@ -28,6 +28,7 @@ Other references:
 - Ambiguous target, scope, or data/security/cost/irreversible action → ask and wait; batch questions.
 - Plan/design request → deliver the plan only; no edits until approved.
 - Ambiguous "continue"/"proceed" → confirm scope first.
+- UI feedback quoting two strings ("X text should be Y") is ambiguous between rename and match-style; confirm which before editing — the wrong guess rewrites code and tests.
 
 ## Thinking economy
 - Deliberate in proportion to what a step can break: reversible, locally verifiable work gets one plan sentence; deep reasoning goes to irreversible, cross-boundary, or under-evidenced work — re-doing a cheap step costs less than proving it in advance.

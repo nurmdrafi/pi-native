@@ -2,7 +2,7 @@
 name: ponytail
 description: "Ship the minimal correct solution; review diffs for over-engineering. Triggers: 'ponytail', 'be lazy', 'yagni', 'ultra', or speculative, dead, duplicated code in the diff. Not correctness review."
 license: MIT
-disable-model-invocation: true
+disable-model-invocation: false
 metadata:
   author: nur
   tags: [minimalism, code-review, yagni]

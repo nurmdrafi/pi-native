@@ -1,7 +1,7 @@
 ---
 name: playwright-tester
 description: "Playwright test automation — e2e specs, stress/update-flow runs, bug-hunt iterations, slow-startup diagnosis. Attaches to running Chrome (CDP :9222) for logged-in sessions; falls back to isolated runs. Use for any Playwright/e2e/browser-automation task, including 'untested critical paths' / 'no e2e coverage' gaps (auth flow, 401 ladder, wallet/settlement). NOT one-off DOM poking (→ browser-tools), component specs (Vitest), CI."
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 `<skill-dir>` = this skill's directory (`location` attribute on the injected skill tag; normally `~/.pi/agent/skills/playwright-tester`). All `scripts/`, `references/`, `assets/` paths in this skill resolve under it — never the session cwd.
