@@ -17,7 +17,7 @@ call; a standing rule with condition, action, and why prevents the class
 | Condition | Class | Action |
 |-----------|-------|--------|
 | gate block on a read-only command head | misfire | regression test + judge fix |
-| gate block on a shape AGENTS.md/docs/tool-use.md/scout mandates verbatim (a literal named only inside a prohibition line is not a mandate) | contradiction | carve gate or fix doc + canary test |
+| gate block on a shape [AGENTS.md](../AGENTS.md), the [tool-use rules](../rules/tool-use.md), or scout mandates verbatim (a literal named only inside a prohibition line is not a mandate) | contradiction | carve gate or fix doc + canary test |
 | same source:id+shape recurs ≥3 | rule-gap | invariant line in the tool rules |
 | new lesson record | lesson | fix/doc/test that retires it |
 | suite failure | test-fail | suite green (or flake fix) closes it |

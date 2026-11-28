@@ -12,7 +12,7 @@ A measured performance harness for the official Pi coding agent: native Rust too
 [![license](https://img.shields.io/badge/license-MIT-2ea44f?logo=opensourceinitiative&logoColor=white&labelColor=24292f&style=flat-square)](LICENSE)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/nurmdrafi/badge.svg)](https://hub.xerj.org/contributors/nurmdrafi)
 [![pi coding agent](https://img.shields.io/badge/pi-coding_agent-8A2BE2?logo=github&logoColor=white&labelColor=24292f&style=flat-square)](https://github.com/earendil-works/pi-coding-agent)
-[![macOS](https://img.shields.io/badge/macOS-6e7681?logo=apple&logoColor=A2AAAD&labelColor=24292f&style=flat-square)](docs/design-rules.md#portability)[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=FCC624&labelColor=24292f&style=flat-square)](docs/design-rules.md#portability)
+[![macOS](https://img.shields.io/badge/macOS-6e7681?logo=apple&logoColor=A2AAAD&labelColor=24292f&style=flat-square)](rules/design-rules.md#portability)[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=FCC624&labelColor=24292f&style=flat-square)](rules/design-rules.md#portability)
 [![rust](https://img.shields.io/badge/rust-default-DEA584?logo=rust&logoColor=white&labelColor=24292f&style=flat-square)](#quick-start)
 [![tmux](https://img.shields.io/badge/tmux-optional-6e7681?logo=tmux&logoColor=1BB91F&labelColor=24292f&style=flat-square)](docs/subagents.md)
 [![skills](https://img.shields.io/badge/skills-manual-2563eb?logo=readthedocs&logoColor=8CA1AF&labelColor=24292f&style=flat-square)](docs/skills.md)
@@ -108,7 +108,7 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 
 Every tool call: the extension intercepts the built-in call, the permission gate authorizes it fail-closed, the Rust binary executes it — persistent daemon (`--serve`, NDJSON over stdio) on the hot path, one-shot spawn as fallback. Terminal failure throws a tool error plus one stderr line, never a silent built-in run. Tests pin daemon and one-shot paths byte-identical; `details.via` records the serving path. Deep dive: [docs/rust-tools-architecture.md](docs/rust-tools-architecture.md).
 
-Repository map: [extensions/](extensions/) integrates with Pi; [rust-tools/](rust-tools/) implements the native binaries. See the [test index](tests/README.md) for checks, including those for the separate [dashboard](dashboard/) app. The [benchmark guide](benchmark/README.md) covers runners and recorded results. [skills/](skills/) and [docs/](docs/) hold task-specific guidance.
+Repository map: [extensions/](extensions/) integrates with Pi; [rust-tools/](rust-tools/) implements the native binaries. See the [test index](tests/README.md) for checks, including those for the separate [dashboard](dashboard/) app. The [benchmark guide](benchmark/README.md) covers runners and recorded results. [rules/](rules/) holds written agent guidance loaded on demand; [skills/](skills/) and [docs/](docs/) hold task-specific workflows and references.
 
 ## <img src="https://api.iconify.design/withicons-anime/users.svg" height="18" alt="" /> Skills & subagents
 
@@ -157,7 +157,7 @@ Issues and PRs: [issue tracker](https://github.com/nurmdrafi/pi-native/issues).
 - [Skills](docs/skills.md): roster and validator-enforced layout
 - [Subagents](docs/subagent-orchestration.md): gating, sandboxing, agent table
 - [Zero-init](docs/zero-init.md): the two-rung bootstrap ladder and what the hot path costs
-- [Design rules](docs/design-rules.md): context layers, token budget, portability
+- [Design rules](rules/design-rules.md): context layers, token budget, portability
 - [Development](docs/development.md): repo layout, scripts, sync, providers
 - [Benchmarks](benchmark/README.md): harness arms, raw runs, filing numbers on your hardware
 - [extensions/README.md](extensions/README.md): extension and permission-gate rule catalog

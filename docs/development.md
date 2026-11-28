@@ -5,7 +5,8 @@
 ```text
 ~/.pi/agent/
 ├── AGENTS.md                 # Always-on behavioral core (kept short & byte-stable)
-├── docs/                     # Scoped rule sets — load on demand via AGENTS.md links
+├── rules/                    # Written rules — load on demand via AGENTS.md
+├── docs/                     # Reference docs and workflows
 ├── settings.json             # Provider / model / theme / thinking (no secrets)
 ├── auth.json                 # API keys — gitignored, copied once per machine
 ├── models.json               # Custom model defs (glm-5.3-flash)

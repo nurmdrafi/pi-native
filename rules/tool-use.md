@@ -52,4 +52,4 @@ This file defines tool invocation mechanics; `AGENTS.md` defines agent behavior.
   then run `git add` and `git commit -F <msgfile>` in one shell call.
 
 ## Portability
-- Apply `~/.pi/agent/docs/portability.md` before shell or path work.
+- Apply `~/.pi/agent/rules/portability.md` before shell or path work.

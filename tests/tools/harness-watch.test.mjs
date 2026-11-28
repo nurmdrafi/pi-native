@@ -150,12 +150,20 @@ test("CLI: harvests fixture tree, dedupes on re-run, writes ledgers + cursor", (
   const home = mkdtempSync(join(tmpdir(), "hw-home-"));
   const sess = join(home, "sessions/proj");
   mkdirSync(sess, { recursive: true });
-  writeFileSync(join(sess, "2026-11-19T00-00-00Z_a.jsonl"), SESSION);
+  const rules = join(home, "rules");
+  mkdirSync(rules);
+  writeFileSync(join(rules, "tool-use.md"), DOCS);
+  writeFileSync(join(sess, "2026-11-19T00-00-00Z_a.jsonl"), [
+    SESSION,
+    call("c7", "jq -r '.x' big.json"),
+    result("c7", "Hygiene (Reader-bypass): read windows with piread", true),
+  ].join("\n"));
   const run = (args = []) =>
     execFileSync("node", [join(ROOT, "scripts/harness-watch.mjs"), "--home", home, ...args], { encoding: "utf8" });
   const out1 = run();
-  assert.match(out1, /5 new events/);
+  assert.match(out1, /6 new events/);
   assert.match(out1, /\[misfire\] gate:H2/);
+  assert.match(out1, /\[contradiction\] gate:SE2/);
   const dir = join(home, ".cache/harness-watch");
   for (const f of ["events.ndjson", "tasks.ndjson", "metrics.ndjson", "state.json"])
     assert.ok(existsSync(join(dir, f)), `${f} written`);

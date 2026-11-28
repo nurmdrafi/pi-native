@@ -14,6 +14,6 @@ for (const line of diff.split('\n')) {
   }
 }
 if (violations) {
-  console.error(`Portable diff check: ${violations} of ${added} added lines contain machine-specific home paths. See docs/portability.md.`);
+  console.error(`Portable diff check: ${violations} of ${added} added lines contain machine-specific home paths. See rules/portability.md.`);
   process.exitCode = 1;
 }

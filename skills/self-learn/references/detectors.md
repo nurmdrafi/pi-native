@@ -68,7 +68,7 @@ re-read/re-anchor for a span the session itself had produced.
 ## S9 — rule-source desync (static, periodic)
 
 Scope: session-related rules and gates ONLY — rules with a tool-call
-surface. Compare declared rules (docs/tool-use.md tool-path/bash/blocks,
+surface. Compare declared rules ([tool-use rules](../../../rules/tool-use.md),
 AGENTS.md safety, skills' tool-call instructions) vs gate enforcement
 (`RULE_IDS` in extensions/permission-gate/config.ts plus the header table
 in index.ts) vs session behaviour (S1-S8 window signals). Doc-style,

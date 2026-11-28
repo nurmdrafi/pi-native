@@ -23,7 +23,7 @@ and the permission-gate treats each native tool as a wrapper on the equivalent
 event (`read`/`edit`/`bash`).
 
 **Companion docs:** [`native-tools.md`](native-tools.md) (measured speedups,
-context-shaping tables, tool version pins), [`portability.md`](portability.md)
+context-shaping tables, tool version pins), [portability rules](../rules/portability.md)
 (OS constraints), [`rust-tools-optimization.md`](rust-tools-optimization.md) (the
 safe path for changing one of these tools). Per-crate build logs live in
 `rust-tools/*/README.md`.

@@ -47,7 +47,7 @@ skill, a rule, a test — and whatever cannot land yet is archived under
    false-positive-against-context (S8). When gate blocks cluster, run the S9
    desync pass: rule-file text vs gate behaviour vs what the workflow
    actually needed. S9 scope is session-related rules and gates only —
-   rules with a tool-call surface (docs/tool-use.md tool-path/bash/blocks,
+   rules with a tool-call surface ([tool-use rules](../../rules/tool-use.md),
    AGENTS.md safety, skills' tool-call instructions) checked against the
    gate's rule set and observed session behaviour; doc-style, communication,
    and process rules have no gate surface and stay out of scope. Note when

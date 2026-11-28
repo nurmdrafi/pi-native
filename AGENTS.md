@@ -2,22 +2,23 @@
 
 ## Scope
 - This file holds agent behavior and judgment: safety, communication, workflow, verification, docs, lessons.
-- `~/.pi/agent/docs/tool-use.md` holds tool invocation mechanics; keep the two apart — no rule lives in both files.
+- `~/.pi/agent/rules/tool-use.md` holds tool invocation mechanics; keep the two apart — no rule lives in both files.
 - Do not restate controls that tools, extensions, or the pi system enforce by default (gating, out-of-scope write refusal, install prompts, tool flags). State the agent's response to them, never the mechanism.
 - One rule, one home; cross-reference instead of restating.
 
-## Docs on demand
+## Rules and docs on demand
 Do not preload linked docs at session start. Use the table to find guidance for the current step. Read only the sections needed to resolve a question or check a requirement not already covered by the current context. Reuse sections already read in this session unless the file changed. Resolve links from `~/.pi/agent/`, not the session cwd. If needed guidance is unavailable, say what is missing before proceeding.
 
 | When you need guidance on… | Reference |
 |---|---|
-| Choose a tool invocation or plan a commit | `~/.pi/agent/docs/tool-use.md` |
-| Add or change a filesystem path in code, tests, docs, or reports | `~/.pi/agent/docs/portability.md` |
-| Change behavior or evaluate a design | `~/.pi/agent/docs/change-rules.md`, `~/.pi/agent/docs/design-rules.md` |
+| Choose a tool invocation or plan a commit | `~/.pi/agent/rules/tool-use.md` |
+| Add or change a filesystem path in code, tests, docs, or reports | `~/.pi/agent/rules/portability.md` |
+| Change behavior or evaluate a design | `~/.pi/agent/rules/change-rules.md`, `~/.pi/agent/rules/design-rules.md` |
 | Build or test agent code | `~/.pi/agent/docs/development.md` |
 | Write or edit a skill | `~/.pi/agent/docs/skills.md` |
 | Set up or run SkillEvaluator | `~/.pi/agent/docs/skill-evaluation.md` |
-| Investigate a harness gate block or failure | `~/.pi/agent/docs/harness-watch.md` |
+| Respond to a permission-gate block | `~/.pi/agent/rules/permission-gate.md` |
+| Investigate a harness gate failure | `~/.pi/agent/docs/harness-watch.md` |
 | Change native or Rust tools | `~/.pi/agent/docs/native-tools.md`, `~/.pi/agent/docs/rust-tools-architecture.md` |
 
 Other references:
@@ -40,11 +41,6 @@ Other references:
 - Judge commands by effect; never reroute around a permission block — ask instead. Ask first: any `rm -r` or delete/overwrite outside the project, package installs, `sudo`/`curl | sh`/system-path writes, DB drops or unbounded `DELETE`/`UPDATE`, deploys and infra, forced git (`reset --hard`, `clean`, `push --force`, `branch -D`), commits/pushes/tags/version bumps (except a ship run whose gates pass — commit and push immediately), anything public, out-of-scope edits, any task estimated to take over 30 minutes (state the estimate and its basis, then ask before launching).
 - Destructive commands are last resort and rarely required: default to non-destructive equivalents (piedit over `sed -i`/`perl -pi`, read-then-write, scratch copies under the tmp trees — `/tmp` and `$TMPDIR`, free for every session; subagent scratch outside them stays inside their session/artifact directory). In yolo mode or any subagent session, no destructive command at all — take the non-destructive path or stop and ask.
 - Never without explicit approval: secrets (`.env`, `~/.ssh/*`, credentials), `rm -rf /` or `~`, an empty/unexpanded `$VAR` in a delete path, `mkfs`/`dd` to a device. A denial is final — no retries or disguises.
-
-## Gate contract
-- The permission gate enforces read/edit/search/commit discipline. A block is final for that operation: read the block message, apply its remedy, or ask — never bypass, reroute, or disguise.
-- Edit only file regions read this session; never re-read a span already seen this session.
-- View files through `piread` windows — never `cat`/`sed -n`/`head` a file (use them only to trim command output).
 
 ## Communication
 - Plain words, Latin script only; accents and symbols fine, no emoji.
@@ -86,7 +82,7 @@ Spawning, roster, and handover detail: `~/.pi/agent/docs/subagents.md`; orchestr
 - Repo paths cited in these instructions and their docs (docs, tests, benchmarks) resolve under the agent home (`~/.pi/agent`), never the session cwd. Skill-body paths (`scripts/`, `references/`, `assets/`) resolve under the invoked skill's directory (`location` on the injected skill tag; project skills live in `.pi/skills/`).
 - Style: brief, self-contained, no jargon or tribal knowledge; concepts, not tool names; name tools only in repo-scoped rules.
 - Instruction rules are model-agnostic: name the condition, the action, and the invariant (why the action is right). A shape without its invariant is vague — it transfers to nothing beyond the literal case and different models act differently on it. Gate block messages carry at least the action and a short why; standing rules carry the full invariant.
-- This repo (the agent home) is public — every file in it is world-readable; project repos where pi is initialized may be private — never assume public there. Sensitive data never enters any file (docs, comments, tests, fixtures, notes, changelog, prompts, skill bodies): secrets, tokens, and internal/self-hosted infrastructure hostnames or endpoints — reference those via env vars read at runtime (e.g. `$SENTRY_URL` from the agent-home secrets file), never written out. Concrete absolute paths — user, device, or machine specific (`/Users/<name>`, `/home/<name>`, hostnames) — never enter any file either: paths stay dynamic and OS/device-agnostic (`~`/`$HOME`-relative, repo-relative, or env-derived, per `docs/portability.md`); quote historical paths with `<home>`/`<user>` placeholders. In the public agent home, public facts may stay: org/vendor names, public repo and project slugs, public API endpoints, public usernames; keep dates. When a reference must be neutralized, use `<project-a>`, `<vendor>`, `<org>`, `<project-root>`. Fixture names describe shape, never the incident's source. A skill about a named stack names that stack.
+- This repo (the agent home) is public — every file in it is world-readable; project repos where pi is initialized may be private — never assume public there. Sensitive data never enters any file (docs, comments, tests, fixtures, notes, changelog, prompts, skill bodies): secrets, tokens, and internal/self-hosted infrastructure hostnames or endpoints — reference those via env vars read at runtime (e.g. `$SENTRY_URL` from the agent-home secrets file), never written out. Concrete absolute paths — user, device, or machine specific (`/Users/<name>`, `/home/<name>`, hostnames) — never enter any file either: paths stay dynamic and OS/device-agnostic (`~`/`$HOME`-relative, repo-relative, or env-derived, per `rules/portability.md`); quote historical paths with `<home>`/`<user>` placeholders. In the public agent home, public facts may stay: org/vendor names, public repo and project slugs, public API endpoints, public usernames; keep dates. When a reference must be neutralized, use `<project-a>`, `<vendor>`, `<org>`, `<project-root>`. Fixture names describe shape, never the incident's source. A skill about a named stack names that stack.
 - Minimal grammar, no duplicates: one rule, one home; cross-reference, never restate.
 - A cross-reference is a resolvable path from the referring file (markdown link or repo path), never a bare code span naming a file that lives elsewhere.
 - Slash-command bodies pass arguments only through `$ARGUMENTS`/`$@`/`${N}` placeholders — a body without one silently drops the invoked argument.

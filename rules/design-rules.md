@@ -8,7 +8,7 @@ Reference for how the harness spends context and which design invariants hold.
 | ------------------ | ----------------------- | ------------------------- | ------------------------- |
 | System + tools     | pi built-in             | every turn                | pi-managed                |
 | **AGENTS.md**      | global behavioral rules | every turn                | **must stay byte-stable** |
-| Scoped rule docs   | `docs/*.md` rule sets   | task touches the area     | read on demand            |
+| Scoped rules       | `rules/*.md`            | task touches the area     | read on demand            |
 | Skill descriptions | frontmatter only        | every turn                | **must stay byte-stable** |
 | Skill bodies       | SKILL.md full text      | on match or `/skill:name` | load on demand            |
 | Project AGENTS.md  | repo rules              | when present              | overlays global           |
@@ -22,7 +22,7 @@ Keep the always-on prefix small. Scoped rules and skill bodies load on demand; e
 | Component           | Target                                      | Notes                                  |
 | ------------------- | ------------------------------------------- | -------------------------------------- |
 | AGENTS.md           | as small as possible (behavioral core only) | no stack essays, no skill lists        |
-| Skill descriptions  | short, specific routing cues                | eligibility in [Skills](skills.md)     |
+| Skill descriptions  | short, specific routing cues                | eligibility in [Skills](../docs/skills.md)     |
 
 Thinking defaults to `high` in `settings.json`; drop it per-task with `--thinking off` when tokens matter more than depth.
 
@@ -63,8 +63,8 @@ doc is read only when its topic comes up.
 Loaded on demand, never always-on (the links used to sit in AGENTS.md, where they
 cost every project's prefix for rules only this harness needs):
 
-- `docs/change-rules.md` — change ladder, root cause, deployment.
-- `docs/portability.md` — macOS+Linux shell subset, dynamic paths.
-- `docs/rust-tools-optimization.md` — safe path for optimizing a native tool: model
+- [Change rules](change-rules.md) — change ladder, root cause, deployment.
+- [Portability](portability.md) — macOS+Linux shell subset, dynamic paths.
+- [Native-tool optimization](../docs/rust-tools-optimization.md) — safe path for optimizing a native tool: model
 the cost, freeze the old binary, pin the seam, swap, verification ladder, honest
 measurement.
