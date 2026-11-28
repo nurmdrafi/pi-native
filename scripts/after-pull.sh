@@ -2,11 +2,8 @@
 # after-pull.sh — keep the machine-local harness setup in sync after a pull.
 # Invoked by .husky/post-merge and .husky/post-rewrite on macOS + Linux.
 #
-# Always runs the pidoc health check. Safe, non-privileged fixes apply
-# automatically (npm deps + host links, dashboard UI build, pidoc shim,
-# pidx rebuild). Missing
-# toolchains (cargo/rg/gh/jq/fd) are reported with their fix command — installs
-# are never run from here (ask-first rule). Always exits 0.
+# Repairs project dependencies and runs pidoc. Missing system prerequisites
+# are reported, never provisioned here. Always exits 0.
 set -u
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
@@ -18,24 +15,22 @@ echo "== after-pull: syncing setup ($(uname -s))"
 # signature hashes stale and the kernel SIGKILLs the binary on exec.
 . "$ROOT/scripts/lib/install-native.sh"
 . "$ROOT/scripts/lib/progress.sh"
+. "$ROOT/scripts/lib/setup-deps.sh"
 
-# 7 counted steps: deps, dashboard, piread, piedit, pibash, piwrite,
-# auto-heal. The pidoc health check stays un-wrapped — its FAIL/WARN rows are
-# the deliverable, not noise.
-ui_total 7
+# Keep the final pidoc health check unwrapped so its FAIL/WARN rows are visible.
+ui_total 9
 
-# 1. Node deps + host pi package links. Fresh install only when the manifest
-#    moved in this pull or node_modules is missing; link-pi self-validates.
+# 1. Node deps + host Pi links. Repair missing packages even on unchanged pulls.
 if command -v npm >/dev/null 2>&1; then
   changed=0
-  [ -d node_modules ] || changed=1
+  if [ ! -d node_modules ] || ! npm_deps_present .; then changed=1; fi
   if git rev-parse --verify -q ORIG_HEAD >/dev/null 2>&1 &&
      ! git diff --quiet ORIG_HEAD HEAD -- package.json package-lock.json 2>/dev/null; then
     changed=1
   fi
   if [ "$changed" = 1 ]; then
-    ui_run "npm deps (manifest moved or node_modules missing) + host links" \
-      npm install --no-audit --no-fund
+    ui_run "npm deps (manifest changed or dependency missing) + host links" \
+      sh -c 'npm install --no-audit --no-fund && node scripts/link-pi.mjs'
   else
     ui_run "npm deps up to date + host links" node scripts/link-pi.mjs
   fi
@@ -43,13 +38,15 @@ else
   ui_step "npm deps — npm not found (install Node, then: sh scripts/bootstrap.sh)"
 fi
 
+ui_run "web research: Brave CLI + URL reader deps" sync_research_deps
+
 # 1b. dashboard UI (dashboard/dist is gitignored; the dashboard server serves
 #     it, so a fresh checkout has source but no UI until this builds it).
 #     Rebuild when dist is missing or this pull touched dashboard sources.
 if [ -d dashboard ] && [ -f dashboard/package.json ]; then
   if command -v npm >/dev/null 2>&1; then
     dash_changed=0
-    [ -f dashboard/dist/index.html ] || dash_changed=1
+    if [ ! -f dashboard/dist/index.html ] || ! npm_deps_present dashboard; then dash_changed=1; fi
     if git rev-parse --verify -q ORIG_HEAD >/dev/null 2>&1 &&
        ! git diff --quiet ORIG_HEAD HEAD -- dashboard/package.json \
          dashboard/package-lock.json dashboard/src dashboard/index.html \
@@ -158,6 +155,28 @@ if [ -d "$PIWRITE_CRATE/src" ] && [ -f "$PIWRITE_CRATE/Cargo.toml" ]; then
   else
     ui_step "piwrite: cargo not found — the piwrite tool will reject until Rust is installed"
   fi
+fi
+
+# Standalone Rust CLIs are also needed on the target machine after a pull.
+if [ ! -x bin/outline ] || [ ! -x bin/docheck ] ||
+   { git rev-parse --verify -q ORIG_HEAD >/dev/null 2>&1 &&
+     ! git diff --quiet ORIG_HEAD HEAD -- rust-tools/outline rust-tools/docheck \
+       rust-tools/Cargo.toml rust-tools/Cargo.lock rust-tools/rust-toolchain.toml; }; then
+  CARGO=$(command -v cargo || true)
+  [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"
+  if [ -n "$CARGO" ]; then
+    if ui_run "outline + docheck: build (cargo --release)" \
+      sh -c 'cd rust-tools && exec "$1" build --locked --release -p outline -p docheck' sh "$CARGO"; then
+      for tool in outline docheck; do
+        install_native "rust-tools/target/release/$tool" "bin/$tool" ||
+          echo "!! $tool: install failed" >&2
+      done
+    fi
+  else
+    ui_step "outline + docheck: cargo not found"
+  fi
+else
+  ui_step "outline + docheck up to date"
 fi
 
 # 5c. Kill daemons started from older binaries: a pull can replace bin/*

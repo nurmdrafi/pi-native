@@ -33,7 +33,7 @@ Terms: fork clone = child cloning the current session (unrestricted toolset). Wa
 | map-engineer | piwrite, piread, piedit, pibash (`map-integration`) | Map rendering implementer — deck.gl/MapLibre overlays, composite-layer performance, real-time plotting, camera and viewport work, map data flow (Redux-fed layers); use instead of frontend-engineer when the task touches map layers, map state, or map rendering |
 | pi-mechanic | ls, piread, pibash, piwrite, piedit, pidx | Agentic harness engineer — owns the self-healing loop; harvests evidence, fixes anything in the harness, verifies, reverts bad fixes |
 | product-manager | piwrite, piread, pibash (`brainstorming`) | Product manager — turns a rough idea or feature request into a structured brief (problem, users, scope, numbered acceptance criteria); use before implementation waves when scope is unsettled |
-| researcher | piwrite, piread, pibash (`web-search`) | Web researcher — searches the web via the Tavily CLI and synthesizes findings |
+| researcher | piwrite, piread, pibash (`web-search`) | Web researcher — searches with Brave Search and synthesizes findings |
 | reviewer | ls, piread, pibash (`code-reviewer`) | Pre-commit reviewer — reviews the diff for correctness and races before commit+push; structure goes to architect-reviewer, trust boundaries and guard logic to security-reviewer |
 | rust-engineer | piwrite, piread, piedit, pibash (`rust-skills`) | Rust implementer — cargo-workspace code changes, clippy/fmt cleanups, unsafe discipline; use instead of worker when the task is Rust |
 | scout | ls, piread, pibash | Fast codebase recon — explores files, finds patterns, maps module structure and dependencies |

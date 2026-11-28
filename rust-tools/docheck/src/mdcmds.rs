@@ -29,12 +29,12 @@ const MAC_ONLY: &[&str] = &[
 const SOURCED: &[&str] = &["nvm"];
 const OPTIONAL_TOOLCHAINS: &[&str] = &[
     "cargo", "rustc", "rustup", "rustfmt", "perf", "valgrind", "hyperfine", "llvm-profdata",
-    "llvm-bolt", "inferno-collapse-perf", "inferno-flamegraph", "loom",
+    "llvm-bolt", "inferno-collapse-perf", "inferno-flamegraph", "loom", "rust-analyzer", "bx",
 ];
 // KNOWN regex alternation, in JS order (order is irrelevant to the boolean test).
 const KNOWN: &[&str] = &[
     "rg", "grep", "egrep", "fgrep", "find", "xargs", "jq", "sed", "cut", "sort", "uniq", "wc",
-    "head", "tail", "ast-grep", "git", "npm", "npx", "node", "tvly", "pi", "fd", "awk", "tr",
+    "head", "tail", "ast-grep", "git", "npm", "npx", "node", "bx", "pi", "fd", "awk", "tr",
     "chmod", "ls", "cat", "curl", "sh", "bash", "command", "skillcheck.sh",
 ];
 const FLAG_WAIVERS: &[&str] = &[
@@ -51,6 +51,9 @@ const FLAG_WAIVERS: &[&str] = &[
     "gh release --pattern",
     "curl --proto",
     "curl --tlsv1",
+    "bx --count",
+    "bx --max-tokens",
+    "bx --freshness",
 ];
 
 // ---------- pure parsers (JS parity: see scripts/doc-check.mjs) ----------

@@ -5,7 +5,7 @@ Validator-enforced rules (`scripts/validate-skill.mjs`, run from skill-manager d
 ## Hard rules (spec-enforced)
 
 - Frontmatter required: `name` (lowercase, hyphens, matches dir), `description` (≤1024 chars, non-empty).
-- Optional: `license`, `compatibility` (≤500 chars), `metadata`, `allowed-tools`, `disable-model-invocation`. Omit optionals unless needed. `allowed-tools` format: `Bash(tvly *)` — pre-approves only that tool pattern; use when skill wraps one CLI.
+- Optional: `license`, `compatibility` (≤500 chars), `metadata`, `allowed-tools`, `disable-model-invocation`. Omit optionals unless needed. `allowed-tools` format: `Bash(bx *)` — pre-approves only that tool pattern; use when skill wraps one CLI.
 - Missing description → Pi refuses load. Everything else warns but loads.
 - Personal skills: `~/.pi/agent/skills/<name>/`. Project skills: `.pi/skills/<name>/`.
 

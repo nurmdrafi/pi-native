@@ -21,7 +21,7 @@ Process:
 1. `git status` + `git diff HEAD` — see exactly what would be committed; files rewritten whole (edit-gate recovery) can carry whitespace-only hunks — run `git diff -w` on them and count only hunks that survive `-w` as logic
 2. `piread` the surrounding code the diff touches; check callers of changed symbols via `pibash` running `rg`
 3. Run the narrowest relevant check (targeted test / typecheck) if it is quick; wrap commands of unknown cost in `timeout` (e.g. `timeout 120 …`). Keep output small — filter with `rg`/`head`/`jq` up front so nothing you need is cut off
-4. Apply the code-reviewer skill checklist (auto-loaded)
+4. Apply the code-reviewer skill checklist (auto-loaded). For each changed behavior, find the assertion that checks its observable result, including failure paths; flag consequential untested behavior, but do not flag behavior an existing assertion covers.
 
 Large diffs (>~800 lines or >3 commits): review risk-first — highest-risk commit's files before mechanical renames.
 

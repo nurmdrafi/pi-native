@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Rebase-style pulls (`pull.rebase=true`, `git rebase`) fire post-rewrite, not
-# post-merge. Same setup re-check + safe fixes.
+# Rebase-style pulls fire post-rewrite, but commit --amend does too.
+[ "${1:-}" = rebase ] || exit 0
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -x "$ROOT/scripts/after-pull.sh" ] || exit 0
 exec sh "$ROOT/scripts/after-pull.sh"

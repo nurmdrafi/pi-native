@@ -25,7 +25,7 @@ disable-model-invocation: false
 
 **This skill exists for Playwright/e2e testing only.** Anything else routes elsewhere:
 
-- Read-only research / web content → web-search skill (`tvly search`, `tvly extract`); static pages `{baseDir}/scripts/web-fetch.mjs <url> <maxChars>` = cheapest extractor (headless, capped, no quota). Never this skill for research.
+- Read-only research / web content → web-search skill. Never use the CDP browser for research.
 - Manual QA / visual review → refactoring-ui or user-driven, not agent browser driving.
 - General debugging (runtime errors, wrong data) → systematic-debugging; go live only when failing spec needs it.
 - Failing e2e/browser-mode spec the runner log doesn't explain → live replay: [references/debugging.md](references/debugging.md) (go live after ONE unexplained failure).

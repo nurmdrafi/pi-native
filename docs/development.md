@@ -38,10 +38,29 @@
 | OS           | macOS or Linux                                        |
 | Terminal     | Any modern terminal                                   |
 | tmux         | Only if using subagents — see [Subagents](subagents.md) |
-| Rust (cargo) | Builds the native tools `piread`, `piedit`, `pibash`, `piwrite`, and `pidx` |
+| Rustup       | Builds the native tools; see [Rust tool development](#rust-tool-development) |
 | Git          | For sync; `~/.pi/agent` is itself a repo              |
 
-Native tools register unconditionally and always run the Rust binary; nothing opts out via env. Choosing pi's built-in `read`/`bash`/`edit` is configuration: leave that extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`. Bootstrap prints the rustup command if cargo is missing.
+Native tools register unconditionally and always run the Rust binary; nothing opts out via env. Choosing pi's built-in `read`/`bash`/`edit` is configuration: leave that extension out, or set the permission-gate `nativeReadFirst` / `nativeBashFirst` rules to `off`. Bootstrap reports missing Cargo.
+
+## Rust tool development
+
+1. Install [Rustup](https://rustup.rs/) using its official instructions and open a new shell. It supplies Cargo, the Rust build tool and package manager.
+2. Open the [`rust-tools/`](../rust-tools/) workspace in your editor. Enable the [Rust Analyzer extension](https://rust-analyzer.github.io/book/) for completion and inline diagnostics. The workspace's [toolchain file](../rust-tools/rust-toolchain.toml) pins Rust and requests the Rust Analyzer and Clippy components. Rustup supplies them when the workspace toolchain is used.
+3. Check early and lint before review. Run from the repo root:
+
+   ```sh
+   cd rust-tools
+   cargo check --workspace --locked
+   cargo clippy --workspace --locked
+   rust-analyzer --version
+   ```
+
+   `cargo check` skips final code generation; use it during edits. Use `cargo test --locked -p <crate>` for behavior changes and a release build only when you need an executable. Set the editor's Rust Analyzer **Check Command** to `clippy` if you want lint diagnostics on save.
+
+## Web research setup
+
+Bootstrap and the pull hook install the pinned Rust-based [Brave Search CLI](https://github.com/brave/brave-search-cli) into local `bin/` when missing and check the static reader's npm dependencies. Search requires your own [Brave Search API key](https://api-dashboard.search.brave.com/): set `BRAVE_SEARCH_API_KEY` outside Pi, or run `bx config set-key` interactively in your terminal. The pull hook never asks for or transfers credentials. The [web-search skill](../skills/web-search/SKILL.md) covers search and known-URL reading.
 
 ## Providers
 
@@ -111,8 +130,8 @@ Every repo script is exposed through `package.json` — run `npm run <name>` fro
 
 | Script              | Command                  | What it does                                                                 |
 | ------------------- | ------------------------ | ---------------------------------------------------------------------------- |
-| `bootstrap`         | `sh scripts/bootstrap.sh` | Fresh clone → working setup: npm deps, pi links, `pidoc` shim, Rust tool builds. Never installs toolchains; prints the command instead |
-| `after-pull`        | `sh scripts/after-pull.sh` | Post-pull re-sync (run automatically by husky `post-merge`/`post-rewrite`): refresh deps when the lockfile moved, recreate the shim, rebuild stale native tools, then `pidoc --fix` |
+| `bootstrap`         | `sh scripts/bootstrap.sh` | Fresh clone → project dependencies, Pi links, native builds, and health check. Reports missing system prerequisites. |
+| `after-pull`        | `sh scripts/after-pull.sh` | Merge/rebase hook: repairs missing project dependencies and refreshes affected builds, then runs `pidoc --fix`. On an already up-to-date pull, run it directly if you need repair. |
 | `link-pi`           | `node scripts/link-pi.mjs` | Links the host pi packages into the gitignored `node_modules` so extensions and tests resolve their imports |
 | `typecheck`         | `tsc -p tsconfig.json`    | Links pi, then type-checks the TypeScript extensions                       |
 | `test`             | `node --test`             | Full suite: permission-gate, parity, and doc-check suites                  |

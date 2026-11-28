@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Replace Tavily with Brave Search for discovery and the existing static reader for exact URLs. Bootstrap and pull hooks repair missing project dependencies, including the checksum-pinned Brave CLI.
+- Pin Clippy and Rust Analyzer alongside the Rust toolchain. Document the fast `cargo check` development loop.
+
 ### Added
 
 - **piwrite: native Rust write tool.** A workspace crate plus extension wrapper replaces the

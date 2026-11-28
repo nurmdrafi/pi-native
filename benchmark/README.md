@@ -2,7 +2,9 @@
 
 See the [harness optimization checklist](HARNESS-CHECKLIST.md) for completed work, measured baselines, and next experiments.
 
-Suites live in per-arm directories; each arm owns its own `bench.mjs`, `results/` (raw NDJSON, one object per run) and a summary md per run tag.
+Suites live in per-arm directories; each arm owns its own `bench.mjs`, `results/` (raw NDJSON, one object per run) and a summary md per run tag. Some standalone performance runners remain in `tests/tools/bench/`; move one only when changing that suite, updating its scripts and references together. Keep CI assertions in `tests/` and historical results in place.
+
+Before optimizing, record the objective, an independently checked expected result, and a run budget. Change one thing at a time; run baseline and candidate under matching conditions, and reject gains that fail output parity.
 
 ## rss-arm — peak-RSS arm
 

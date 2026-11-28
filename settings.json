@@ -17,9 +17,7 @@
     "-edit",
     "-bash"
   ],
-  "packages": [
-    "git:github.com/affaan-m/ECC"
-  ],
+  "packages": [],
   "compaction": {
     "enabled": false,
     "modelOverrides": {
@@ -31,7 +29,5 @@
   "extensions": [
     "-builtin:mcp"
   ],
-  "extensionChangelogVersions": {
-    "{\"source\":\"git:github.com/affaan-m/ECC\",\"scope\":\"user\"}": "2.2.3"
-  }
+  "extensionChangelogVersions": {}
 }

@@ -3,10 +3,8 @@
 #
 # Usage: sh scripts/bootstrap.sh          (from repo root or anywhere)
 #
-# Does:  npm deps + pi package links, pidoc shim into bin/, dashboard UI
-#        build, pidx + piread builds when cargo exists. Never installs anything
-#        itself — prints the exact commands and exits when a toolchain is
-#        missing (ask-first rule).
+# Installs project dependencies, builds native tools when Cargo exists, and
+# runs the health check. Install system prerequisites separately.
 # After this, `git pull` re-syncs via .husky/post-merge → scripts/after-pull.sh.
 set -eu
 
@@ -17,6 +15,7 @@ echo "== bootstrap: $ROOT"
 
 # Shared installer: copy + chmod + macOS adhoc re-sign (see the helper header).
 . "$ROOT/scripts/lib/install-native.sh"
+. "$ROOT/scripts/lib/setup-deps.sh"
 
 # 1. node deps + pi package links (extensions resolve the host install)
 if command -v npm >/dev/null 2>&1; then
@@ -26,6 +25,8 @@ else
   echo "!! npm not found — install Node (nvm recommended), then re-run" >&2
   exit 1
 fi
+
+sync_research_deps || echo '!! Web research setup incomplete; fix the error and re-run bootstrap' >&2
 
 # 2. bin/ is machine-local (gitignored): create it + the pidoc shim
 mkdir -p bin
@@ -45,7 +46,7 @@ if [ -n "$CARGO" ]; then
   echo "== pidx: built + installed to bin/pidx"
 else
   echo "== pidx: cargo not found — session-audit uses the Node parser (slower)." \
-       "To enable: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && re-run"
+       "To enable: install Rustup from https://rustup.rs and re-run"
 fi
 
 # 4. piread (native read tool — registers unconditionally; Rust is the only

@@ -1,6 +1,5 @@
 #!/usr/bin/env sh
-# git pull / merge: always re-check the machine-local setup and apply safe
-# fixes (deps, pidoc shim, pidx rebuild). Never installs a toolchain.
+# Refresh project dependencies and check setup after a merge.
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -x "$ROOT/scripts/after-pull.sh" ] || exit 0
 exec sh "$ROOT/scripts/after-pull.sh"

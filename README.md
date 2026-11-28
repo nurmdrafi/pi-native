@@ -76,7 +76,7 @@ scp <your-other-machine>:~/.agents/skills/* ~/.pi/agent/skills/  # private skill
 scp <your-other-machine>:~/.pi/agent/auth.json ~/.pi/agent/      # secrets, or /login per provider inside pi
 ```
 
-Every later `git pull` re-checks the setup: husky `post-merge`/`post-rewrite` run `scripts/after-pull.sh`, which refreshes npm deps when the lockfile moved, recreates the `pidoc` shim, rebuilds stale Rust tools, then runs `pidoc --fix`. It applies safe non-privileged fixes automatically and reports missing toolchains, never installing them.
+After a pull that merges or rebases, Husky runs `scripts/after-pull.sh` to repair missing project dependencies, refresh builds, and check setup. Install system prerequisites separately. If Git reports "Already up to date", run the script directly to repair setup. See [Rust tool development](docs/development.md#rust-tool-development) and [web research setup](docs/development.md#web-research-setup).
 
 Verify and start pi:
 
@@ -107,6 +107,8 @@ export PATH="$HOME/.pi/agent/bin:$PATH"
 ▶ Interactive view: [pi-native architecture](https://htmlpreview.github.io/?https://github.com/nurmdrafi/pi-native/blob/main/docs/assets/diagrams/pi-native-architecture.html)
 
 Every tool call: the extension intercepts the built-in call, the permission gate authorizes it fail-closed, the Rust binary executes it — persistent daemon (`--serve`, NDJSON over stdio) on the hot path, one-shot spawn as fallback. Terminal failure throws a tool error plus one stderr line, never a silent built-in run. Tests pin daemon and one-shot paths byte-identical; `details.via` records the serving path. Deep dive: [docs/rust-tools-architecture.md](docs/rust-tools-architecture.md).
+
+Repository map: [extensions/](extensions/) integrates with Pi; [rust-tools/](rust-tools/) implements the native binaries. See the [test index](tests/README.md) for checks, including those for the separate [dashboard](dashboard/) app. The [benchmark guide](benchmark/README.md) covers runners and recorded results. [skills/](skills/) and [docs/](docs/) hold task-specific guidance.
 
 ## <img src="https://api.iconify.design/withicons-anime/users.svg" height="18" alt="" /> Skills & subagents
 
