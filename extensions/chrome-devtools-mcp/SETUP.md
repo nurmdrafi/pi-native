@@ -26,7 +26,7 @@ user-data-dir (verified: developer.chrome.com/blog/remote-debugging-port).
 ```bash
 nohup node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-bridge.mjs >/tmp/mcp-bridge.log 2>&1 &
 node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-client.mjs 'list_pages:{}' \
-  'navigate_page:{"pageId":1,"url":"https://www.linkedin.com/"}' 'take_snapshot:{}'
+  'navigate_page:{"pageId":1,"url":"https://example.com/"}' 'take_snapshot:{}'
 node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-client.mjs '__quit__'   # stop: drops banner
 ```
 
@@ -41,7 +41,7 @@ node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-client.mjs '__quit__'   # st
 ```bash
 node ~/.pi/agent/extensions/chrome-devtools-mcp/mcp-drive.mjs \
   'list_pages:{}' \
-  'navigate_page:{"pageId":1,"url":"https://www.linkedin.com/"}' \
+  'navigate_page:{"pageId":1,"url":"https://example.com/"}' \
   'take_snapshot:{}'
 ```
 

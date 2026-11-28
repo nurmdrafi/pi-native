@@ -48,7 +48,7 @@ async function ensureInit() {
     const init = await send('initialize', {
       protocolVersion: '2025-06-18',
       capabilities: { roots: { listChanged: false } },
-      clientInfo: { name: 'career-ops-bridge', version: '0.1.0' },
+      clientInfo: { name: 'cdp-bridge', version: '0.1.0' },
     });
     proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     if (!init?.result?.serverInfo) throw new Error('handshake failed');

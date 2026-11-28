@@ -38,7 +38,7 @@ const notify = (method) => proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', met
 const init = await send('initialize', {
   protocolVersion: '2025-06-18',
   capabilities: { roots: { listChanged: false } },
-  clientInfo: { name: 'career-ops', version: '0.1.0' },
+  clientInfo: { name: 'cdp-live-test', version: '0.1.0' },
 });
 notify('notifications/initialized');
 console.log('server:', init?.result?.serverInfo?.name, init?.result?.serverInfo?.version);
